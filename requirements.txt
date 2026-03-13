@@ -1,0 +1,31 @@
+# Multi-Theory Consciousness Framework - Core Dependencies
+
+# Core
+numpy>=1.24
+scipy>=1.10
+pydantic>=2.0
+pydantic-settings>=2.0
+python-dotenv>=1.0
+
+# Neural Substrates (optional but recommended)
+# snntorch>=0.7        # SNN - spiking neural networks
+# torch>=2.0           # PyTorch backend for snntorch
+# reservoirpy>=0.4     # LSM - liquid state machines
+
+# Active Inference (optional)
+# pymdp>=1.0           # Free Energy Principle
+
+# Databases (optional - needed for full pipeline)
+# redis>=5.0
+# motor>=3.0
+# pymongo>=4.0
+# neo4j>=5.0
+# qdrant-client>=1.7
+# asyncpg>=0.29
+# sqlalchemy>=2.0
+
+# Development
+# pytest>=7.0
+# pytest-asyncio>=0.21
+# black>=23.0
+# flake8>=6.0

@@ -1,0 +1,94 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "multi-theory-consciousness"
+version = "0.1.0"
+description = "A research framework implementing seven theories of consciousness as interacting computational modules"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+authors = [
+    { name = "Calvin Devereaux" },
+]
+keywords = [
+    "consciousness",
+    "neuroscience",
+    "global-workspace-theory",
+    "attention-schema",
+    "higher-order-thought",
+    "free-energy-principle",
+    "integrated-information",
+    "active-inference",
+    "spiking-neural-networks",
+    "computational-neuroscience",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+neural = [
+    "snntorch>=0.7",
+    "torch>=2.0",
+    "reservoirpy>=0.4",
+]
+fep = [
+    "pymdp>=1.0",
+]
+databases = [
+    "redis>=5.0",
+    "motor>=3.0",
+    "pymongo>=4.0",
+    "neo4j>=5.0",
+    "qdrant-client>=1.7",
+    "asyncpg>=0.29",
+    "sqlalchemy>=2.0",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "black>=23.0",
+    "flake8>=6.0",
+]
+all = [
+    "multi-theory-consciousness[neural,fep,databases,dev]",
+]
+
+[project.urls]
+Repository = "https://github.com/WhiteLotusLA/multi-theory-consciousness"
+Documentation = "https://github.com/WhiteLotusLA/multi-theory-consciousness/tree/master/docs"
+
+[project.scripts]
+mtc-assess = "scripts.run_assessment:main"
+
+[tool.setuptools.packages.find]
+include = ["mtc*"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]
