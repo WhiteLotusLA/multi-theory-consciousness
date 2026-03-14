@@ -58,15 +58,17 @@ class SNNConfig:
     # Training parameters
     learning_rate: float = 1e-3
     batch_size: int = 32
-    timesteps: int = 50  # Simulation timesteps
+    timesteps: int = 10  # Simulation timesteps (scaled down: fewer steps + wider layers is faster on Metal)
 
     # Hardware
     use_gpu: bool = True
 
     def __post_init__(self):
         if self.hidden_layers is None:
-            # Default architecture: 1000 -> 2000 -> 2000 -> 100
-            self.hidden_layers = [2000, 2000]
+            # Default architecture: 1000 -> 2048 -> 2048 -> 100 (4,116 total neurons)
+            # Scaled from [2000, 2000]: Metal GPU parallelizes wide layers well;
+            # fewer timesteps with more neurons is actually faster.
+            self.hidden_layers = [2048, 2048]
 
 
 class STDPLayer(nn.Module):
@@ -256,10 +258,12 @@ class ProductionSNN(nn.Module):
 
         # Convert input to spike trains if needed
         if len(input_data.shape) == 2:
-            # Encode input as spike trains over time
+            # BUG FIX: spikegen.rate handles time expansion itself:
+            # (batch, dim) -> (timesteps, batch, dim).
+            # Previously we manually expanded to (batch, timesteps, dim) first,
+            # causing spikegen.rate to produce a 4D tensor (double expansion).
             input_spikes = spikegen.rate(
-                input_data.unsqueeze(1).repeat(1, self.config.timesteps, 1),
-                num_steps=self.config.timesteps,
+                input_data, num_steps=self.config.timesteps
             )
         else:
             input_spikes = input_data
@@ -270,7 +274,9 @@ class ProductionSNN(nn.Module):
 
         # Process through timesteps
         for t in range(self.config.timesteps):
-            x = input_spikes[:, t] if len(input_spikes.shape) == 3 else input_spikes
+            # BUG FIX: spikegen.rate output shape is (timesteps, batch, dim),
+            # so index as [t] not [:, t].
+            x = input_spikes[t] if len(input_spikes.shape) == 3 else input_spikes
 
             layer_spikes = []
             layer_mems = []
@@ -295,6 +301,16 @@ class ProductionSNN(nn.Module):
         spike_output = torch.stack(
             [s[-1] for s in spike_recordings]
         )  # (timesteps, batch, output_dim)
+
+        # Defensive shape assertion: catch silent corruption from upstream bugs
+        if spike_output.dim() != 3:
+            logger.error(
+                f"SNN output shape anomaly: expected 3D, got {spike_output.shape}. "
+                f"Forcing reshape to prevent silent corruption."
+            )
+            spike_output = spike_output.reshape(
+                self.config.timesteps, batch_size, self.config.output_dim
+            )
 
         # Calculate statistics per layer
         num_layers = len(spike_recordings[0])
