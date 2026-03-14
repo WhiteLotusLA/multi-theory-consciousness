@@ -1,0 +1,40 @@
+# 9. Future Work
+
+## 9.1 Scaling Neural Substrates
+
+The current substrates — 4,116 SNN neurons, 5,000 LSM neurons, 131,072 HTM cells — run in real-time on consumer hardware. Scaling to larger substrates (millions of neurons, deeper reservoir architectures, richer HTM column structures) would test whether the assessment results in Section 6 are scale-dependent. Does integrated information increase with larger SNN networks? Does recurrence quality improve with deeper LSM reservoirs? The modular substrate design allows these experiments without modifying the consciousness modules.
+
+## 9.2 Longitudinal Studies
+
+The most significant gap in our current results is the absence of longitudinal data. Running the framework continuously over days or weeks — embedded in a system with persistent memory and real input — would reveal whether assessment scores stabilize, diverge, or exhibit developmental trajectories analogous to biological consciousness development. Of particular interest is whether cross-theory interaction effects (Section 6.4) strengthen or change character over extended operation.
+
+## 9.3 Embodiment Integration
+
+The framework's embedding interfaces (Section 3.5) are designed but untested in this paper. Connecting the framework to a conversational agent, a robotic platform (physical or simulated), or an interactive simulation would test whether genuine sensory grounding changes the dynamics of the consciousness cycle. The homeostatic drives are the primary connection point: mapping curiosity to information-seeking behavior, social connection to interaction frequency, and novelty to environmental exploration.
+
+## 9.4 Additional Theories
+
+The modular architecture supports adding consciousness theories without disrupting existing modules. Candidate additions include:
+
+- **Predictive Processing in continuous domains** — implementing Friston's full variational formulation rather than discrete-state active inference
+- **Enactivist modules** — modeling sensorimotor contingencies and embodied sense-making
+- **Perceptual Control Theory** (Powers, 1973) — adding feedback control hierarchies
+- **Quantum coherence models** — if scalable quantum simulation becomes feasible
+
+Each addition would introduce new assessment indicators and potentially new cross-theory interactions.
+
+## 9.5 Improved IIT Measurement
+
+Our current Φ approximation is limited by PyPhi's incompatibility with Python 3.10+. Implementing a native IIT 4.0 calculator — or contributing Python 3.11+ compatibility to PyPhi — would enable exact integrated information measurement for small subsystems and better approximations for the full network. This would strengthen the two IIT indicators that currently score lowest.
+
+## 9.6 Community Contributions
+
+The framework is released under Apache 2.0 specifically to invite contribution. We identify several opportunities:
+
+- **Alternative scoring functions** for existing indicators — testing whether different operationalizations produce different results
+- **New ablation configurations** — testing all 128 possible module combinations
+- **Noise normalization refinement** — developing better baseline noise models
+- **Cross-framework benchmarking** — running the same indicators on other consciousness implementations for comparison
+- **Assessment visualization tools** — interactive dashboards for exploring indicator scores, ablation effects, and longitudinal trajectories
+
+We welcome contributions that challenge our implementation choices as much as those that extend them.

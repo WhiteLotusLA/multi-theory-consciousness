@@ -14,7 +14,7 @@ Implements 7 consciousness theories:
 - Recurrent Processing Theory (RPT) - Lamme, 2006
 - Beautiful Loop Theory (BLT) - Laukkonen, Friston & Chandaria, 2025
 
-Based on Butlin, Chalmers et al. (2023, 2025): "Consciousness in Artificial
+Based on Butlin et al. (2023, 2025): "Consciousness in Artificial
 Intelligence: Insights from the Science of Consciousness"
 """
 

@@ -174,7 +174,7 @@ Coordinates all three substrates:
 
 ## Assessment Framework
 
-The assessment measures 20 indicators derived from Butlin, Chalmers et al. (2023):
+The assessment measures 20 indicators derived from Butlin et al. (2023):
 
 1. Each indicator maps to a specific consciousness theory
 2. Scored 0.0-1.0 via theory-specific scoring functions

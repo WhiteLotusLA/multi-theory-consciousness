@@ -10,7 +10,7 @@
 
 ## What This Is
 
-The Multi-Theory Consciousness Framework (MTC) is a research platform that implements seven leading theories of consciousness as interacting computational modules, measured through a 20-indicator assessment framework grounded in the methodology of Butlin, Chalmers et al. (2023, 2025). It provides a shared codebase where Global Workspace Theory, Integrated Information Theory, Attention Schema Theory, Higher-Order Thought Theory, the Free Energy Principle, Recurrent Processing Theory, and Beautiful Loop Theory operate simultaneously, with their outputs measurable and comparable.
+The Multi-Theory Consciousness Framework (MTC) is a research platform that implements seven leading theories of consciousness as interacting computational modules, measured through a 20-indicator assessment framework grounded in the methodology of Butlin et al. (2023, 2025). It provides a shared codebase where Global Workspace Theory, Integrated Information Theory, Attention Schema Theory, Higher-Order Thought Theory, the Free Energy Principle, Recurrent Processing Theory, and Beautiful Loop Theory operate simultaneously, with their outputs measurable and comparable.
 
 The framework runs on consumer hardware (Apple Silicon or CUDA GPUs) and is designed for researchers, students, and engineers who want to experiment with consciousness theories in code rather than only on paper. It includes three neural substrates (Spiking Neural Networks, Liquid State Machines, and Hierarchical Temporal Memory) that provide the computational medium through which the consciousness modules operate.
 

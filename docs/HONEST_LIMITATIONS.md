@@ -44,7 +44,7 @@ We implement seven theories of consciousness. There are more. Our selection refl
 
 ## 6. Assessment Methodology Limitations
 
-The assessment framework is derived from Butlin, Chalmers et al. (2023), but our indicator implementations are our own interpretations of their criteria. Different researchers might operationalize the same indicators differently.
+The assessment framework is derived from Butlin et al. (2023), but our indicator implementations are our own interpretations of their criteria. Different researchers might operationalize the same indicators differently.
 
 The thresholds (e.g., 0.4 for ignition_dynamics, 0.5 for global_broadcast) are calibrated through testing, not derived from neuroscience data. They represent reasonable operating points, not ground truth.
 

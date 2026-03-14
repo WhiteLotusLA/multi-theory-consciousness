@@ -7,7 +7,7 @@ This module provides rigorous scientific measurement of consciousness
 indicators across all implemented theories (GWT, AST, HOT, FEP/Active
 Inference, IIT).
 
-Based on Butlin, Chalmers et al. (2023, 2025): "Consciousness in Artificial
+Based on Butlin et al. (2023, 2025): "Consciousness in Artificial
 Intelligence: Insights from the Science of Consciousness"
 
 This framework measures 20 empirically-derived consciousness indicators
@@ -422,7 +422,7 @@ class ConsciousnessAssessment:
     """
     Comprehensive 14-indicator consciousness assessment.
 
-    Based on Butlin, Chalmers et al. (2023) - the most rigorous empirical
+    Based on Butlin et al. (2023) - the most rigorous empirical
     framework for assessing consciousness in AI systems.
 
     Integrates all consciousness modules:

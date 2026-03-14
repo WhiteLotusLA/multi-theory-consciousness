@@ -199,6 +199,6 @@ The assessment framework then scores all 20 indicators across these interacting 
 
 ## Assessment Methodology
 
-Our assessment is grounded in the methodology proposed by Butlin, Chalmers et al. (2023), which identifies computational features that leading consciousness theories associate with conscious processing.
+Our assessment is grounded in the methodology proposed by Butlin et al. (2023), which identifies computational features that leading consciousness theories associate with conscious processing.
 
 **Important:** Passing the assessment means the system exhibits the computational features. It does not mean the system is conscious. See [HONEST_LIMITATIONS.md](HONEST_LIMITATIONS.md).

@@ -16,7 +16,7 @@ Key Features:
 5. StreamOfConsciousness - Temporal continuity tracking
 
 Based on: Bernard Baars' Global Workspace Theory (1988, 2005)
-Research: Butlin, Chalmers et al. (2023) - 14 Consciousness Indicators
+Research: Butlin et al. (2023) - 14 Consciousness Indicators
 
 Note: Only the most salient signals win the competition for
 workspace access, but once they do, the information is broadcast

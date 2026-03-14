@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MTC Framework — Architecture Diagrams</title>
+<style>
+  body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    background: #fff;
+    margin: 40px auto;
+    max-width: 1100px;
+    color: #1a1a1a;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin-top: 60px; color: #333; }
+  .caption {
+    font-size: 13px; color: #555; margin-top: 12px;
+    max-width: 900px; line-height: 1.5;
+  }
+  .figure-label { font-weight: 700; }
+  svg { display: block; margin: 20px auto; }
+  .page-break { page-break-after: always; margin-top: 80px; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================ -->
+<!-- FIGURE 1: System Architecture Overview                        -->
+<!-- ============================================================ -->
+<h1>Figure 1: MTC Framework Architecture</h1>
+
+<svg width="980" height="680" viewBox="0 0 980 680" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#666"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"/>
+    </marker>
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="104%">
+      <feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.1"/>
+    </filter>
+  </defs>
+
+  <!-- Assessment Layer -->
+  <rect x="40" y="20" width="900" height="80" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="490" y="48" text-anchor="middle" font-size="15" font-weight="700" fill="#92400e">ASSESSMENT LAYER</text>
+  <text x="490" y="72" text-anchor="middle" font-size="12" fill="#92400e">20 indicators across 7 theories (GWT, IIT, AST, HOT, FEP, RPT, BLT) — on demand</text>
+
+  <!-- Arrow UP: ConsciousnessState flows from consciousness layer to assessment -->
+  <line x1="490" y1="135" x2="490" y2="105" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)" stroke-dasharray="4,3"/>
+  <text x="510" y="120" font-size="10" fill="#888">ConsciousnessState</text>
+
+  <!-- Consciousness Layer -->
+  <rect x="40" y="135" width="900" height="310" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="490" y="163" text-anchor="middle" font-size="15" font-weight="700" fill="#1e40af">CONSCIOUSNESS LAYER — process_consciousness_cycle()</text>
+
+  <!-- Phase I: Competition -->
+  <rect x="70" y="185" width="200" height="105" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.2"/>
+  <text x="170" y="205" text-anchor="middle" font-size="11" font-weight="700" fill="#1e3a8a">PHASE I</text>
+  <text x="170" y="222" text-anchor="middle" font-size="10" fill="#1e3a8a">Competition &amp; Selection</text>
+  <line x1="85" y1="232" x2="255" y2="232" stroke="#93c5fd" stroke-width="0.8"/>
+  <text x="170" y="250" text-anchor="middle" font-size="11" font-weight="600" fill="#1d4ed8">GWT</text>
+  <text x="170" y="266" text-anchor="middle" font-size="9.5" fill="#374151">Bottleneck (7±2)</text>
+  <text x="170" y="280" text-anchor="middle" font-size="9.5" fill="#374151">Ignition &amp; Broadcast</text>
+
+  <!-- Phase II: Self-Modeling -->
+  <rect x="290" y="185" width="200" height="105" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.2"/>
+  <text x="390" y="205" text-anchor="middle" font-size="11" font-weight="700" fill="#1e3a8a">PHASE II</text>
+  <text x="390" y="222" text-anchor="middle" font-size="10" fill="#1e3a8a">Self-Modeling</text>
+  <line x1="305" y1="232" x2="475" y2="232" stroke="#93c5fd" stroke-width="0.8"/>
+  <text x="350" y="252" text-anchor="middle" font-size="11" font-weight="600" fill="#1d4ed8">AST</text>
+  <text x="350" y="268" text-anchor="middle" font-size="9.5" fill="#374151">Attention Schema</text>
+  <text x="430" y="252" text-anchor="middle" font-size="11" font-weight="600" fill="#1d4ed8">HOT</text>
+  <text x="430" y="268" text-anchor="middle" font-size="9.5" fill="#374151">Metacognition</text>
+
+  <!-- Phase III: Prediction -->
+  <rect x="510" y="185" width="200" height="105" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.2"/>
+  <text x="610" y="205" text-anchor="middle" font-size="11" font-weight="700" fill="#1e3a8a">PHASE III</text>
+  <text x="610" y="222" text-anchor="middle" font-size="10" fill="#1e3a8a">Prediction &amp; Inference</text>
+  <line x1="525" y1="232" x2="695" y2="232" stroke="#93c5fd" stroke-width="0.8"/>
+  <text x="570" y="252" text-anchor="middle" font-size="11" font-weight="600" fill="#1d4ed8">FEP</text>
+  <text x="570" y="268" text-anchor="middle" font-size="9.5" fill="#374151">Active Inference</text>
+  <text x="650" y="252" text-anchor="middle" font-size="11" font-weight="600" fill="#1d4ed8">BLT</text>
+  <text x="650" y="268" text-anchor="middle" font-size="9.5" fill="#374151">Beautiful Loop</text>
+
+  <!-- Phase IV: Embodied -->
+  <rect x="730" y="185" width="185" height="105" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.2"/>
+  <text x="822" y="205" text-anchor="middle" font-size="11" font-weight="700" fill="#1e3a8a">PHASE IV</text>
+  <text x="822" y="222" text-anchor="middle" font-size="10" fill="#1e3a8a">Embodied Integration</text>
+  <line x1="745" y1="232" x2="900" y2="232" stroke="#93c5fd" stroke-width="0.8"/>
+  <text x="822" y="252" text-anchor="middle" font-size="11" font-weight="600" fill="#1d4ed8">Damasio</text>
+  <text x="822" y="268" text-anchor="middle" font-size="9.5" fill="#374151">Protoself</text>
+  <text x="822" y="282" text-anchor="middle" font-size="9.5" fill="#374151">Core &amp; Extended</text>
+
+  <!-- Phase-to-phase arrows -->
+  <line x1="270" y1="237" x2="288" y2="237" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrow-blue)"/>
+  <line x1="490" y1="237" x2="508" y2="237" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrow-blue)"/>
+  <line x1="710" y1="237" x2="728" y2="237" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrow-blue)"/>
+
+  <!-- Cross-theory interaction arrows (curved) -->
+  <!-- AST -> FEP precision -->
+  <path d="M 390 290 Q 390 330, 570 290" stroke="#ef4444" stroke-width="1.2" fill="none" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+  <text x="470" y="328" text-anchor="middle" font-size="9" fill="#ef4444" font-style="italic">attention = precision</text>
+
+  <!-- HOT -> BLT depth -->
+  <path d="M 430 290 Q 460 340, 650 290" stroke="#ef4444" stroke-width="1.2" fill="none" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+  <text x="555" y="350" text-anchor="middle" font-size="9" fill="#ef4444" font-style="italic">HOTs increase epistemic depth</text>
+
+  <!-- FEP -> GWT (feedback loop) -->
+  <path d="M 570 185 Q 400 145, 170 185" stroke="#ef4444" stroke-width="1.2" fill="none" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+  <text x="370" y="153" text-anchor="middle" font-size="9" fill="#ef4444" font-style="italic">prediction error modulates salience (next cycle)</text>
+
+  <!-- FEP -> Damasio -->
+  <path d="M 610 290 Q 680 310, 780 290" stroke="#ef4444" stroke-width="1.2" fill="none" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+  <text x="700" y="318" text-anchor="middle" font-size="9" fill="#ef4444" font-style="italic">drives → protoself</text>
+
+  <!-- Legend for cross-theory arrows -->
+  <rect x="70" y="370" width="280" height="55" rx="4" fill="#fff5f5" stroke="#fecaca" stroke-width="1"/>
+  <line x1="85" y1="390" x2="125" y2="390" stroke="#ef4444" stroke-width="1.2" stroke-dasharray="5,3"/>
+  <text x="135" y="394" font-size="10" fill="#991b1b">Cross-theory interaction (Section 3.4)</text>
+  <line x1="85" y1="410" x2="125" y2="410" stroke="#2563eb" stroke-width="1.8"/>
+  <text x="135" y="414" font-size="10" fill="#1e40af">Sequential data flow within cycle</text>
+
+  <!-- Arrow UP: neural signals flow from substrates to consciousness layer -->
+  <line x1="490" y1="480" x2="490" y2="450" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="530" y="465" font-size="10" fill="#888">neural_signals{}</text>
+
+  <!-- Neural Substrate Layer -->
+  <rect x="40" y="480" width="900" height="175" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="490" y="508" text-anchor="middle" font-size="15" font-weight="700" fill="#166534">NEURAL SUBSTRATE LAYER</text>
+
+  <!-- SNN Box -->
+  <rect x="80" y="525" width="240" height="110" rx="6" fill="#dcfce7" stroke="#22c55e" stroke-width="1.2"/>
+  <text x="200" y="548" text-anchor="middle" font-size="13" font-weight="700" fill="#166534">SNN</text>
+  <text x="200" y="566" text-anchor="middle" font-size="10" fill="#374151">Spiking Neural Network</text>
+  <text x="200" y="582" text-anchor="middle" font-size="10" fill="#374151">4,116 LIF neurons</text>
+  <text x="200" y="598" text-anchor="middle" font-size="10" fill="#374151">10 timesteps, STDP</text>
+  <text x="200" y="618" text-anchor="middle" font-size="9" fill="#6b7280" font-style="italic">snntorch</text>
+
+  <!-- LSM Box -->
+  <rect x="370" y="525" width="240" height="110" rx="6" fill="#dcfce7" stroke="#22c55e" stroke-width="1.2"/>
+  <text x="490" y="548" text-anchor="middle" font-size="13" font-weight="700" fill="#166534">LSM</text>
+  <text x="490" y="566" text-anchor="middle" font-size="10" fill="#374151">Liquid State Machine</text>
+  <text x="490" y="582" text-anchor="middle" font-size="10" fill="#374151">5,000 reservoir neurons</text>
+  <text x="490" y="598" text-anchor="middle" font-size="10" fill="#374151">spectral radius 0.9</text>
+  <text x="490" y="618" text-anchor="middle" font-size="9" fill="#6b7280" font-style="italic">reservoirpy</text>
+
+  <!-- HTM Box -->
+  <rect x="660" y="525" width="240" height="110" rx="6" fill="#dcfce7" stroke="#22c55e" stroke-width="1.2"/>
+  <text x="780" y="548" text-anchor="middle" font-size="13" font-weight="700" fill="#166534">HTM</text>
+  <text x="780" y="566" text-anchor="middle" font-size="10" fill="#374151">Hierarchical Temporal Memory</text>
+  <text x="780" y="582" text-anchor="middle" font-size="10" fill="#374151">131,072 cells (4,096 × 32)</text>
+  <text x="780" y="598" text-anchor="middle" font-size="10" fill="#374151">sequence learning</text>
+  <text x="780" y="618" text-anchor="middle" font-size="9" fill="#6b7280" font-style="italic">custom implementation</text>
+</svg>
+
+<p class="caption"><span class="figure-label">Figure 1.</span> System architecture of the Multi-Theory Consciousness (MTC) framework. Data flows bottom-up: neural substrates generate signals that feed into the consciousness layer, where seven theory modules process them through a four-phase cycle. The resulting ConsciousnessState flows up to the assessment layer, which measures it against 20 indicators on demand. Red dashed arrows indicate cross-theory interactions — data dependencies between modules that create observable interaction effects (Section 3.4). Blue arrows indicate sequential data flow within a single cycle.</p>
+
+<div class="page-break"></div>
+
+<!-- ============================================================ -->
+<!-- FIGURE 2: Consciousness Cycle Data Flow                       -->
+<!-- ============================================================ -->
+<h1>Figure 2: Consciousness Cycle Data Flow</h1>
+
+<svg width="980" height="520" viewBox="0 0 980 520" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#475569"/>
+    </marker>
+    <marker id="arr2-red" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#dc2626"/>
+    </marker>
+  </defs>
+
+  <!-- Input -->
+  <rect x="20" y="220" width="110" height="60" rx="20" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="75" y="245" text-anchor="middle" font-size="11" font-weight="600" fill="#334155">Candidates</text>
+  <text x="75" y="260" text-anchor="middle" font-size="9" fill="#64748b">neural, memory,</text>
+  <text x="75" y="272" text-anchor="middle" font-size="9" fill="#64748b">sensory, external</text>
+
+  <line x1="130" y1="250" x2="165" y2="250" stroke="#475569" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+  <!-- GWT -->
+  <rect x="170" y="180" width="140" height="140" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="240" y="210" text-anchor="middle" font-size="14" font-weight="700" fill="#1e40af">GWT</text>
+  <line x1="185" y1="220" x2="295" y2="220" stroke="#93c5fd" stroke-width="0.8"/>
+  <text x="240" y="240" text-anchor="middle" font-size="10" fill="#334155">Compete</text>
+  <text x="240" y="255" text-anchor="middle" font-size="10" fill="#334155">Ignite</text>
+  <text x="240" y="270" text-anchor="middle" font-size="10" fill="#334155">Broadcast</text>
+  <text x="240" y="290" text-anchor="middle" font-size="9" fill="#64748b">→ winners, events</text>
+  <text x="240" y="305" text-anchor="middle" font-size="9" fill="#64748b">→ integration level</text>
+
+  <line x1="310" y1="250" x2="345" y2="250" stroke="#475569" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="328" y="242" font-size="8" fill="#64748b">winners</text>
+
+  <!-- AST + HOT -->
+  <rect x="350" y="160" width="140" height="180" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="420" y="188" text-anchor="middle" font-size="14" font-weight="700" fill="#5b21b6">AST</text>
+  <text x="420" y="204" text-anchor="middle" font-size="9" fill="#334155">Attention model</text>
+  <text x="420" y="218" text-anchor="middle" font-size="9" fill="#334155">Shift prediction</text>
+  <line x1="365" y1="228" x2="475" y2="228" stroke="#c4b5fd" stroke-width="0.8"/>
+  <text x="420" y="250" text-anchor="middle" font-size="14" font-weight="700" fill="#5b21b6">HOT</text>
+  <text x="420" y="266" text-anchor="middle" font-size="9" fill="#334155">Meta-representations</text>
+  <text x="420" y="280" text-anchor="middle" font-size="9" fill="#334155">Self-model</text>
+  <line x1="365" y1="290" x2="475" y2="290" stroke="#c4b5fd" stroke-width="0.8"/>
+  <text x="420" y="310" text-anchor="middle" font-size="9" fill="#64748b">→ attention state</text>
+  <text x="420" y="325" text-anchor="middle" font-size="9" fill="#64748b">→ HOTs, self-model</text>
+
+  <line x1="490" y1="250" x2="525" y2="250" stroke="#475569" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="508" y="242" font-size="8" fill="#64748b">state</text>
+
+  <!-- FEP + BLT -->
+  <rect x="530" y="140" width="150" height="220" rx="8" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+  <text x="605" y="168" text-anchor="middle" font-size="14" font-weight="700" fill="#991b1b">FEP</text>
+  <text x="605" y="184" text-anchor="middle" font-size="9" fill="#334155">Hierarchical prediction</text>
+  <text x="605" y="198" text-anchor="middle" font-size="9" fill="#334155">Active inference (pymdp)</text>
+  <text x="605" y="212" text-anchor="middle" font-size="9" fill="#334155">Homeostatic drives</text>
+  <line x1="545" y1="224" x2="665" y2="224" stroke="#fca5a5" stroke-width="0.8"/>
+  <text x="605" y="246" text-anchor="middle" font-size="14" font-weight="700" fill="#991b1b">BLT</text>
+  <text x="605" y="262" text-anchor="middle" font-size="9" fill="#334155">Precision allocation</text>
+  <text x="605" y="276" text-anchor="middle" font-size="9" fill="#334155">Bayesian binding (MI)</text>
+  <text x="605" y="290" text-anchor="middle" font-size="9" fill="#334155">Epistemic depth (0–4)</text>
+  <line x1="545" y1="302" x2="665" y2="302" stroke="#fca5a5" stroke-width="0.8"/>
+  <text x="605" y="322" text-anchor="middle" font-size="9" fill="#64748b">→ pred. error, VFE</text>
+  <text x="605" y="336" text-anchor="middle" font-size="9" fill="#64748b">→ loop quality, depth</text>
+  <text x="605" y="350" text-anchor="middle" font-size="9" fill="#64748b">→ drives, bindings</text>
+
+  <line x1="680" y1="250" x2="715" y2="250" stroke="#475569" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="698" y="242" font-size="8" fill="#64748b">drives</text>
+
+  <!-- Damasio -->
+  <rect x="720" y="175" width="140" height="150" rx="8" fill="#fdf4ff" stroke="#a855f7" stroke-width="2"/>
+  <text x="790" y="203" text-anchor="middle" font-size="14" font-weight="700" fill="#7e22ce">Damasio</text>
+  <line x1="735" y1="213" x2="845" y2="213" stroke="#d8b4fe" stroke-width="0.8"/>
+  <text x="790" y="232" text-anchor="middle" font-size="10" fill="#334155">Protoself</text>
+  <text x="790" y="247" text-anchor="middle" font-size="9" fill="#64748b">(body → feelings)</text>
+  <text x="790" y="266" text-anchor="middle" font-size="10" fill="#334155">Core Consciousness</text>
+  <text x="790" y="281" text-anchor="middle" font-size="9" fill="#64748b">(somatic markers)</text>
+  <text x="790" y="300" text-anchor="middle" font-size="10" fill="#334155">Extended</text>
+  <text x="790" y="315" text-anchor="middle" font-size="9" fill="#64748b">(autobiographic self)</text>
+
+  <line x1="860" y1="250" x2="895" y2="250" stroke="#475569" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+  <!-- Output -->
+  <rect x="900" y="210" width="70" height="80" rx="6" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+  <text x="935" y="240" text-anchor="middle" font-size="10" font-weight="700" fill="#166534">Consc.</text>
+  <text x="935" y="254" text-anchor="middle" font-size="10" font-weight="700" fill="#166534">State</text>
+  <text x="935" y="274" text-anchor="middle" font-size="9" fill="#166534">30+</text>
+  <text x="935" y="284" text-anchor="middle" font-size="9" fill="#166534">fields</text>
+
+  <!-- Cross-theory feedback: FEP -> GWT (next cycle) -->
+  <path d="M 605 140 C 605 60, 240 60, 240 180" stroke="#dc2626" stroke-width="1.3" fill="none" stroke-dasharray="6,3" marker-end="url(#arr2-red)"/>
+  <text x="420" y="52" text-anchor="middle" font-size="10" fill="#dc2626" font-weight="600">prediction error → salience (next cycle)</text>
+
+  <!-- Cross-theory: AST -> FEP precision -->
+  <path d="M 460 200 Q 500 160, 540 190" stroke="#dc2626" stroke-width="1" fill="none" stroke-dasharray="4,3" marker-end="url(#arr2-red)"/>
+  <text x="500" y="148" font-size="8.5" fill="#dc2626">precision</text>
+
+  <!-- IIT measurement annotation -->
+  <rect x="170" y="400" width="200" height="50" rx="4" fill="#fefce8" stroke="#ca8a04" stroke-width="1"/>
+  <text x="270" y="420" text-anchor="middle" font-size="10" font-weight="600" fill="#854d0e">IIT (Integrated Information)</text>
+  <text x="270" y="436" text-anchor="middle" font-size="9" fill="#854d0e">Measured across substrates, not a cycle step</text>
+  <line x1="270" y1="395" x2="270" y2="400" stroke="#ca8a04" stroke-width="1" stroke-dasharray="3,2"/>
+
+  <!-- RPT measurement annotation -->
+  <rect x="430" y="400" width="200" height="50" rx="4" fill="#fefce8" stroke="#ca8a04" stroke-width="1"/>
+  <text x="530" y="420" text-anchor="middle" font-size="10" font-weight="600" fill="#854d0e">RPT (Recurrent Processing)</text>
+  <text x="530" y="436" text-anchor="middle" font-size="9" fill="#854d0e">Measured via substrate recurrence depth</text>
+
+  <!-- Note -->
+  <text x="490" y="490" text-anchor="middle" font-size="10" fill="#94a3b8">IIT and RPT are measured across the system, not implemented as cycle steps.</text>
+  <text x="490" y="506" text-anchor="middle" font-size="10" fill="#94a3b8">Their indicators appear in the assessment layer.</text>
+</svg>
+
+<p class="caption"><span class="figure-label">Figure 2.</span> Data flow through one consciousness cycle. Candidates enter from the left and are processed through four phases: competition and selection (GWT), self-modeling (AST, HOT), prediction and inference (FEP, BLT), and embodied integration (Damasio). Each module's outputs are listed below its divider line. The red dashed arrow at the top shows the cross-cycle feedback loop: prediction errors from the FEP module modulate candidate salience in the next cycle's workspace competition. IIT and RPT are measured across the full system rather than implemented as sequential cycle steps. The final output is a ConsciousnessState with 30+ fields spanning all seven theories.</p>
+
+<div class="page-break"></div>
+
+<!-- ============================================================ -->
+<!-- FIGURE 3: Theory Interaction Map                              -->
+<!-- ============================================================ -->
+<h1>Figure 3: Cross-Theory Interaction Map</h1>
+
+<svg width="700" height="550" viewBox="0 0 700 550" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#475569"/>
+    </marker>
+  </defs>
+
+  <!-- Theory nodes as circles -->
+  <!-- GWT center top -->
+  <circle cx="350" cy="80" r="50" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="350" y="76" text-anchor="middle" font-size="16" font-weight="700" fill="#1e40af">GWT</text>
+  <text x="350" y="95" text-anchor="middle" font-size="9" fill="#1e3a8a">Workspace</text>
+
+  <!-- AST left -->
+  <circle cx="130" cy="210" r="45" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="130" y="206" text-anchor="middle" font-size="16" font-weight="700" fill="#5b21b6">AST</text>
+  <text x="130" y="224" text-anchor="middle" font-size="9" fill="#5b21b6">Attention</text>
+
+  <!-- HOT right-ish -->
+  <circle cx="570" cy="210" r="45" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="570" y="206" text-anchor="middle" font-size="16" font-weight="700" fill="#5b21b6">HOT</text>
+  <text x="570" y="224" text-anchor="middle" font-size="9" fill="#5b21b6">Meta</text>
+
+  <!-- FEP center -->
+  <circle cx="250" cy="360" r="50" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+  <text x="250" y="356" text-anchor="middle" font-size="16" font-weight="700" fill="#991b1b">FEP</text>
+  <text x="250" y="375" text-anchor="middle" font-size="9" fill="#991b1b">Inference</text>
+
+  <!-- BLT right -->
+  <circle cx="470" cy="360" r="45" fill="#fff7ed" stroke="#ea580c" stroke-width="2"/>
+  <text x="470" y="356" text-anchor="middle" font-size="16" font-weight="700" fill="#c2410c">BLT</text>
+  <text x="470" y="375" text-anchor="middle" font-size="9" fill="#c2410c">Loop</text>
+
+  <!-- Damasio bottom -->
+  <circle cx="350" cy="480" r="45" fill="#fdf4ff" stroke="#a855f7" stroke-width="2"/>
+  <text x="350" y="472" text-anchor="middle" font-size="14" font-weight="700" fill="#7e22ce">Damasio</text>
+  <text x="350" y="492" text-anchor="middle" font-size="9" fill="#7e22ce">Body</text>
+
+  <!-- IIT top-right -->
+  <circle cx="580" cy="80" r="35" fill="#fefce8" stroke="#ca8a04" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <text x="580" y="76" text-anchor="middle" font-size="14" font-weight="700" fill="#854d0e">IIT</text>
+  <text x="580" y="93" text-anchor="middle" font-size="8" fill="#854d0e">integration</text>
+
+  <!-- RPT top-left -->
+  <circle cx="120" cy="80" r="35" fill="#fefce8" stroke="#ca8a04" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <text x="120" y="76" text-anchor="middle" font-size="14" font-weight="700" fill="#854d0e">RPT</text>
+  <text x="120" y="93" text-anchor="middle" font-size="8" fill="#854d0e">recurrence</text>
+
+  <!-- Interaction arrows with labels -->
+  <!-- GWT -> AST: workspace state -->
+  <line x1="305" y1="110" x2="170" y2="185" stroke="#475569" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <text x="215" y="138" font-size="9" fill="#475569" transform="rotate(-28, 215, 138)">workspace state</text>
+
+  <!-- GWT -> HOT: winners -->
+  <line x1="395" y1="110" x2="530" y2="185" stroke="#475569" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <text x="480" y="138" font-size="9" fill="#475569" transform="rotate(28, 480, 138)">winners</text>
+
+  <!-- AST -> FEP: precision -->
+  <line x1="155" y1="248" x2="225" y2="318" stroke="#dc2626" stroke-width="1.8" marker-end="url(#arr3)"/>
+  <text x="168" y="290" font-size="9.5" fill="#dc2626" font-weight="600">precision</text>
+
+  <!-- HOT -> BLT: depth -->
+  <line x1="545" y1="248" x2="492" y2="322" stroke="#dc2626" stroke-width="1.8" marker-end="url(#arr3)"/>
+  <text x="535" y="290" font-size="9.5" fill="#dc2626" font-weight="600">depth</text>
+
+  <!-- FEP -> GWT: salience modulation (thick, important) -->
+  <path d="M 215 325 C 150 200, 250 110, 305 90" stroke="#dc2626" stroke-width="2" fill="none" marker-end="url(#arr3)"/>
+  <text x="200" y="195" font-size="9.5" fill="#dc2626" font-weight="600">salience</text>
+
+  <!-- FEP -> Damasio: drives -->
+  <line x1="275" y1="405" x2="325" y2="445" stroke="#475569" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <text x="280" y="440" font-size="9" fill="#475569">drives</text>
+
+  <!-- FEP -> BLT: prediction errors -->
+  <line x1="295" y1="345" x2="428" y2="350" stroke="#475569" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <text x="360" y="338" font-size="9" fill="#475569">pred. errors</text>
+
+  <!-- INPUT: Candidates enter the system at GWT -->
+  <rect x="350" y="5" width="110" height="40" rx="16" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="405" y="22" text-anchor="middle" font-size="10" font-weight="600" fill="#334155">Candidates</text>
+  <text x="405" y="36" text-anchor="middle" font-size="8" fill="#64748b">neural, memory, input</text>
+  <line x1="380" y1="45" x2="360" y2="70" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+  <!-- OUTPUT: ConsciousnessState produced by the full cycle -->
+  <rect x="530" y="435" width="130" height="40" rx="16" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="595" y="452" text-anchor="middle" font-size="10" font-weight="600" fill="#166534">ConsciousnessState</text>
+  <text x="595" y="466" text-anchor="middle" font-size="8" fill="#166534">30+ fields, all theories</text>
+  <line x1="380" y1="470" x2="535" y2="455" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+  <!-- Legend -->
+  <rect x="20" y="510" width="660" height="30" rx="4" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <line x1="40" y1="525" x2="70" y2="525" stroke="#475569" stroke-width="1.5"/>
+  <text x="80" y="529" font-size="10" fill="#475569">Sequential data flow</text>
+  <line x1="230" y1="525" x2="260" y2="525" stroke="#dc2626" stroke-width="1.8"/>
+  <text x="270" y="529" font-size="10" fill="#dc2626">Cross-theory interaction (novel)</text>
+  <circle cx="460" cy="525" r="8" fill="none" stroke="#ca8a04" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <text x="475" y="529" font-size="10" fill="#854d0e">Measurement only (no cycle step)</text>
+</svg>
+
+<p class="caption"><span class="figure-label">Figure 3.</span> Cross-theory interaction map. Candidates enter at the top (GWT) and the cycle produces a ConsciousnessState at the bottom. Solid gray arrows show sequential data flow within the consciousness cycle. Red arrows highlight the five cross-theory interactions documented in Section 3.4 — cases where one theory's output substantively affects another theory's computation. Dashed circles (IIT, RPT) indicate theories that are measured across the system rather than implemented as cycle participants. The FEP → GWT salience modulation (left arc) is the strongest interaction: prediction errors from active inference change which candidates win workspace competition in the next cycle, directly linking Friston's framework to Baars'.</p>
+
+</body>
+</html>

@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Beautiful Loop Theory (BLT) - Laukkonen, Friston & Chandaria 2025
   - Recurrent Processing Theory (RPT) - Lamme 2006
 - Damasio Three-Layer Model (Protoself, Core Consciousness, Extended Consciousness)
-- 20-indicator assessment framework based on Butlin, Chalmers et al. (2023)
+- 20-indicator assessment framework based on Butlin et al. (2023)
 - Digital Consciousness Model (DCM) 13-perspective scoring
 - Three neural substrates: SNN (spiking), LSM (liquid state), HTM (hierarchical temporal)
 - Neural orchestrator for unified processing pipeline
