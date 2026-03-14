@@ -37,7 +37,9 @@ logger = logging.getLogger(__name__)
 class LSMConfig:
     """Configuration for production LSM."""
 
-    reservoir_size: int = 10000  # Number of reservoir neurons
+    # Scaled from 10K to 5K: 5K is the latency ceiling (~96ms at 50 timesteps).
+    # 10K would need JAX/GPU -- ReservoirPy is CPU-bound.
+    reservoir_size: int = 5000  # Number of reservoir neurons
     input_dim: int = 100  # Input dimension
     output_dim: int = 50  # Output dimension
 

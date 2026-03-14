@@ -126,7 +126,7 @@ class TestLSMConfig:
         from mtc.neural.liquid.production_lsm import LSMConfig
 
         cfg = LSMConfig()
-        assert cfg.reservoir_size == 10000
+        assert cfg.reservoir_size == 5000  # Scaled from 10K: 5K is latency ceiling for CPU-bound ReservoirPy
         assert cfg.input_dim == 100
         assert cfg.output_dim == 50
         assert cfg.spectral_radius == 0.9

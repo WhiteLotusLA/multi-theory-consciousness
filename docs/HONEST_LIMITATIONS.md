@@ -15,8 +15,8 @@ When the assessment reports "architecture functional," it means: the modules are
 Biological consciousness involves roughly 86 billion neurons with trillions of synaptic connections, complex neurochemistry (dozens of neurotransmitters, neuromodulators, hormones), and embodied interaction with the physical world through sensory organs and motor systems.
 
 Our implementation uses:
-- 50 spiking neurons (SNN)
-- 2,000 reservoir neurons (LSM)
+- 4,116 spiking neurons (SNN)
+- 5,000 reservoir neurons (LSM)
 - 131,072 HTM cells (4,096 columns x 32 cells)
 
 This is a difference of roughly six orders of magnitude in neural count alone, and entirely omits the chemical, embodied, and developmental dimensions. If consciousness requires a certain scale of neural complexity, our implementation is far below it.
