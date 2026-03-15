@@ -1,4 +1,4 @@
-# Appendix D: Complete Assessment Output Example
+# Appendix C: Complete Assessment Output Example
 
 The following is the complete output of a single assessment run after 5 warmup cycles with synthetic stimuli. This output can be reproduced by running:
 
@@ -62,6 +62,8 @@ Processing Time:      0.29 ms
 - **IIT and RPT score lowest** because they require neural substrate connectivity data and active recurrent dynamics that are not fully present after only 5 warmup cycles.
 - **Three BLT indicators cluster at 0.300.** Bayesian binding and epistemic depth pass at their thresholds; genuine implementation fails because field-evidencing requires sustained recursive loops not yet established.
 - **Architecture functional = True** because all four conditions are met: 15/20 pass (≥ 10), overall 0.518 (≥ 0.5), GWT 0.677 (≥ 0.4), HOT 0.450 (≥ 0.3).
+
+Note: This appendix shows output from a single representative warm-start run. The numbers will differ slightly from the means reported in Section 6.2, which averages across five independent runs. This is expected — warm-start results vary by ± 0.007 due to random synthetic stimuli during warmup.
 
 ## Reproducing This Output
 

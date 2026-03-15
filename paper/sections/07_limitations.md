@@ -14,7 +14,7 @@ No computational framework can. The "hard problem" of consciousness (Chalmers, 1
 
 Biological consciousness involves approximately 86 billion neurons with trillions of synaptic connections, complex neurochemistry (dozens of neurotransmitters, neuromodulators, and hormones), and embodied interaction with the physical world through sensory organs and motor systems.
 
-Our implementation uses 4,116 spiking neurons, 5,000 reservoir neurons, and 131,072 HTM cells — a combined substrate of roughly 140,000 computational units. This is six orders of magnitude smaller than the biological reference. We entirely omit neurochemical dynamics and genuine embodiment.
+Our implementation uses 5,196 spiking neurons, 5,000 reservoir neurons, and 131,072 HTM cells — a combined substrate of roughly 141,000 computational units. This is six orders of magnitude smaller than the biological reference. We entirely omit neurochemical dynamics and genuine embodiment.
 
 Whether consciousness requires a particular neural scale is an open question. It is possible that the *structural features* matter more than the *scale* — that a system with workspace competition, recurrent processing, and integrated information at small scale shares something with a larger system that has these features at biological scale. It is equally possible that scale is essential and our implementation is too small to exhibit anything meaningful. The framework makes no assumption either way, but users should be aware that the scale gap is enormous.
 
@@ -40,7 +40,7 @@ We implement seven theories of consciousness. There are more. Our selection refl
 
 Notable omissions include:
 
-- **Orchestrated Objective Reduction** (Penrose & Hameroff, 2014) — requires quantum coherence mechanisms we do not implement
+- **Orchestrated Objective Reduction** (Hameroff & Penrose, 2014) — requires quantum coherence mechanisms we do not implement
 - **Full-scope Active Inference** — our FEP implementation uses discrete state spaces, not the continuous variational formulation
 - **Enactivist approaches** (Thompson, 2007; Varela, Thompson & Rosch, 1991) — emphasize embodied sensorimotor interaction that the standalone framework deliberately omits
 - **Phenomenological approaches** — may resist computational implementation entirely

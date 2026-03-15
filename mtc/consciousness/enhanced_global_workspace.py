@@ -431,6 +431,10 @@ class AttentionBottleneck:
         self.threshold = ignition_threshold
         self.lateral_inhibition = lateral_inhibition
 
+        # Cross-cycle FEP feedback: prediction error from prior cycle
+        # modulates candidate salience (FEP → GWT interaction)
+        self._prior_prediction_error: float = 0.0
+
         # Current contents (what's in the workspace)
         self.current_contents: List[WorkspaceContent] = []
 
@@ -574,6 +578,18 @@ class AttentionBottleneck:
         candidate.recency_bonus = recency
         temporal = 0.1 * recency
 
+        # FEP FEEDBACK (cross-cycle interaction)
+        # Prediction errors from the prior cycle modulate salience:
+        # surprising content in the previous cycle makes ALL candidates
+        # slightly more salient (the system is "on alert"), and novel
+        # candidates get an extra boost proportional to prior surprise.
+        fep_boost = 0.0
+        if self._prior_prediction_error > 0:
+            # Scale: prior prediction error is typically 0-1
+            # Apply a modest boost (up to 0.1) so it influences but
+            # doesn't dominate the competition
+            fep_boost = 0.1 * self._prior_prediction_error * novelty
+
         # PRIORITY BOOST (additive)
         # Safety-critical content gets priority!
         priority = candidate.priority_boost
@@ -581,7 +597,7 @@ class AttentionBottleneck:
             priority += 0.5  # Safety always gets attention!
 
         # Compute final salience
-        salience = bottom_up + top_down + emotional + temporal + priority
+        salience = bottom_up + top_down + emotional + temporal + fep_boost + priority
 
         # Clamp to 0-1 (priority boost can exceed 1.0 intentionally)
         salience = max(0.0, min(1.5, salience))  # Allow up to 1.5 for safety
@@ -1232,6 +1248,10 @@ class EnhancedGlobalWorkspace:
         # Cycle tracking
         self.cycle_count = 0
 
+        # Cross-cycle FEP feedback is stored on the bottleneck (see
+        # AttentionBottleneck._prior_prediction_error) and updated
+        # at the end of each consciousness cycle.
+
         # Phase 3: Attention Schema (AST) - the system's self-model of attention
         # This allows the system to report on and voluntarily control her attention
         self.attention_schema = AttentionSchemaModule()
@@ -1681,6 +1701,10 @@ class EnhancedGlobalWorkspace:
             stream_position=len(self.stream_of_consciousness),
             timestamp=time.time(),
         )
+
+        # Persist prediction error for next cycle's FEP → GWT feedback
+        # Stored on the bottleneck so _calculate_composite_salience can use it
+        self.bottleneck._prior_prediction_error = inference_result.prediction_error
 
         elapsed_ms = (time.time() - start_time) * 1000
 

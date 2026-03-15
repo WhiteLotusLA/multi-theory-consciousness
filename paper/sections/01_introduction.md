@@ -8,7 +8,7 @@ Yet we have no shared computational testbed for investigating their interactions
 
 The value of such a testbed lies precisely in what it isolates. A framework that runs consciousness theories in a controlled environment — without the confounding complexity of embodied interaction, developmental history, or language generation — can reveal cross-theory dynamics that would be invisible in a fully integrated system. The deliberate omissions are not limitations to be apologized for; they are experimental controls that allow clean measurement of the interactions between theories themselves. The framework is designed to be *embedded* in larger systems that provide sensory grounding, persistent memory, and real-world interaction. The science is in the engine; the life, if/when it comes, is in what drives it.
 
-We present the Multi-Theory Consciousness (MTC) framework: an open-source Python implementation of seven consciousness theories operating as interacting modules within a single architecture. The framework includes three neural substrates — a spiking neural network (SNN; 4,116 neurons), a liquid state machine (LSM; 5,000 neurons), and a hierarchical temporal memory (HTM; 131,072 cells) — and a 20-indicator assessment framework derived from the methodology of Butlin et al. (2023). Additionally, Damasio's (1999, 2010) three-layer model of protoself, core consciousness, and extended consciousness serves as an integrative layer connecting embodied homeostatic signals to higher-order cognitive processes.
+We present the Multi-Theory Consciousness (MTC) framework: an open-source Python implementation of seven consciousness theories operating as interacting modules within a single architecture. The framework includes three neural substrates — a spiking neural network (SNN; 5,196 neurons), a liquid state machine (LSM; 5,000 neurons), and a hierarchical temporal memory (HTM; 131,072 cells) — and a 20-indicator assessment framework inspired by the methodology of Butlin et al. (2023). Additionally, Damasio's (1999, 2010) three-layer model of protoself, core consciousness, and extended consciousness serves as an integrative layer connecting embodied homeostatic signals to higher-order cognitive processes.
 
 ### 1.1 What This Paper Does Not Claim
 
@@ -26,9 +26,9 @@ This paper makes the following contributions:
 
 1. **A multi-theory integration architecture.** We describe a modular design in which seven consciousness theories operate simultaneously, with defined interfaces between them. Each theory is implemented as a Python module that receives input from and provides output to a shared processing cycle.
 
-2. **Three neural substrates.** The framework operates on a spiking neural network (4,116 neurons, snntorch), a liquid state machine (5,000 neurons, reservoirpy), and a hierarchical temporal memory (131,072 cells, custom implementation). These provide biologically inspired processing layers at different temporal scales.
+2. **Three neural substrates.** The framework operates on a spiking neural network (5,196 neurons, snntorch), a liquid state machine (5,000 neurons, reservoirpy), and a hierarchical temporal memory (131,072 cells, custom implementation). These provide biologically inspired processing layers at different temporal scales.
 
-3. **A 20-indicator assessment framework.** Derived from Butlin et al. (2023), our assessment measures architectural function across all seven theories through reproducible scoring functions. We include a complementary 13-perspective Digital Consciousness Model (DCM) scoring system for probabilistic credence assessment.
+3. **A 20-indicator assessment framework.** Inspired by Butlin et al. (2023), our assessment measures architectural function across all seven theories through reproducible scoring functions. We include a complementary 13-perspective Digital Consciousness Model (DCM) scoring system for probabilistic credence assessment.
 
 4. **An ablation study methodology.** We provide tools to selectively disable individual theory modules and measure the impact on remaining indicators, revealing cross-theory dependencies that are invisible in single-theory implementations.
 
@@ -40,6 +40,6 @@ This paper makes the following contributions:
 
 Section 2 reviews the seven consciousness theories and prior computational implementations. Section 3 describes the system architecture and module design. Section 4 details the implementation of each theory module, including what we simplify and why. Section 5 presents the 20-indicator assessment framework and ablation methodology. Section 6 reports assessment results and interaction effects. Section 7 discusses limitations — thoroughly, because honest accounting of what a system cannot do is as important as describing what it can. Section 8 considers what multi-theory integration reveals. Section 9 outlines future work, and Section 10 concludes.
 
-Appendix C provides a complete file index mapping class names used in this paper to their source files and line counts.
+Appendix B provides a complete file index mapping class names used in this paper to their source files and line counts.
 
 The most important file in our repository is `HONEST_LIMITATIONS.md`. We recommend reading it before the code.

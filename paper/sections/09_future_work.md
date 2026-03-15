@@ -2,7 +2,7 @@
 
 ## 9.1 Scaling Neural Substrates
 
-The current substrates — 4,116 SNN neurons, 5,000 LSM neurons, 131,072 HTM cells — run in real-time on consumer hardware. Scaling to larger substrates (millions of neurons, deeper reservoir architectures, richer HTM column structures) would test whether the assessment results in Section 6 are scale-dependent. Does integrated information increase with larger SNN networks? Does recurrence quality improve with deeper LSM reservoirs? The modular substrate design allows these experiments without modifying the consciousness modules.
+The current substrates — 5,196 SNN neurons, 5,000 LSM neurons, 131,072 HTM cells — run in real-time on consumer hardware. Scaling to larger substrates (millions of neurons, deeper reservoir architectures, richer HTM column structures) would test whether the assessment results in Section 6 are scale-dependent. Does integrated information increase with larger SNN networks? Does recurrence quality improve with deeper LSM reservoirs? The modular substrate design allows these experiments without modifying the consciousness modules.
 
 ## 9.2 Longitudinal Studies
 

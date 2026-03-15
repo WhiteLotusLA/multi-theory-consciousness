@@ -512,7 +512,7 @@ class ConsciousnessAssessment:
                 "description": "Feedback loops in neural processing",
             },
             "local_recurrence": {
-                "theory": ConsciousnessTheory.GWT,
+                "theory": ConsciousnessTheory.RPT,
                 "threshold": 0.3,
                 "weight": 0.8,
                 "description": "Local neural feedback circuits",

@@ -1,4 +1,4 @@
-# Appendix C: Module File Index
+# Appendix B: Module File Index
 
 The following table maps the class names used throughout this paper to their source files in the repository. Line counts are approximate and reflect the state of the codebase at the time of publication.
 
@@ -30,9 +30,9 @@ The following table maps the class names used throughout this paper to their sou
 | Class | File Path | Lines |
 |-------|-----------|-------|
 | `NeuralOrchestrator` | `mtc/neural/orchestrator.py` | 975 |
-| `ProductionSNN` | `mtc/neural/spiking/production_snn.py` | — |
-| `ProductionLSM` | `mtc/neural/liquid/production_lsm.py` | — |
-| `ProductionHTM` | `mtc/neural/temporal/production_htm.py` | — |
+| `ProductionSNN` | `mtc/neural/spiking/production_snn.py` | varies |
+| `ProductionLSM` | `mtc/neural/liquid/production_lsm.py` | varies |
+| `ProductionHTM` | `mtc/neural/htm/production_htm.py` | varies |
 
 ## Assessment
 
@@ -41,7 +41,7 @@ The following table maps the class names used throughout this paper to their sou
 | `ConsciousnessAssessment` | `mtc/assessment/assessment.py` | 2,000 |
 | `ConsciousnessReport` | `mtc/assessment/assessment.py` | (same file) |
 | `RPTMeasurement` | `mtc/assessment/rpt_measurement.py` | 568 |
-| `DCMScorer` | `mtc/assessment/dcm_scoring.py` | — |
+| `DCMScorer` | `mtc/assessment/dcm_scoring.py` | varies |
 | `AblationStudy` | `mtc/assessment/assessment.py` | (same file) |
 
 ## Data Structures
@@ -52,7 +52,7 @@ The following table maps the class names used throughout this paper to their sou
 | `WorkspaceCandidate` | `enhanced_global_workspace.py` | Item competing for workspace access |
 | `IndicatorResult` | `assessment.py` | Single indicator measurement |
 | `ConsciousMoment` | `beautiful_loop/__init__.py` | Output of Beautiful Loop processing |
-| `BodyState` | `damasio/protoself.py` | Six-dimensional body representation |
+| `BodyState` | `damasio/protoself.py` | Five-dimensional body representation (plus dictionary field) |
 | `SomaticMarker` | `damasio/core_consciousness.py` | Emotional tag on workspace content |
 | `BoundPercept` | `beautiful_loop/bayesian_binding.py` | Unified conscious percept |
 | `HigherOrderThought` | `metacognition.py` | Meta-representation of a mental state |

@@ -65,7 +65,7 @@ class SNNConfig:
 
     def __post_init__(self):
         if self.hidden_layers is None:
-            # Default architecture: 1000 -> 2048 -> 2048 -> 100 (4,116 total neurons)
+            # Default architecture: 1000 -> 2048 -> 2048 -> 100 (5,196 total neurons)
             # Scaled from [2000, 2000]: Metal GPU parallelizes wide layers well;
             # fewer timesteps with more neurons is actually faster.
             self.hidden_layers = [2048, 2048]

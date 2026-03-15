@@ -18,13 +18,13 @@ The ablation results suggest a natural partition of the seven theories into two 
 
 **Enrichment modules** — AST, HOT, and BLT — add self-modeling, meta-representation, and recursive inference. Removing any one causes a 6–8% drop. The consciousness cycle can function without them, but the resulting function is impoverished: no attention self-model, no higher-order thoughts, no binding of inferences into coherent percepts.
 
-This partition is an empirical finding, not a theoretical claim. It may reflect our implementation choices (GWT is the first phase in the cycle, so everything depends on it) more than a deep truth about which theories are more fundamental. A different ordering — placing FEP first and GWT downstream, for example — might produce a different partition. The framework supports such reordering, and we expect future work to explore it.
+This partition is an architectural observation, not a theoretical claim. It substantially reflects the sequential pipeline design: GWT is the first processing phase, so all downstream modules depend on its output. Removing the first stage of any sequential pipeline will cause the largest impact. Similarly, FEP provides the prediction error signals that multiple downstream modules consume. We do not claim that GWT and FEP are more "fundamental" theories of consciousness — only that they are more structurally central in our specific implementation. A different module ordering might produce a different partition, and the framework supports such reordering for future investigation.
 
 ## 8.3 The Value of Honest Assessment
 
-The noise normalization methodology (Section 5.3) and the failing indicators (Section 6.3) are as informative as the passing ones. Five indicators fail at warm start, and they fail for specific, identifiable reasons: insufficient tracking history, missing neural connectivity data, or incomplete recursive loop establishment. Each failure points to a concrete capability the framework needs — either internally (better RPT measurement) or from an embedding system (persistent state for extended operational history).
+The noise normalization methodology (Section 5.3) and the failing indicators (Section 6.3) are as informative as the passing ones. Six indicators fail at warm start, and they fail for specific, identifiable reasons: insufficient tracking history, missing neural connectivity data, or incomplete recursive loop establishment. Each failure points to a concrete capability the framework needs — either internally (better RPT measurement) or from an embedding system (persistent state for extended operational history).
 
-This is the value of honest measurement. A framework that reports 20/20 passing on cold start would be measuring structural properties of its scoring functions, not dynamic function of its modules. The five failures — and the specific reasons they fail — are more useful to future researchers than a perfect score would be.
+This is the value of honest measurement. A framework that reports 20/20 passing on cold start would be measuring structural properties of its scoring functions, not dynamic function of its modules. The six failures — and the specific reasons they fail — are more useful to future researchers than a perfect score would be.
 
 ## 8.4 Embedding as the Next Step
 
