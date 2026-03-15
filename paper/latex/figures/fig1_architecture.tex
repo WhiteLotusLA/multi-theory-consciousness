@@ -1,0 +1,191 @@
+% fig1_architecture.tex — MTC Framework Architecture (Figure 1)
+% Requires: \usepackage{tikz}
+%           \usetikzlibrary{arrows.meta, positioning, fit, backgrounds, calc}
+
+\begin{figure*}[t]
+\centering
+\begin{tikzpicture}[
+    >=Stealth,
+    every node/.style={font=\sffamily},
+    sequential arrow/.style={->, thick, blue!70!black},
+    cross arrow/.style={->, dashed, thick, red!70!black},
+    inter layer arrow/.style={->, thick, black!50, dashed},
+  ]
+
+  % =====================================================================
+  %  NEURAL SUBSTRATE LAYER (y = 0 to 2.8)
+  % =====================================================================
+  \fill[green!5, rounded corners=8pt] (-8.2, -0.2) rectangle (8.2, 2.8);
+  \draw[green!60!black, rounded corners=8pt] (-8.2, -0.2) rectangle (8.2, 2.8);
+  \node[font=\sffamily\bfseries\large, text=green!30!black] at (0, 2.4) {NEURAL SUBSTRATE LAYER};
+
+  % SNN
+  \fill[green!10, rounded corners=4pt] (-7.6, 0.2) rectangle (-2.6, 1.8);
+  \draw[green!60!black, rounded corners=4pt] (-7.6, 0.2) rectangle (-2.6, 1.8);
+  \node[font=\sffamily\bfseries\normalsize, text=green!30!black] at (-5.1, 1.5) {SNN};
+  \node[font=\sffamily\scriptsize, text=black!70, align=center] at (-5.1, 0.8)
+    {Spiking Neural Network\\5,196 LIF neurons, STDP};
+  \node[font=\sffamily\itshape\scriptsize, text=black!50] at (-5.1, 0.35) {snntorch};
+
+  % LSM
+  \fill[green!10, rounded corners=4pt] (-2.2, 0.2) rectangle (2.8, 1.8);
+  \draw[green!60!black, rounded corners=4pt] (-2.2, 0.2) rectangle (2.8, 1.8);
+  \node[font=\sffamily\bfseries\normalsize, text=green!30!black] at (0.3, 1.5) {LSM};
+  \node[font=\sffamily\scriptsize, text=black!70, align=center] at (0.3, 0.8)
+    {Liquid State Machine\\5,000 reservoir neurons};
+  \node[font=\sffamily\itshape\scriptsize, text=black!50] at (0.3, 0.35) {reservoirpy};
+
+  % HTM
+  \fill[green!10, rounded corners=4pt] (3.2, 0.2) rectangle (7.8, 1.8);
+  \draw[green!60!black, rounded corners=4pt] (3.2, 0.2) rectangle (7.8, 1.8);
+  \node[font=\sffamily\bfseries\normalsize, text=green!30!black] at (5.5, 1.5) {HTM};
+  \node[font=\sffamily\scriptsize, text=black!70, align=center] at (5.5, 0.8)
+    {Hierarchical Temporal Memory\\131,072 cells (4,096 $\times$ 32)};
+  \node[font=\sffamily\itshape\scriptsize, text=black!50] at (5.5, 0.35) {custom};
+
+  % =====================================================================
+  %  Gap between Neural and Consciousness: inter-layer arrow (y = 2.8 to 4.0)
+  % =====================================================================
+  \draw[inter layer arrow] (0, 2.8) -- (0, 4.0)
+    node[midway, right=3pt, font=\sffamily\scriptsize\itshape, text=black!50]
+    {\texttt{neural\_signals\{\}}};
+
+  % =====================================================================
+  %  CONSCIOUSNESS LAYER (y = 4.0 to 13.2)
+  %  Layout: phases at y=5.0–9.0, cross-theory arrows at y=9.5–11.5
+  % =====================================================================
+  \fill[blue!4, rounded corners=8pt] (-8.2, 4.0) rectangle (8.2, 13.2);
+  \draw[blue!60!black, rounded corners=8pt] (-8.2, 4.0) rectangle (8.2, 13.2);
+  \node[font=\sffamily\bfseries\large, text=blue!30!black]
+    at (0, 12.7) {CONSCIOUSNESS LAYER --- \texttt{process\_consciousness\_cycle()}};
+
+  % --- Phase I: GWT (x = -7.8 to -4.0) ---
+  \fill[blue!10, rounded corners=4pt] (-7.8, 5.0) rectangle (-4.0, 9.0);
+  \draw[blue!50!black, rounded corners=4pt] (-7.8, 5.0) rectangle (-4.0, 9.0);
+  \node[font=\sffamily\bfseries\small, text=blue!25!black] at (-5.9, 8.6) {PHASE I};
+  \node[font=\sffamily\scriptsize, text=blue!25!black] at (-5.9, 8.2) {Competition \& Selection};
+  \draw[blue!30, thin] (-7.4, 7.9) -- (-4.4, 7.9);
+  \node[font=\sffamily\bfseries\normalsize, text=blue!60!black] at (-5.9, 7.3) {GWT};
+  \node[font=\sffamily\small, text=black!70, align=center] at (-5.9, 6.2)
+    {Bottleneck (7$\pm$2)\\[2pt]Ignition \& Broadcast};
+
+  % --- Phase II: AST + HOT (x = -3.6 to 0.4) ---
+  \fill[blue!10, rounded corners=4pt] (-3.6, 5.0) rectangle (0.4, 9.0);
+  \draw[blue!50!black, rounded corners=4pt] (-3.6, 5.0) rectangle (0.4, 9.0);
+  \node[font=\sffamily\bfseries\small, text=blue!25!black] at (-1.6, 8.6) {PHASE II};
+  \node[font=\sffamily\scriptsize, text=blue!25!black] at (-1.6, 8.2) {Self-Modeling};
+  \draw[blue!30, thin] (-3.2, 7.9) -- (0.0, 7.9);
+  \node[font=\sffamily\bfseries\normalsize, text=blue!60!black] at (-2.6, 7.3) {AST};
+  \node[font=\sffamily\bfseries\normalsize, text=blue!60!black] at (-0.6, 7.3) {HOT};
+  \node[font=\sffamily\small, text=black!70, align=center] at (-2.6, 6.2)
+    {Attention\\[2pt]Schema};
+  \node[font=\sffamily\small, text=black!70, align=center] at (-0.6, 6.2)
+    {Meta-\\[2pt]cognition};
+
+  % --- Phase III: FEP + BLT (x = 0.8 to 4.8) ---
+  \fill[blue!10, rounded corners=4pt] (0.8, 5.0) rectangle (4.8, 9.0);
+  \draw[blue!50!black, rounded corners=4pt] (0.8, 5.0) rectangle (4.8, 9.0);
+  \node[font=\sffamily\bfseries\small, text=blue!25!black] at (2.8, 8.6) {PHASE III};
+  \node[font=\sffamily\scriptsize, text=blue!25!black] at (2.8, 8.2) {Prediction \& Inference};
+  \draw[blue!30, thin] (1.2, 7.9) -- (4.4, 7.9);
+  \node[font=\sffamily\bfseries\normalsize, text=blue!60!black] at (1.8, 7.3) {FEP};
+  \node[font=\sffamily\bfseries\normalsize, text=blue!60!black] at (3.8, 7.3) {BLT};
+  \node[font=\sffamily\small, text=black!70, align=center] at (1.8, 6.2)
+    {Active\\[2pt]Inference};
+  \node[font=\sffamily\small, text=black!70, align=center] at (3.8, 6.2)
+    {Beautiful\\[2pt]Loop};
+
+  % --- Phase IV: Damasio (x = 5.2 to 7.8) ---
+  \fill[blue!10, rounded corners=4pt] (5.2, 5.0) rectangle (7.8, 9.0);
+  \draw[blue!50!black, rounded corners=4pt] (5.2, 5.0) rectangle (7.8, 9.0);
+  \node[font=\sffamily\bfseries\small, text=blue!25!black] at (6.5, 8.6) {PHASE IV};
+  \node[font=\sffamily\scriptsize, text=blue!25!black] at (6.5, 8.2) {Embodied Integration};
+  \draw[blue!30, thin] (5.6, 7.9) -- (7.4, 7.9);
+  \node[font=\sffamily\bfseries\normalsize, text=blue!60!black] at (6.5, 7.3) {Damasio};
+  \node[font=\sffamily\small, text=black!70, align=center] at (6.5, 6.2)
+    {Protoself\\[2pt]Core \& Extended};
+
+  % =====================================================================
+  %  SEQUENTIAL ARROWS between phases (blue solid, at y=7.0)
+  % =====================================================================
+  \draw[sequential arrow] (-4.0, 7.0) -- (-3.6, 7.0);
+  \draw[sequential arrow] (0.4, 7.0) -- (0.8, 7.0);
+  \draw[sequential arrow] (4.8, 7.0) -- (5.2, 7.0);
+
+  % =====================================================================
+  %  CROSS-THEORY ARROWS (red dashed)
+  %  All routed in the clear zone between phase tops (y=9.0) and
+  %  the layer title (y=12.7), with staggered heights to avoid overlap.
+  % =====================================================================
+
+  % 1. FEP -> GWT: prediction error modulates salience
+  %    Widest arc, highest path (y peak ~11.5)
+  \draw[cross arrow]
+    (1.8, 9.0) .. controls (1.0, 11.6) and (-5.0, 11.6) .. (-5.9, 9.0);
+  \node[font=\sffamily\itshape\scriptsize, text=red!70!black, fill=blue!4, inner sep=1pt]
+    at (-2.0, 11.5) {prediction error modulates salience (next cycle)};
+
+  % 2. AST -> FEP: attention = precision
+  %    Short hop, low path (y peak ~9.8)
+  \draw[cross arrow]
+    (-2.6, 9.0) .. controls (-2.6, 9.8) and (1.8, 9.8) .. (1.8, 9.0);
+  \node[font=\sffamily\itshape\scriptsize, text=red!70!black, fill=blue!4, inner sep=1pt]
+    at (-0.4, 10.0) {attention = precision};
+
+  % 3. HOT -> BLT: HOTs increase epistemic depth
+  %    Medium hop, medium path (y peak ~10.4)
+  \draw[cross arrow]
+    (-0.6, 9.0) .. controls (-0.6, 10.6) and (3.8, 10.6) .. (3.8, 9.0);
+  \node[font=\sffamily\itshape\scriptsize, text=red!70!black, fill=blue!4, inner sep=1pt]
+    at (1.6, 10.7) {HOTs increase epistemic depth};
+
+  % 4. FEP -> Damasio: drives -> protoself
+  %    Short direct hop between adjacent phases
+  \draw[cross arrow]
+    (2.8, 9.0) .. controls (3.5, 9.6) and (5.5, 9.6) .. (6.5, 9.0);
+  \node[font=\sffamily\itshape\scriptsize, text=red!70!black, fill=blue!4, inner sep=1pt]
+    at (4.7, 9.8) {drives $\to$ protoself};
+
+  % =====================================================================
+  %  LEGEND (top-right corner, clear space)
+  % =====================================================================
+  \fill[red!3, rounded corners=3pt] (4.4, 11.2) rectangle (7.9, 12.3);
+  \draw[red!20, rounded corners=3pt] (4.4, 11.2) rectangle (7.9, 12.3);
+
+  \draw[dashed, red!70!black, thick] (4.7, 11.9) -- (5.5, 11.9);
+  \node[font=\sffamily\scriptsize, text=black!70, anchor=west] at (5.7, 11.9)
+    {Cross-theory interaction};
+
+  \draw[blue!70!black, thick] (4.7, 11.5) -- (5.5, 11.5);
+  \node[font=\sffamily\scriptsize, text=black!70, anchor=west] at (5.7, 11.5)
+    {Sequential data flow};
+
+  % =====================================================================
+  %  Gap between Consciousness and Assessment: inter-layer arrow (y = 13.2 to 14.4)
+  % =====================================================================
+  \draw[inter layer arrow] (0, 13.2) -- (0, 14.4)
+    node[midway, right=3pt, font=\sffamily\scriptsize\itshape, text=black!50]
+    {\texttt{ConsciousnessState}};
+
+  % =====================================================================
+  %  ASSESSMENT LAYER (y = 14.4 to 16.2)
+  % =====================================================================
+  \fill[yellow!10, rounded corners=8pt] (-8.2, 14.4) rectangle (8.2, 16.2);
+  \draw[orange!70!black, rounded corners=8pt] (-8.2, 14.4) rectangle (8.2, 16.2);
+  \node[font=\sffamily\bfseries\large, text=orange!40!black] at (0, 15.6)
+    {ASSESSMENT LAYER};
+  \node[font=\sffamily\small, text=orange!40!black] at (0, 15.0)
+    {20 indicators across 7 theories (GWT, IIT, AST, HOT, FEP, RPT, BLT) --- on demand};
+
+\end{tikzpicture}
+
+\caption{System architecture of the Multi-Theory Consciousness (MTC) framework.
+Data flows bottom-up: neural substrates generate signals that feed into the
+consciousness layer, where seven theory modules process them through a four-phase
+cycle. The resulting \texttt{ConsciousnessState} flows up to the assessment layer,
+which measures it against 20~indicators on demand. Red dashed arrows indicate
+cross-theory interactions---data dependencies between modules that create observable
+interaction effects (Section~\ref{sec:cross-theory}). Blue arrows indicate sequential
+data flow within a single cycle.}
+\label{fig:architecture}
+\end{figure*}

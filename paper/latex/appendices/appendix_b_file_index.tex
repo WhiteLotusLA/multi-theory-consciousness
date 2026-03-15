@@ -1,0 +1,106 @@
+% Appendix B: Module File Index
+\section{File Index}\label{app:files}
+
+The following tables map the class names used throughout this paper to their source files in the repository.
+Line counts are approximate and reflect the state of the codebase at the time of publication.
+
+\subsection{Consciousness Modules}
+
+\begin{longtable}{@{}llp{5.2cm}r@{}}
+\toprule
+\textbf{Class} & \textbf{Theory} & \textbf{File Path} & \textbf{Lines} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Class} & \textbf{Theory} & \textbf{File Path} & \textbf{Lines} \\
+\midrule
+\endhead
+\midrule
+\multicolumn{4}{r}{\emph{Continued on next page}} \\
+\bottomrule
+\endfoot
+\bottomrule
+\endlastfoot
+\texttt{EnhancedGlobalWorkspace}       & GWT    & \small\texttt{mtc/consciousness/enhanced\_global\_workspace.py}        & 2{,}262 \\
+\texttt{AttentionBottleneck}           & GWT    & \small\texttt{mtc/consciousness/enhanced\_global\_workspace.py}        & (same) \\
+\texttt{IgnitionDetector}              & GWT    & \small\texttt{mtc/consciousness/enhanced\_global\_workspace.py}        & (same) \\
+\texttt{GlobalBroadcast}               & GWT    & \small\texttt{mtc/consciousness/enhanced\_global\_workspace.py}        & (same) \\
+\texttt{AttentionSchemaModule}         & AST    & \small\texttt{mtc/consciousness/attention\_schema.py}                  & 1{,}015 \\
+\texttt{MetacognitionModule}           & HOT    & \small\texttt{mtc/consciousness/metacognition.py}                      & 1{,}772 \\
+\texttt{SelfModel}                     & HOT    & \small\texttt{mtc/consciousness/metacognition.py}                      & (same) \\
+\texttt{ActiveInferenceModule}         & FEP    & \small\texttt{mtc/consciousness/active\_inference.py}                  & 1{,}535 \\
+\texttt{HierarchicalPredictiveProcessor} & FEP  & \small\texttt{mtc/consciousness/active\_inference.py}                  & (same) \\
+\texttt{HomeostaticDrives}             & FEP    & \small\texttt{mtc/consciousness/active\_inference.py}                  & (same) \\
+\texttt{HyperModel}                    & BLT    & \small\texttt{mtc/consciousness/beautiful\_loop/hyper\_model.py}       & 362 \\
+\texttt{BayesianBinding}               & BLT    & \small\texttt{mtc/consciousness/beautiful\_loop/bayesian\_binding.py}  & 499 \\
+\texttt{EpistemicDepthTracker}         & BLT    & \small\texttt{mtc/consciousness/beautiful\_loop/epistemic\_depth.py}   & 459 \\
+\texttt{BeautifulLoop}                 & BLT    & \small\texttt{mtc/consciousness/beautiful\_loop/\_\_init\_\_.py}       & 437 \\
+\texttt{Protoself}                     & Damasio & \small\texttt{mtc/consciousness/damasio/protoself.py}                  & 307 \\
+\texttt{CoreConsciousness}             & Damasio & \small\texttt{mtc/consciousness/damasio/core\_consciousness.py}        & 302 \\
+\texttt{ExtendedConsciousness}         & Damasio & \small\texttt{mtc/consciousness/damasio/extended\_consciousness.py}    & 356 \\
+\texttt{DamasioLayers}                 & Damasio & \small\texttt{mtc/consciousness/damasio/\_\_init\_\_.py}               & 239 \\
+\end{longtable}
+
+\subsection{Neural Substrates}
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{@{}llr@{}}
+\toprule
+\textbf{Class} & \textbf{File Path} & \textbf{Lines} \\
+\midrule
+\texttt{NeuralOrchestrator} & \texttt{mtc/neural/orchestrator.py}            & 975 \\
+\texttt{ProductionSNN}      & \texttt{mtc/neural/spiking/production\_snn.py} & varies \\
+\texttt{ProductionLSM}      & \texttt{mtc/neural/liquid/production\_lsm.py}  & varies \\
+\texttt{ProductionHTM}      & \texttt{mtc/neural/htm/production\_htm.py}      & varies \\
+\bottomrule
+\end{tabular}
+\caption{Neural substrate classes.}
+\label{tab:neural-files}
+\end{table}
+
+\subsection{Assessment}
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{@{}llr@{}}
+\toprule
+\textbf{Class} & \textbf{File Path} & \textbf{Lines} \\
+\midrule
+\texttt{ConsciousnessAssessment} & \texttt{mtc/assessment/assessment.py}        & 2{,}000 \\
+\texttt{ConsciousnessReport}     & \texttt{mtc/assessment/assessment.py}        & (same) \\
+\texttt{RPTMeasurement}          & \texttt{mtc/assessment/rpt\_measurement.py}  & 568 \\
+\texttt{DCMScorer}               & \texttt{mtc/assessment/dcm\_scoring.py}      & varies \\
+\texttt{AblationStudy}           & \texttt{mtc/assessment/assessment.py}        & (same) \\
+\bottomrule
+\end{tabular}
+\caption{Assessment classes.}
+\label{tab:assessment-files}
+\end{table}
+
+\subsection{Data Structures}
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{@{}lp{5.5cm}p{5.5cm}@{}}
+\toprule
+\textbf{Structure} & \textbf{Defined In} & \textbf{Purpose} \\
+\midrule
+\texttt{ConsciousnessState}    & \texttt{enhanced\_global\_workspace.py}      & Complete output of one consciousness cycle \\
+\texttt{WorkspaceCandidate}    & \texttt{enhanced\_global\_workspace.py}      & Item competing for workspace access \\
+\texttt{IndicatorResult}       & \texttt{assessment.py}                       & Single indicator measurement \\
+\texttt{ConsciousMoment}       & \texttt{beautiful\_loop/\_\_init\_\_.py}     & Output of Beautiful Loop processing \\
+\texttt{BodyState}             & \texttt{damasio/protoself.py}                & Five-dimensional body representation (plus dictionary field) \\
+\texttt{SomaticMarker}         & \texttt{damasio/core\_consciousness.py}      & Emotional tag on workspace content \\
+\texttt{BoundPercept}          & \texttt{beautiful\_loop/bayesian\_binding.py} & Unified conscious percept \\
+\texttt{HigherOrderThought}    & \texttt{metacognition.py}                    & Meta-representation of a mental state \\
+\texttt{AttentionSchemaState}  & \texttt{attention\_schema.py}                & Snapshot of attention self-model \\
+\texttt{ActiveInferenceState}  & \texttt{active\_inference.py}                & FEP state including beliefs and free energy \\
+\bottomrule
+\end{tabular}
+\caption{Key data structures.}
+\label{tab:data-structures}
+\end{table}

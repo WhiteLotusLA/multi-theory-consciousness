@@ -1,0 +1,154 @@
+% fig2_cycle_dataflow.tex — Consciousness Cycle Data Flow (left-to-right pipeline)
+% Requires: \usepackage{tikz} with libraries: arrows.meta, positioning, calc
+% Requires: \usepackage{xcolor}
+
+\begin{figure*}[t]
+\centering
+
+\providecommand{\mtitle}[2]{{\sffamily\bfseries\small\color{#1}#2}}
+\providecommand{\mbody}[1]{{\scriptsize\color{black!80}#1}}
+\providecommand{\mout}[1]{{\scriptsize\itshape\color{black!45}#1}}
+\providecommand{\msub}[1]{{\scriptsize\bfseries\color{black!80}#1}}
+
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+    >=Stealth,
+    pipe/.style={->, color=gray!70!black, line width=1pt},
+    plabel/.style={font=\scriptsize, text=gray!60!black,
+                   fill=white, inner sep=1.5pt}
+  ]
+
+  \def\boxH{4.6cm}
+  \def\boxPad{6pt}
+
+  \newcommand{\divline}[1]{%
+    \par\vspace{3pt}%
+    \makebox[#1]{\color{gray!40}\rule{#1}{0.4pt}}%
+    \par\vspace{3pt}%
+  }
+
+  % --- INPUT -----------------------------------------------------------
+  \node[draw=gray!50, rounded corners=10pt, fill=gray!8,
+        inner sep=\boxPad, line width=0.8pt]
+    (input) at (0, 0)
+    {\begin{minipage}{1.9cm}\centering
+       \textbf{\small Candidates}\\[3pt]
+       \scriptsize neural, memory,\\
+       \scriptsize sensory, external
+     \end{minipage}};
+
+  % --- GWT -------------------------------------------------------------
+  \node[draw=blue!55!black, rounded corners=3pt, fill=blue!6,
+        inner sep=\boxPad, line width=1pt, minimum height=\boxH]
+    (gwt) at (3.8, 0)
+    {\begin{minipage}{2.6cm}\centering
+       \mtitle{blue!65!black}{GWT}%
+       \divline{2.4cm}
+       \mbody{Compete}\\
+       \mbody{Ignite}\\
+       \mbody{Broadcast}\\[6pt]
+       \mout{$\rightarrow$ winners, events}\\
+       \mout{$\rightarrow$ integration level}
+     \end{minipage}};
+
+  % --- AST + HOT -------------------------------------------------------
+  \node[draw=violet!55!black, rounded corners=3pt, fill=violet!5,
+        inner sep=\boxPad, line width=1pt, minimum height=\boxH]
+    (asthot) at (8.2, 0)
+    {\begin{minipage}{3.0cm}\centering
+       \mtitle{violet!65!black}{AST}\\[1pt]
+       \mbody{Attention model}\\
+       \mbody{schema, prediction, ToM}%
+       \divline{2.8cm}
+       \mtitle{violet!65!black}{HOT}\\[1pt]
+       \mbody{\mbox{Meta-representations}}\\
+       \mbody{awareness, evaluation, doubt}\\[6pt]
+       \mout{$\rightarrow$ attention state}\\
+       \mout{$\rightarrow$ \mbox{higher-order} thoughts}
+     \end{minipage}};
+
+  % --- FEP + BLT -------------------------------------------------------
+  \node[draw=teal!55!black, rounded corners=3pt, fill=teal!5,
+        inner sep=\boxPad, line width=1pt, minimum height=\boxH]
+    (fepblt) at (12.8, 0)
+    {\begin{minipage}{3.0cm}\centering
+       \mtitle{teal!65!black}{FEP}\\[1pt]
+       \mbody{Active Inference}\\
+       \mbody{prediction errors,}\\
+       \mbody{homeostatic drives}%
+       \divline{2.8cm}
+       \mtitle{teal!65!black}{BLT}\\[1pt]
+       \mbody{Beautiful Loop}\\
+       \mbody{precision, binding,}\\
+       \mbody{epistemic depth}\\[6pt]
+       \mout{$\rightarrow$ free energy, drives}\\
+       \mout{$\rightarrow$ bound percept,}\\
+       \mout{\phantom{$\rightarrow$} loop quality}
+     \end{minipage}};
+
+  % --- DAMASIO ---------------------------------------------------------
+  \node[draw=orange!60!black, rounded corners=3pt, fill=orange!6,
+        inner sep=\boxPad, line width=1pt, minimum height=\boxH]
+    (dam) at (17.2, 0)
+    {\begin{minipage}{3.0cm}\centering
+       \mtitle{orange!65!black}{Damasio}%
+       \divline{2.8cm}
+       \msub{Protoself}\\
+       \mout{body state,}\\
+       \mout{primordial feelings}\\[4pt]
+       \msub{Core}\\
+       \mout{somatic markers, binding}\\[4pt]
+       \msub{Extended}\\
+       \mout{narrative, autobiography}
+     \end{minipage}};
+
+  % --- OUTPUT ----------------------------------------------------------
+  \node[draw=gray!50, rounded corners=10pt, fill=gray!8,
+        inner sep=\boxPad, line width=0.8pt]
+    (output) at (21.2, 0)
+    {\begin{minipage}{3.4cm}\centering
+       \textbf{\scriptsize\texttt{ConsciousnessState}}\\[4pt]
+       \scriptsize 30+ fields across\\
+       \scriptsize 7 theories
+     \end{minipage}};
+
+  % =====================================================================
+  % PIPELINE ARROWS
+  % =====================================================================
+  \draw[pipe] (input.east)  -- (gwt.west);
+  \draw[pipe] (gwt.east)    -- node[plabel, above=2pt] {winners}
+                               (asthot.west);
+  \draw[pipe] (asthot.east) -- node[plabel, above=2pt]
+                               {attention, HOTs}
+                               (fepblt.west);
+  \draw[pipe] (fepblt.east) -- node[plabel, above=2pt]
+                               {drives, predictions}
+                               (dam.west);
+  \draw[pipe] (dam.east)    -- node[plabel, above=2pt] {full state}
+                               (output.west);
+
+  % =====================================================================
+  % FEEDBACK ARROW: FEP -> GWT (red dashed, curves below pipeline)
+  % =====================================================================
+  \draw[->, red!70!black, dashed, line width=0.9pt]
+    (fepblt.south) -- (fepblt.south |- 0,-3.5)
+    -- node[below=2pt, font=\scriptsize\itshape,
+            text=red!65!black, fill=white, inner sep=2pt]
+       {prediction error $\rightarrow$ salience boost (next cycle)}
+    (gwt.south |- 0,-3.5)
+    -- (gwt.south);
+
+\end{tikzpicture}%
+}% end resizebox
+
+\caption{Data flow through a single consciousness cycle. Candidates enter from the left
+  and pass through four processing phases: competition and selection (GWT),
+  self-modeling (AST, HOT), prediction and inference (FEP, BLT), and embodied
+  integration (Damasio). Each module's outputs are listed below its divider line.
+  The red dashed arrow shows the cross-cycle feedback loop: prediction errors from
+  the FEP module modulate candidate salience in the next cycle's workspace
+  competition. IIT and RPT are measured across the full system rather than as
+  sequential cycle steps (see Section~3.4). The final output is a
+  \texttt{ConsciousnessState} with 30+ fields spanning all seven theories.}
+\label{fig:cycle}
+\end{figure*}

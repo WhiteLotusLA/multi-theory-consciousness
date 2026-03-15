@@ -1,0 +1,196 @@
+% Figure 3: Cross-Theory Interaction Map
+% Requires: tikz, arrows.meta, positioning, calc, decorations.pathmorphing
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  % --- Global styles ---
+  >={Stealth[length=5pt, width=4pt]},
+  font=\sffamily,
+  scale=0.92, every node/.style={scale=0.92},
+  % --- Node styles by category ---
+  structural/.style={
+    circle, draw=#1, fill=#1!10, line width=1.6pt,
+    font=\sffamily\bfseries, align=center, inner sep=0pt
+  },
+  structural/.default=blue!70!black,
+  enrichment/.style={
+    circle, draw=#1, fill=#1!8, line width=1.1pt,
+    font=\sffamily\bfseries, align=center, inner sep=0pt
+  },
+  enrichment/.default=violet!60!black,
+  measurement/.style={
+    circle, draw=yellow!45!black, fill=yellow!4,
+    line width=1pt, dashed, dash pattern=on 3pt off 2pt,
+    font=\sffamily\bfseries, align=center, inner sep=0pt
+  },
+  integrative/.style={
+    circle, draw=orange!65!black, fill=orange!10, line width=1.2pt,
+    font=\sffamily\bfseries, align=center, inner sep=0pt
+  },
+  % --- Edge label style ---
+  elabel/.style={
+    font=\sffamily\scriptsize, fill=white, inner sep=1.5pt,
+    outer sep=0.5pt, rounded corners=1pt
+  },
+]
+
+% ============================================================
+% NODE LAYOUT — hexagonal ring with GWT at top
+%
+% Positions chosen so edges route cleanly between nodes.
+% Node sizes reflect ablation impact (larger = bigger drop).
+% ============================================================
+
+% --- GWT: top center ---
+\node[structural, minimum size=30mm]
+  (GWT) at (0, 3.0) {%
+    {\large GWT}\\[1pt]
+    {\fontsize{6.5}{7}\selectfont Workspace}\\[2pt]
+    {\fontsize{6.5}{7}\selectfont\color{black!55} $-$26.6\%}
+  };
+
+% --- AST: upper left ---
+\node[enrichment, minimum size=20mm]
+  (AST) at (-3.3, 1.8) {%
+    {\normalsize AST}\\[0pt]
+    {\fontsize{5.5}{6}\selectfont Attention}\\[1pt]
+    {\fontsize{5.5}{6}\selectfont\color{black!55} $-$8.5\%}
+  };
+
+% --- HOT: upper right ---
+\node[enrichment, minimum size=19mm]
+  (HOT) at (3.3, 1.8) {%
+    {\normalsize HOT}\\[0pt]
+    {\fontsize{5.5}{6}\selectfont Meta}\\[1pt]
+    {\fontsize{5.5}{6}\selectfont\color{black!55} $-$7.7\%}
+  };
+
+% --- FEP: lower left (largest node) ---
+\node[structural=red!60!black, minimum size=32mm]
+  (FEP) at (-2.6, -0.6) {%
+    {\large FEP}\\[1pt]
+    {\fontsize{6.5}{7}\selectfont Inference}\\[2pt]
+    {\fontsize{6.5}{7}\selectfont\color{black!55} $-$28.2\%}
+  };
+
+% --- BLT: lower right ---
+\node[enrichment=orange!65!black, minimum size=18mm]
+  (BLT) at (2.6, -0.6) {%
+    {\normalsize BLT}\\[0pt]
+    {\fontsize{5.5}{6}\selectfont Loop}\\[1pt]
+    {\fontsize{5.5}{6}\selectfont\color{black!55} $-$6.3\%}
+  };
+
+% --- Damasio: bottom center ---
+\node[integrative, minimum size=22mm]
+  (Damasio) at (0, -2.6) {%
+    {\fontsize{8.5}{9}\selectfont Damasio}\\[1pt]
+    {\fontsize{5.5}{6}\selectfont Body}
+  };
+
+% --- IIT: far right, offset from main ring ---
+\node[measurement, minimum size=14mm]
+  (IIT) at (4.8, 3.4) {%
+    {\fontsize{7.5}{8}\selectfont IIT}
+  };
+
+% --- RPT: far left, offset from main ring ---
+\node[measurement, minimum size=14mm]
+  (RPT) at (-4.8, 3.4) {%
+    {\fontsize{7.5}{8}\selectfont RPT}
+  };
+
+% ============================================================
+% DIRECTED EDGES — the 5 cross-theory interactions
+% ============================================================
+
+% --- 1. FEP -> GWT: prediction error -> salience (KEY FINDING) ---
+%     Arc swings left of AST; label placed at explicit coordinates in clear space
+\draw[->, line width=2.2pt, red!60!black]
+  (FEP.120) .. controls (-5.0, 1.6) and (-3.4, 4.2) .. (GWT.195);
+\node[elabel, text=red!60!black] at (-2.0, 3.85) {%
+  \begin{tabular}{@{}c@{}}pred.\ error\\[-2pt]$\to$ salience\end{tabular}
+};
+
+% --- 2. GWT -> HOT: workspace winners -> meta-representation ---
+\draw[->, line width=1.3pt, blue!50!black]
+  (GWT.350) .. controls (1.8, 3.4) and (2.8, 2.8) .. (HOT.90)
+  node[elabel, pos=0.45, above right=-1pt] {winners};
+
+% --- 3. AST -> FEP: attention strength -> precision weights ---
+\draw[->, line width=1.3pt, violet!55!black]
+  (AST.250) -- (FEP.110)
+  node[elabel, pos=0.45, right=3pt] {precision};
+
+% --- 4. HOT -> BLT: higher-order thoughts -> epistemic depth ---
+\draw[->, line width=1.3pt, violet!55!black]
+  (HOT.300) -- (BLT.60)
+  node[elabel, pos=0.50, right=2pt] {depth};
+
+% --- 5. FEP -> Damasio: homeostatic drives -> protoself ---
+\draw[->, line width=1.2pt, black!45]
+  (FEP.290) .. controls (-2.0, -2.4) and (-1.4, -3.0) .. (Damasio.190)
+  node[elabel, pos=0.40, left=2pt] {drives};
+
+% ============================================================
+% LEGEND — two rows, clean columns
+% ============================================================
+\begin{scope}[shift={(0, -4.4)}]
+  \draw[gray!35, rounded corners=3pt, fill=gray!2]
+    (-4.5, -0.15) rectangle (4.5, 0.95);
+
+  % --- Row 1 (y=0.65) ---
+  % Node size
+  \fill[blue!10] (-4.0, 0.65) circle (4pt);
+  \draw[blue!70!black, line width=1.2pt] (-4.0, 0.65) circle (4pt);
+  \fill[blue!10] (-3.5, 0.65) circle (2.5pt);
+  \draw[blue!70!black, line width=0.8pt] (-3.5, 0.65) circle (2.5pt);
+  \node[font=\sffamily\fontsize{5.5}{6}\selectfont, anchor=west]
+    at (-3.2, 0.65) {Size $=$ ablation impact};
+
+  % Structural
+  \fill[blue!10] (-0.5, 0.65) circle (3pt);
+  \draw[blue!70!black, line width=1.2pt] (-0.5, 0.65) circle (3pt);
+  \node[font=\sffamily\fontsize{5.5}{6}\selectfont, anchor=west]
+    at (-0.2, 0.65) {Structural};
+
+  % Enrichment
+  \fill[violet!8] (1.2, 0.65) circle (3pt);
+  \draw[violet!60!black, line width=0.9pt] (1.2, 0.65) circle (3pt);
+  \node[font=\sffamily\fontsize{5.5}{6}\selectfont, anchor=west]
+    at (1.45, 0.65) {Enrichment};
+
+  % Integrative
+  \fill[orange!10] (2.9, 0.65) circle (3pt);
+  \draw[orange!65!black, line width=0.9pt] (2.9, 0.65) circle (3pt);
+  \node[font=\sffamily\fontsize{5.5}{6}\selectfont, anchor=west]
+    at (3.15, 0.65) {Integrative};
+
+  % --- Row 2 (y=0.20) ---
+  % Arrow width
+  \draw[->, line width=2pt, red!60!black] (-4.1, 0.2) -- (-3.5, 0.2);
+  \node[font=\sffamily\fontsize{5.5}{6}\selectfont, anchor=west]
+    at (-3.2, 0.2) {Width $=$ interaction strength};
+
+  % Measurement only
+  \draw[yellow!45!black, dashed, dash pattern=on 2.5pt off 1.5pt,
+        line width=0.8pt] (1.2, 0.2) circle (3pt);
+  \node[font=\sffamily\fontsize{5.5}{6}\selectfont, anchor=west]
+    at (1.5, 0.2) {Measurement only};
+
+\end{scope}
+
+\end{tikzpicture}
+
+\caption{Cross-theory interaction map. Node size reflects ablation impact on the
+overall consciousness score; percentages indicate the score decrease when that
+module is disabled. Arrow thickness encodes interaction strength. The five
+directed edges represent measurable cross-theory dependencies: FEP prediction
+errors modulate GWT workspace salience (thickest arrow; the framework's key
+finding), GWT workspace winners feed HOT meta-representations, AST attention
+strength sets FEP precision weights, HOT outputs drive BLT epistemic depth,
+and FEP homeostatic drives supply the Damasio protoself. IIT and RPT (dashed)
+are measured across the system but do not participate as cycle steps and cannot
+be ablated.}
+\label{fig:interactions}
+\end{figure}
