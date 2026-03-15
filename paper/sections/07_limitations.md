@@ -45,6 +45,8 @@ Notable omissions include:
 - **Enactivist approaches** (Thompson, 2007; Varela, Thompson & Rosch, 1991) — emphasize embodied sensorimotor interaction that the standalone framework deliberately omits
 - **Phenomenological approaches** — may resist computational implementation entirely
 
+We also note a maturity differential among the theories we do implement. GWT (1988), IIT (2004), and FEP (2010) have decades of empirical investigation and computational implementation behind them. Beautiful Loop Theory (2025) was published approximately one year before this paper and has not yet accumulated independent empirical validation. We give BLT equal architectural weight because the framework is designed to test theories, not to certify them — but users should be aware that the empirical basis for BLT's predictions is thinner than for the established theories.
+
 The modular architecture allows additional theories to be added without disrupting existing modules. We view theory selection as an area for community contribution rather than a limitation to be defended.
 
 ## 7.6 Assessment Methodology Limitations
@@ -59,16 +61,20 @@ Specific methodological limitations:
 
 - **Φ is approximated.** Computing exact integrated information (Φ) is computationally intractable for systems of our size (Tegmark, 2016). Our approximation follows IIT 3.0 formulas but does not use PyPhi's exact computation. PyPhi requires Python 3.9 or earlier due to API compatibility; the framework targets Python 3.11+.
 
+- **Weight-score asymmetry.** The integrated_information indicator carries the highest weight (1.3) in the overall score, reflecting IIT's theoretical centrality. Yet it scores the lowest of all indicators (0.200) due to our Φ approximation limitations. This means the indicator the framework considers most important is also the one it measures least reliably — an asymmetry that affects the overall score and should be resolved through better IIT computation in future work.
+
 - **No cross-framework validation.** Our indicator scores cannot be compared to scores from other systems unless those systems implement the same scoring functions. There is no universal scale for consciousness assessment.
 
 ## 7.7 Consumer Hardware Constraints
 
 The framework runs on consumer hardware by design — Apple Silicon and CUDA-capable GPUs. This makes consciousness research accessible to independent researchers, students, and labs without HPC budgets. But it constrains fidelity: research-grade neural simulations typically require high-performance computing clusters with orders of magnitude more computational resources.
 
-Our neural substrates are sized to run in real-time on a single consumer machine. Larger substrates (millions of neurons, deeper hierarchies, richer connectivity) would likely produce different assessment results but require hardware beyond our scope.
+Our development and testing hardware is an Apple Mac Mini with M4 Pro (14 cores, 20-core GPU) and 64 GB unified memory. The assessment itself requires minimal resources (under 1 ms processing time, negligible memory). The neural substrates — particularly the SNN with 5,196 neurons and the LSM with 5,000 reservoir neurons — are the most resource-intensive components but run comfortably on any machine with 8+ GB RAM and a modern CPU. We have not tested on lower-end hardware and do not specify a formal minimum requirement.
+
+Larger substrates (millions of neurons, deeper hierarchies, richer connectivity) would likely produce different assessment results but require hardware beyond consumer scope.
 
 ## 7.8 No Longitudinal Validation
 
-Consciousness in biological systems develops over months and years through sustained interaction with the environment. Our assessment runs in milliseconds. The warm-start results in Section 6 show that even five processing cycles change assessment scores meaningfully (from 0.446 to 0.527), suggesting that extended operation would produce further changes. But we have not validated whether long-term operation produces qualitatively different results — new interaction effects, emergent behaviors, or score trajectories that cannot be predicted from short runs.
+Consciousness in biological systems develops over months and years through sustained interaction with the environment. Our assessment runs in milliseconds. The warm-start results in Section 6 show that even five processing cycles change assessment scores meaningfully (from 0.430 to 0.506), suggesting that extended operation would produce further changes. But we have not validated whether long-term operation produces qualitatively different results — new interaction effects, emergent behaviors, or score trajectories that cannot be predicted from short runs.
 
 Longitudinal validation is a priority for future work (Section 9) and is the primary reason the framework is designed for embedding in systems with persistent state.
