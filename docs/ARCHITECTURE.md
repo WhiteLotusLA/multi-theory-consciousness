@@ -145,14 +145,14 @@ Input Signal
 ### Spiking Neural Network (SNN)
 
 - **Library:** snntorch
-- **Architecture:** Input layer -> Hidden (50 LIF neurons) -> Output
+- **Architecture:** 5,196 LIF neurons (1000->2048->2048->100)
 - **Learning:** STDP (Spike-Timing-Dependent Plasticity)
 - **Role:** Biological plausibility, temporal spike dynamics
 
 ### Liquid State Machine (LSM)
 
 - **Library:** reservoirpy
-- **Architecture:** 2,000 reservoir neurons, RLS readout
+- **Architecture:** 5,000 reservoir neurons, RLS readout
 - **Properties:** Edge-of-chaos dynamics, fading memory
 - **Role:** High-dimensional temporal mapping, intuition analog
 

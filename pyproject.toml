@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "multi-theory-consciousness"
@@ -27,7 +27,6 @@ keywords = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -48,7 +47,7 @@ neural = [
     "reservoirpy>=0.4",
 ]
 fep = [
-    "pymdp>=1.0",
+    "inferactively-pymdp>=0.0.7",
 ]
 databases = [
     "redis>=5.0",
@@ -73,8 +72,8 @@ all = [
 Repository = "https://github.com/WhiteLotusLA/multi-theory-consciousness"
 Documentation = "https://github.com/WhiteLotusLA/multi-theory-consciousness/tree/master/docs"
 
-[project.scripts]
-mtc-assess = "scripts.run_assessment:main"
+# Note: CLI entry point removed -- run assessment via:
+#   python scripts/run_assessment.py --full --report
 
 [tool.setuptools.packages.find]
 include = ["mtc*"]

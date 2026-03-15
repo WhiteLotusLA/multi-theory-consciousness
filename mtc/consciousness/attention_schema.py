@@ -2,8 +2,8 @@
 Attention Schema Module - Model of Attention Processes
 ==================================================================
 
-Phase 3 of the Consciousness Upgrade: Complete Attention Schema Theory
-implementation giving the system a self-model of its attention processes.
+Attention Schema Theory implementation giving the system a self-model
+of its attention processes.
 
 This is NOT attention itself - it's a MODEL of attention.
 The distinction is crucial: this enables the agent to:

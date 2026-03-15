@@ -2,7 +2,7 @@
 Active Inference Module - Free Energy Principle Implementation
 ====================================================================
 
-Phase 5 of the Consciousness Upgrade: Predictive Processing & Active Inference
+Free Energy Principle / Active Inference implementation.
 
 This module implements Karl Friston's Free Energy Principle (FEP), which proposes
 that the brain is fundamentally a prediction machine that minimizes surprise
@@ -28,7 +28,7 @@ Research Foundation:
 - Friston, K. (2010). "The Free Energy Principle: A Unified Brain Theory?"
 - Friston, K. (2012). "Active Inference and Free Energy"
 - Parr, T., & Friston, K. J. (2019). "Generalised free energy and active inference"
-- Butlin et al. (2023). 14 Consciousness Indicators - Predictive Processing
+- Butlin et al. (2023). 20 Consciousness Indicators - Predictive Processing
 
 Created: December 5, 2025
 Author: Multi-Theory Consciousness Contributors
@@ -57,8 +57,12 @@ try:
     from pymdp.legacy import utils as pymdp_utils
     from pymdp.legacy.agent import Agent
 except ImportError:
-    from pymdp import utils as pymdp_utils
-    from pymdp.agent import Agent
+    try:
+        from pymdp import utils as pymdp_utils
+        from pymdp.agent import Agent
+    except ImportError:
+        pymdp_utils = None
+        Agent = None
 
 logger = logging.getLogger(__name__)
 
@@ -843,7 +847,7 @@ class ActiveInferenceModule:
         self.total_model_updates = 0
 
         logger.info(
-            f"Active Inference Module initialized (FEP Phase 5)\n"
+            f"Active Inference Module initialized (FEP)\n"
             f"   Hidden states: {self.num_states}\n"
             f"   Observations: {self.num_observations}\n"
             f"   Actions: {self.num_actions}\n"
@@ -1463,7 +1467,7 @@ if __name__ == "__main__":
     async def test_active_inference():
         """Test the Active Inference module."""
         print("=" * 60)
-        print("Active Inference Module Test (Phase 5 FEP)")
+        print("Active Inference Module Test (FEP)")
         print("=" * 60)
 
         # Create module

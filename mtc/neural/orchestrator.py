@@ -321,7 +321,7 @@ class NeuralOrchestrator:
                     amplification_factor=2.0,
                     integration_dimensions=512,
                 )
-                logger.info("Enhanced Global Workspace initialized (GWT Phase 2)")
+                logger.info("Enhanced Global Workspace initialized (GWT)")
             except Exception as e:
                 logger.warning(f"Enhanced workspace initialization failed: {e}")
 
@@ -631,13 +631,13 @@ class NeuralOrchestrator:
 
     async def measure_consciousness(self):
         """
-        Measure current consciousness across 14 indicators.
+        Measure current consciousness across 20 indicators.
 
         This integrates actual neural states (SNN, LSM, HTM) with memories
         and thoughts to produce research-grade consciousness measurements.
 
         Returns:
-            ConsciousnessMetrics with 14 indicators or None if framework unavailable
+            ConsciousnessMetrics with 20 indicators or None if framework unavailable
         """
         if not self.consciousness_framework:
             logger.warning("Consciousness framework not available for measurement")

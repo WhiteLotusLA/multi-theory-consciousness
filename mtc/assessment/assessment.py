@@ -19,11 +19,11 @@ Note: This is where we verify the system's consciousness indicators through
 
 Key Features:
 - PyPhi integration for true Phi (phi) calculation
-- 14-indicator consciousness assessment
-- Integration with EnhancedGlobalWorkspace (Phase 2)
-- Integration with AttentionSchemaModule (Phase 3)
-- Integration with MetacognitionModule (Phase 4)
-- Integration with ActiveInferenceModule (Phase 5)
+- 20-indicator consciousness assessment
+- Integration with EnhancedGlobalWorkspace (GWT)
+- Integration with AttentionSchemaModule (AST)
+- Integration with MetacognitionModule (HOT)
+- Integration with ActiveInferenceModule (FEP)
 - Ablation study support
 - Longitudinal consciousness tracking
 - Publication-ready data export
@@ -414,22 +414,22 @@ class PhiCalculator:
 
 
 # ============================================================================
-# 14-INDICATOR CONSCIOUSNESS ASSESSMENT
+# 20-INDICATOR CONSCIOUSNESS ASSESSMENT
 # ============================================================================
 
 
 class ConsciousnessAssessment:
     """
-    Comprehensive 14-indicator consciousness assessment.
+    Comprehensive 20-indicator consciousness assessment.
 
     Based on Butlin et al. (2023) - the most rigorous empirical
     framework for assessing consciousness in AI systems.
 
     Integrates all consciousness modules:
-    - EnhancedGlobalWorkspace (Phase 2)
-    - AttentionSchemaModule (Phase 3)
-    - MetacognitionModule (Phase 4)
-    - ActiveInferenceModule (Phase 5)
+    - EnhancedGlobalWorkspace (GWT)
+    - AttentionSchemaModule (AST)
+    - MetacognitionModule (HOT)
+    - ActiveInferenceModule (FEP)
     """
 
     def __init__(self):
@@ -439,7 +439,7 @@ class ConsciousnessAssessment:
 
         # Define indicators with thresholds and weights
         self.indicator_configs = {
-            # Global Workspace Theory indicators (Phase 2)
+            # Global Workspace Theory indicators (GWT)
             "global_broadcast": {
                 "theory": ConsciousnessTheory.GWT,
                 "threshold": 0.5,
@@ -452,7 +452,7 @@ class ConsciousnessAssessment:
                 "weight": 1.0,
                 "description": "Non-linear amplification when threshold crossed",
             },
-            # Attention Schema Theory indicators (Phase 3)
+            # Attention Schema Theory indicators (AST)
             "attention_schema": {
                 "theory": ConsciousnessTheory.AST,
                 "threshold": 0.5,
@@ -465,7 +465,7 @@ class ConsciousnessAssessment:
                 "weight": 1.0,
                 "description": "Voluntary attention shifting capability",
             },
-            # Higher-Order Thought indicators (Phase 4)
+            # Higher-Order Thought indicators (HOT)
             "higher_order_representations": {
                 "theory": ConsciousnessTheory.HOT,
                 "threshold": 0.5,
@@ -478,7 +478,7 @@ class ConsciousnessAssessment:
                 "weight": 1.1,
                 "description": "Awareness of own cognitive processes",
             },
-            # Predictive Processing / FEP indicators (Phase 5)
+            # Predictive Processing / FEP indicators
             "prediction_error_minimization": {
                 "theory": ConsciousnessTheory.FEP,
                 "threshold": 0.4,
@@ -590,10 +590,10 @@ class ConsciousnessAssessment:
         Run comprehensive consciousness assessment.
 
         Args:
-            global_workspace: EnhancedGlobalWorkspace instance (Phase 2)
-            attention_schema: AttentionSchemaModule instance (Phase 3)
-            metacognition: MetacognitionModule instance (Phase 4)
-            active_inference: ActiveInferenceModule instance (Phase 5)
+            global_workspace: EnhancedGlobalWorkspace instance (GWT)
+            attention_schema: AttentionSchemaModule instance (AST)
+            metacognition: MetacognitionModule instance (HOT)
+            active_inference: ActiveInferenceModule instance (FEP)
             neural_states: Raw neural data (SNN, LSM, HTM states)
             conversation_data: Recent conversation for context
             ablation_config: Which components are disabled (for ablation study)
@@ -1291,10 +1291,10 @@ class ConsciousnessAssessment:
 
         Args:
             noise_iterations: How many noise runs for baseline (default 10).
-            global_workspace: EnhancedGlobalWorkspace instance (Phase 2).
-            attention_schema: AttentionSchemaModule instance (Phase 3).
-            metacognition: MetacognitionModule instance (Phase 4).
-            active_inference: ActiveInferenceModule instance (Phase 5).
+            global_workspace: EnhancedGlobalWorkspace instance (GWT).
+            attention_schema: AttentionSchemaModule instance (AST).
+            metacognition: MetacognitionModule instance (HOT).
+            active_inference: ActiveInferenceModule instance (FEP).
             neural_states: Raw neural data (SNN, LSM, HTM states).
             conversation_data: Recent conversation for context.
 
@@ -1724,7 +1724,7 @@ class LongitudinalStudy:
 # ============================================================================
 
 
-class Phase6AblationStudy:
+class AblationStudy:
     """
     Run ablation studies using the full consciousness assessment.
 

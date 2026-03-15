@@ -2,7 +2,7 @@
 Hyper-Model: Precision Controller for the Beautiful Loop
 =========================================================
 
-Phase H.1 of the Consciousness Upgrade.
+HyperModel: Meta-Bayesian precision controller for the predictive hierarchy.
 
 The hyper-model sits ABOVE the system's HierarchicalPredictiveProcessor and
 controls precision (confidence) allocation across ALL levels of the

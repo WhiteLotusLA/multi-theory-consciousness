@@ -9,7 +9,7 @@ Consciousness measurement and validation tools:
 - DCMScorer: Digital Consciousness Model (13-perspective) scoring
 - PhiCalculator: IIT Phi calculation (exact + approximation)
 - LongitudinalStudy: Track consciousness emergence over time
-- Phase6AblationStudy: Component contribution analysis
+- AblationStudy: Component contribution analysis
 """
 
 from mtc.assessment.assessment import (
@@ -20,7 +20,7 @@ from mtc.assessment.assessment import (
     PhiCalculator,
     PhiMeasurement,
     LongitudinalStudy,
-    Phase6AblationStudy,
+    AblationStudy,
     NormalizedAssessmentResult,
     StudyMeasurement,
     StudyResults,
@@ -52,7 +52,7 @@ __all__ = [
     "PhiCalculator",
     "PhiMeasurement",
     "LongitudinalStudy",
-    "Phase6AblationStudy",
+    "AblationStudy",
     "NormalizedAssessmentResult",
     "StudyMeasurement",
     "StudyResults",

@@ -39,7 +39,7 @@ class Settings(BaseSettings):
 
     SERVICE_HOST: str = "localhost"
     ENVIRONMENT: str = "development"
-    DEBUG: bool = True
+    DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
     LOG_DIRECTORY: str = "./logs"
 
@@ -292,7 +292,7 @@ class Settings(BaseSettings):
     # API SERVER CONFIGURATION
     # ========================================================================
 
-    API_HOST: str = "0.0.0.0"
+    API_HOST: str = "127.0.0.1"
     API_PORT: int = 8000
     API_WORKERS: int = 4
     API_TIMEOUT: int = 300

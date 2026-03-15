@@ -2,7 +2,7 @@
 Beautiful Loop: Integrated Consciousness Theory Implementation
 ===============================================================
 
-Phase H.4 of the Consciousness Upgrade.
+Beautiful Loop Theory integration module.
 
 The Beautiful Loop (Laukkonen, Friston & Chandaria 2025) proposes that
 consciousness arises from a self-referential predictive processing loop:
@@ -176,7 +176,7 @@ class BeautifulLoop:
             prediction_errors: Prediction errors from hierarchy levels
             workspace_winners: GWT workspace winner content objects
             inference_result: Active inference result (for posterior beliefs)
-            self_model: The Phase 3.4 SelfModel
+            self_model: The SelfModel
             meta_state: MetaState from active inference
             higher_order_thoughts: HOTs from metacognition
             attention_schema_state: AttentionSchemaState from AST

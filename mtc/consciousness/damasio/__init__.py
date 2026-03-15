@@ -2,7 +2,7 @@
 Damasio Three-Layer Consciousness Model
 ========================================
 
-Phase J of the Consciousness Upgrade.
+Damasio's Three-Layer Consciousness Model implementation.
 
 Implements Damasio's three-layer consciousness structure:
 
