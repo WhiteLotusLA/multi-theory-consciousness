@@ -1,6 +1,6 @@
 # 6. Results
 
-We report assessment results under two conditions: cold start (modules freshly initialized with no accumulated state) and warm start (modules exercised through five consciousness cycles with synthetic stimuli before assessment). The cold-start condition serves as a controlled baseline; the warm-start condition demonstrates the effect of even minimal operational history on assessment scores. Warm-start results are reported as means ± standard deviations across five independent runs.
+We report assessment results under two conditions: cold start (modules freshly initialized with no accumulated state) and warm start (modules exercised through five consciousness cycles with synthetic stimuli before assessment). The cold-start condition serves as a controlled baseline; the warm-start condition demonstrates the effect of even minimal operational history on assessment scores. Cold-start results are perfectly deterministic (repeated runs return identical scores). Warm-start results are reported as means ± standard deviations across ten independent runs.
 
 All results were obtained on consumer hardware (Apple M4 Pro, 64 GB unified memory). Assessment processing time was under 1 ms in all conditions.
 
@@ -33,7 +33,7 @@ The architecture does not meet the "functional" criterion at cold start because 
 
 ## 6.2 Warm-Start Assessment
 
-After five consciousness cycles with synthetic stimuli (random workspace candidates with varying salience, emotional charge, and novelty), the framework scores improve substantially. Results across five independent runs:
+After five consciousness cycles with synthetic stimuli (random workspace candidates with varying salience, emotional charge, and novelty), the framework scores improve substantially. Results across ten independent runs:
 
 | Metric | Value |
 |--------|-------|
@@ -152,7 +152,7 @@ python scripts/run_assessment.py --full --report
 python scripts/run_assessment.py --full --ablation
 ```
 
-Cold-start results are perfectly deterministic. Warm-start results vary by ± 0.007 (standard deviation across 5 runs) due to random synthetic stimuli during warmup. All commands complete in under 5 seconds on consumer hardware.
+Cold-start results are perfectly deterministic. Warm-start results vary by ± 0.007 (standard deviation across 10 runs, range 0.493–0.517) due to random synthetic stimuli during warmup. Passing indicator count showed zero variance: all 10 runs produced exactly 14/20 passing. All commands complete in under 5 seconds on consumer hardware.
 
 The assessment does not require GPUs, network access, or external databases. It runs entirely on CPU using the framework's own modules. This is deliberate: reproducibility requires that no external dependencies affect the results.
 
