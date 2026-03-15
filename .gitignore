@@ -47,6 +47,9 @@ logs/
 mlx_models/
 models/
 
+# Private outreach (emails, strategy docs)
+docs/outreach/
+
 # OS
 .DS_Store
 Thumbs.db
