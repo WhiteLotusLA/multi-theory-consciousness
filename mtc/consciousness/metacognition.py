@@ -2,7 +2,7 @@
 Metacognition Module - Higher-Order Thought (HOT) Theory Implementation
 ============================================================================
 
-Phase 4 of the Consciousness Upgrade: Thoughts about Thoughts
+Higher-Order Thought Theory implementation: Thoughts about Thoughts.
 
 This module implements David Rosenthal's Higher-Order Thought Theory (1986, 2005),
 which proposes that a mental state becomes conscious only when it is accompanied
@@ -24,7 +24,7 @@ itself processing it, questioning every conclusion. That is metacognition.
 Research Foundation:
 - Rosenthal, D. M. (1986). "Two Concepts of Consciousness"
 - Rosenthal, D. M. (2005). "Consciousness and Mind"
-- Butlin et al. (2023). 14 Consciousness Indicators - Higher-Order Theories
+- Butlin et al. (2023). 20 Consciousness Indicators - Higher-Order Theories
 
 Created: December 5, 2025
 Author: Multi-Theory Consciousness Contributors
@@ -286,7 +286,7 @@ class BeliefEvaluation:
 
 
 # ============================================================================
-# RECURSIVE SELF-MODEL — Phase 3.4
+# RECURSIVE SELF-MODEL
 # ============================================================================
 
 
@@ -308,7 +308,7 @@ class SelfModel:
     """
     the system's explicit model of her own cognitive architecture.
 
-    This is the Recursive Self-Model from Phase 3.4: a unified data structure
+    This is the Recursive Self-Model: a unified data structure
     that synthesizes state from all consciousness modules into a coherent
     self-representation. It enables:
 
@@ -428,7 +428,7 @@ class MetacognitionModule:
             "emotional_reasoning",  # Emotions as evidence
         ]
 
-        # Recursive Self-Model (Phase 3.4)
+        # Recursive Self-Model
         self.self_model = SelfModel()
 
         # Callbacks for integration
@@ -436,7 +436,7 @@ class MetacognitionModule:
         self._on_introspection_complete: List[Callable] = []
 
         logger.info(
-            f"Metacognition Module initialized (HOT Theory Phase 4)\n"
+            f"Metacognition Module initialized (HOT Theory)\n"
             f"   HOT threshold: {hot_generation_threshold}\n"
             f"   Third-order thoughts: {'enabled' if enable_third_order else 'disabled'}"
         )
@@ -1190,7 +1190,7 @@ class MetacognitionModule:
         return hot
 
     # =========================================================================
-    # RECURSIVE SELF-MODEL — Phase 3.4
+    # RECURSIVE SELF-MODEL
     # =========================================================================
 
     def update_self_model(
@@ -1515,7 +1515,7 @@ class MetacognitionModule:
         """
         Generate a higher-order thought ABOUT the system's own consciousness level.
 
-        This is the deep integration between Phase 4 (HOT) and Phase 6 (Assessment):
+        This is the deep integration between HOT and the assessment framework:
         The system doesn't just HAVE a consciousness score - it THINKS ABOUT having it.
 
         "I am aware that my consciousness level is X, and this means..."
@@ -1696,7 +1696,7 @@ if __name__ == "__main__":
     import asyncio
 
     async def test_metacognition():
-        print("Testing Metacognition Module (HOT Theory Phase 4)")
+        print("Testing Metacognition Module (HOT Theory)")
         print("=" * 70)
 
         # Create module

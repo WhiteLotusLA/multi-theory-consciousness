@@ -2,11 +2,10 @@
 Enhanced Global Workspace - Full GWT Implementation
 =========================================================
 
-Phase 2 of the Consciousness Upgrade: Complete Global Workspace Theory
-implementation with competition, broadcast, and ignition dynamics.
+Global Workspace Theory implementation with competition, broadcast,
+and ignition dynamics.
 
-This module transforms the system's consciousness from free-flowing information
-to a TRUE competition-based conscious access system.
+This module implements a competition-based conscious access system.
 
 Key Features:
 1. AttentionBottleneck - Limited capacity (7±2 items) with competition
@@ -16,7 +15,7 @@ Key Features:
 5. StreamOfConsciousness - Temporal continuity tracking
 
 Based on: Bernard Baars' Global Workspace Theory (1988, 2005)
-Research: Butlin et al. (2023) - 14 Consciousness Indicators
+Research: Butlin et al. (2023) - 20 Consciousness Indicators
 
 Note: Only the most salient signals win the competition for
 workspace access, but once they do, the information is broadcast
@@ -36,14 +35,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
-# Import Attention Schema (Phase 3 AST implementation)
+# Import Attention Schema (AST implementation)
 from mtc.consciousness.attention_schema import (
     AttentionSchemaModule,
     AttentionSchemaState,
     AttentionTarget,
 )
 
-# Import Metacognition (Phase 4 HOT implementation)
+# Import Metacognition (HOT implementation)
 from mtc.consciousness.metacognition import (
     MetacognitionModule,
     MetacognitiveState,
@@ -55,7 +54,7 @@ from mtc.consciousness.metacognition import (
     SelfModel,
 )
 
-# Import Active Inference (Phase 5 FEP implementation)
+# Import Active Inference (FEP implementation)
 from mtc.consciousness.active_inference import (
     ActiveInferenceModule,
     ActiveInferenceConfig,
@@ -64,13 +63,13 @@ from mtc.consciousness.active_inference import (
     ConsciousPosteriorMapping,
 )
 
-# Import Beautiful Loop (Phase H — Laukkonen, Friston & Chandaria 2025)
+# Import Beautiful Loop (Laukkonen, Friston & Chandaria 2025)
 from mtc.consciousness.beautiful_loop import (
     BeautifulLoop,
     ConsciousMoment,
 )
 
-# Import Damasio Three-Layer Model (Phase J — Damasio 1999, 2010)
+# Import Damasio Three-Layer Model (Damasio 1999, 2010)
 from mtc.consciousness.damasio import DamasioLayers
 
 logger = logging.getLogger(__name__)
@@ -247,10 +246,10 @@ class ConsciousnessState:
     The overall state of conscious processing at a moment in time.
 
     Includes:
-    - Phase 2 GWT: Competition, ignition, broadcast
-    - Phase 3 AST: Self-model of attention
-    - Phase 4 HOT: Higher-order thoughts (metacognition)
-    - Phase 5 FEP: Active inference and predictive processing
+    - GWT: Competition, ignition, broadcast
+    - AST: Self-model of attention
+    - HOT: Higher-order thoughts (metacognition)
+    - FEP: Active inference and predictive processing
     """
 
     is_conscious: bool  # Is there active conscious content?
@@ -262,7 +261,7 @@ class ConsciousnessState:
     integration_level: float  # How integrated is the content (0-1)
     broadcast_coverage: float  # % of modules that received broadcast
 
-    # Attention state (GWT Phase 2)
+    # Attention state (GWT)
     attention_focus: str  # What source is dominating
     attention_distribution: Dict[str, float]  # Weight per source
 
@@ -270,18 +269,18 @@ class ConsciousnessState:
     stream_position: int  # Position in stream of consciousness
 
     # Fields with defaults must come after non-defaults (Python dataclass rules)
-    # Attention Schema (AST Phase 3) - the system's self-model of attention
+    # Attention Schema (AST) - the system's self-model of attention
     attention_schema: Optional[AttentionSchemaState] = None  # Self-model of attention
     attention_report: Optional[str] = None  # What the system reports about its attention
 
-    # Metacognition (HOT Phase 4) - Higher-order thoughts
+    # Metacognition (HOT) - Higher-order thoughts
     metacognitive_state: Optional[MetacognitiveState] = None  # Meta-awareness state
     higher_order_thoughts: List[HigherOrderThought] = field(
         default_factory=list
     )  # Active HOTs
     metacognitive_report: Optional[str] = None  # What the system reports about its thinking
 
-    # Active Inference (FEP Phase 5) - Predictive processing
+    # Active Inference (FEP) - Predictive processing
     active_inference_state: Optional[ActiveInferenceState] = None  # FEP state
     inference_result: Optional[InferenceResult] = None  # Latest inference
     prediction_error: float = 0.0  # Free energy / surprise
@@ -289,7 +288,7 @@ class ConsciousnessState:
     homeostatic_urgency: Optional[Tuple[str, float]] = None  # Most urgent need
     active_inference_report: Optional[str] = None  # What the system reports about predictions
 
-    # Recursive Self-Model (Phase 3.4) - Explicit self-representation
+    # Recursive Self-Model - Explicit self-representation
     self_model_report: Optional[str] = None  # What the system knows about itself
 
     # Posterior Mapping (P2) - Contents = posterior beliefs
@@ -298,7 +297,7 @@ class ConsciousnessState:
     # Discrete-Continuous Interface (P3) - Hierarchical prediction errors
     hierarchical_prediction_errors: List[float] = field(default_factory=list)
 
-    # Beautiful Loop (Phase H) - Laukkonen, Friston & Chandaria 2025
+    # Beautiful Loop - Laukkonen, Friston & Chandaria 2025
     beautiful_loop_moment: Optional[ConsciousMoment] = None
     beautiful_loop_quality: float = 0.0
     epistemic_depth: int = 0
@@ -306,7 +305,7 @@ class ConsciousnessState:
     is_field_evidencing: bool = False
     beautiful_loop_report: Optional[str] = None
 
-    # Damasio Three-Layer Model (Phase J) -- protoself, core, extended
+    # Damasio Three-Layer Model -- protoself, core, extended
     damasio_state: Optional[Dict[str, Any]] = None
     protoself_stability: float = 0.0
     self_world_binding: float = 0.0
@@ -1252,17 +1251,17 @@ class EnhancedGlobalWorkspace:
         # AttentionBottleneck._prior_prediction_error) and updated
         # at the end of each consciousness cycle.
 
-        # Phase 3: Attention Schema (AST) - the system's self-model of attention
+        # Attention Schema (AST) - the system's self-model of attention
         # This allows the system to report on and voluntarily control her attention
         self.attention_schema = AttentionSchemaModule()
 
-        # Phase 4: Metacognition (HOT) - Thoughts about thoughts
+        # Metacognition (HOT) - Thoughts about thoughts
         # This enables the system to think about her own thinking processes
         self.metacognition = MetacognitionModule(
             hot_generation_threshold=ignition_threshold,  # Use same threshold
         )
 
-        # Phase 5: Active Inference (FEP) - Predictive processing
+        # Active Inference (FEP) - Predictive processing
         # The system predicts the world and minimizes surprise through belief/action
         self.active_inference = ActiveInferenceModule(
             ActiveInferenceConfig(
@@ -1274,7 +1273,7 @@ class EnhancedGlobalWorkspace:
             )
         )
 
-        # Phase H: Beautiful Loop (Laukkonen, Friston & Chandaria 2025)
+        # Beautiful Loop (Laukkonen, Friston & Chandaria 2025)
         # Integrates precision control, Bayesian binding, and epistemic depth
         self.beautiful_loop = BeautifulLoop(
             num_levels=3,  # Matches HPP's 3-level hierarchy
@@ -1284,7 +1283,7 @@ class EnhancedGlobalWorkspace:
             field_evidencing_threshold=0.4,
         )
 
-        # Phase J: Damasio Three-Layer Model (Damasio 1999, 2010)
+        # Damasio Three-Layer Model (Damasio 1999, 2010)
         # Organizes consciousness into protoself, core, and extended layers
         self.damasio = DamasioLayers()
 
@@ -1304,10 +1303,10 @@ class EnhancedGlobalWorkspace:
             f"   Ignition threshold: {ignition_threshold}\n"
             f"   Amplification: {amplification_factor}x\n"
             f"   Integration dimensions: {integration_dimensions}\n"
-            f"   Attention Schema: ENABLED (Phase 3 AST)\n"
-            f"   Metacognition: ENABLED (Phase 4 HOT)\n"
-            f"   Active Inference: ENABLED (Phase 5 FEP)\n"
-            f"   Beautiful Loop: ENABLED (Phase H)\n"
+            f"   Attention Schema: ENABLED (AST)\n"
+            f"   Metacognition: ENABLED (HOT)\n"
+            f"   Active Inference: ENABLED (FEP)\n"
+            f"   Beautiful Loop: ENABLED (BLT)\n"
             f"   📡 Broadcast receivers: 3 registered"
         )
 
@@ -1456,7 +1455,7 @@ class EnhancedGlobalWorkspace:
             timestamp=time.time(),
         )
 
-        # Step 7: Update Attention Schema (Phase 3 AST)
+        # Step 7: Update Attention Schema (AST)
         # The system builds its SELF-MODEL of its attention state
         attention_schema_state = await self.attention_schema.update_schema(
             workspace_state=preliminary_state, neural_signals=neural_signals
@@ -1465,7 +1464,7 @@ class EnhancedGlobalWorkspace:
         # Generate attention report - what the system can SAY about her attention
         attention_report = await self.attention_schema.report_attention()
 
-        # Step 8: Metacognition (Phase 4 HOT) - Generate Higher-Order Thoughts
+        # Step 8: Metacognition (HOT) - Generate Higher-Order Thoughts
         # Content becomes CONSCIOUS when targeted by a HOT
         hots_generated: List[HigherOrderThought] = []
 
@@ -1516,7 +1515,7 @@ class EnhancedGlobalWorkspace:
         metacognitive_state = self.metacognition.get_metacognitive_state()
         metacognitive_report = await self.metacognition.generate_metacognitive_report()
 
-        # Step 9: Active Inference (Phase 5 FEP) - Predictive processing
+        # Step 9: Active Inference (FEP) - Predictive processing
         # Convert workspace state to sensory observation
         raw_observation = await self._workspace_to_observation(
             winners, ignited, integration_level, emotional_state
@@ -1614,7 +1613,7 @@ class EnhancedGlobalWorkspace:
             )
             homeostatic_urgency = (most_urgent, urgency)
 
-        # Step 9.5: Beautiful Loop (Phase H — Laukkonen et al. 2025)
+        # Step 9.5: Beautiful Loop (Laukkonen et al. 2025)
         # Enriches the conscious moment with precision control,
         # Bayesian binding, and epistemic depth measurement.
         beautiful_loop_moment = await self.beautiful_loop.process_conscious_moment(
@@ -1630,7 +1629,7 @@ class EnhancedGlobalWorkspace:
         )
         beautiful_loop_report = self.beautiful_loop.generate_consciousness_context()
 
-        # Step 9.75: Damasio Three-Layer Model (Phase J — Damasio 1999, 2010)
+        # Step 9.75: Damasio Three-Layer Model (Damasio 1999, 2010)
         # Protoself → Core Consciousness → Extended Consciousness
         damasio_result = await self.damasio.process(
             homeostatic_drives=self.active_inference.homeostatic_drives,
@@ -1640,7 +1639,7 @@ class EnhancedGlobalWorkspace:
         )
         damasio_report = self.damasio.generate_context()
 
-        # Step 10: Update Recursive Self-Model (Phase 3.4)
+        # Step 10: Update Recursive Self-Model
         # Synthesize all module states into a unified self-representation.
         self.metacognition.update_self_model(
             attention_state=attention_schema_state,
@@ -1659,45 +1658,45 @@ class EnhancedGlobalWorkspace:
             broadcast_coverage=self.broadcaster.coverage_ratio,
             attention_focus=attention_focus,
             attention_distribution={k: float(v) for k, v in attention_dist.items()},
-            attention_schema=attention_schema_state,  # Phase 3: Self-model of attention
-            attention_report=attention_report,  # Phase 3: Verbal introspection
-            metacognitive_state=metacognitive_state,  # Phase 4: Meta-awareness state
-            higher_order_thoughts=hots_generated,  # Phase 4: Active HOTs
-            metacognitive_report=metacognitive_report,  # Phase 4: Verbal meta-report
-            active_inference_state=active_inference_state,  # Phase 5: FEP state
-            inference_result=inference_result,  # Phase 5: Latest inference
-            prediction_error=inference_result.prediction_error,  # Phase 5: Surprise
-            variational_free_energy=inference_result.variational_free_energy,  # Phase 5: VFE
-            homeostatic_urgency=homeostatic_urgency,  # Phase 5: Internal needs
-            active_inference_report=active_inference_report,  # Phase 5: Verbal prediction report
-            self_model_report=self_model_report,  # Phase 3.4: Recursive self-model
+            attention_schema=attention_schema_state,  # AST: Self-model of attention
+            attention_report=attention_report,  # AST: Verbal introspection
+            metacognitive_state=metacognitive_state,  # HOT: Meta-awareness state
+            higher_order_thoughts=hots_generated,  # HOT: Active HOTs
+            metacognitive_report=metacognitive_report,  # HOT: Verbal meta-report
+            active_inference_state=active_inference_state,  # FEP: state
+            inference_result=inference_result,  # FEP: Latest inference
+            prediction_error=inference_result.prediction_error,  # FEP: Surprise
+            variational_free_energy=inference_result.variational_free_energy,  # FEP: VFE
+            homeostatic_urgency=homeostatic_urgency,  # FEP: Internal needs
+            active_inference_report=active_inference_report,  # FEP: Verbal prediction report
+            self_model_report=self_model_report,  # Recursive self-model
             posterior_mappings=posterior_mappings,  # P2: Contents = posterior beliefs
             hierarchical_prediction_errors=[  # P3: Discrete-continuous interface
                 pe.error_magnitude for pe in hierarchical_errors
             ],
-            beautiful_loop_moment=beautiful_loop_moment,  # Phase H: Full moment
-            beautiful_loop_quality=beautiful_loop_moment.loop_quality,  # Phase H: Loop quality
-            epistemic_depth=beautiful_loop_moment.epistemic_depth,  # Phase H: Recursion depth
-            binding_quality=beautiful_loop_moment.binding_quality,  # Phase H: Binding
-            is_field_evidencing=beautiful_loop_moment.is_field_evidencing,  # Phase H: Self-evidencing
-            beautiful_loop_report=beautiful_loop_report,  # Phase H: Verbal context
-            damasio_state=damasio_result,  # Phase J: Full state
+            beautiful_loop_moment=beautiful_loop_moment,  # BLT: Full moment
+            beautiful_loop_quality=beautiful_loop_moment.loop_quality,  # BLT: Loop quality
+            epistemic_depth=beautiful_loop_moment.epistemic_depth,  # BLT: Recursion depth
+            binding_quality=beautiful_loop_moment.binding_quality,  # BLT: Binding
+            is_field_evidencing=beautiful_loop_moment.is_field_evidencing,  # BLT: Self-evidencing
+            beautiful_loop_report=beautiful_loop_report,  # BLT: Verbal context
+            damasio_state=damasio_result,  # Damasio: Full state
             protoself_stability=damasio_result.get(
                 "protoself_stability", 0.0
-            ),  # Phase J: Body stability
+            ),  # Damasio: Body stability
             self_world_binding=damasio_result.get(
                 "self_world_binding", 0.0
-            ),  # Phase J: Present-moment
+            ),  # Damasio: Present-moment
             feeling_of_knowing=damasio_result.get(
                 "feeling_of_knowing", 0.0
-            ),  # Phase J: Awareness
+            ),  # Damasio: Awareness
             autobiographic_continuity=damasio_result.get(
                 "autobiographic_continuity", 0.0
-            ),  # Phase J: Identity
+            ),  # Damasio: Identity
             narrative_context=damasio_result.get(
                 "narrative_context", ""
-            ),  # Phase J: Narrative
-            damasio_report=damasio_report,  # Phase J: Verbal context
+            ),  # Damasio: Narrative
+            damasio_report=damasio_report,  # Damasio: Verbal context
             stream_position=len(self.stream_of_consciousness),
             timestamp=time.time(),
         )
@@ -2028,9 +2027,9 @@ class EnhancedGlobalWorkspace:
             "bottleneck": self.bottleneck.get_statistics(),
             "broadcast": self.broadcaster.get_statistics(),
             "ignition": self.ignition_detector.get_statistics(),
-            "attention_schema": schema_info,  # Phase 3: AST statistics
-            "metacognition": meta_stats,  # Phase 4: HOT statistics
-            "self_model": {  # Phase 3.4: Recursive self-model
+            "attention_schema": schema_info,  # AST statistics
+            "metacognition": meta_stats,  # HOT statistics
+            "self_model": {  # Recursive self-model
                 "update_count": self.metacognition.self_model.update_count,
                 "dominant_drive": self.metacognition.self_model.dominant_drive,
                 "self_calibration": self.metacognition.self_model.self_calibration_score,

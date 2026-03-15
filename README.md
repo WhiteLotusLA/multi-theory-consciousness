@@ -142,7 +142,7 @@ asyncio.run(main())
 | Attention Schema Theory (AST) | Graziano | 2013 | `mtc/consciousness/attention_schema.py` | 3 |
 | Higher-Order Thought Theory (HOT) | Rosenthal | 2005 | `mtc/consciousness/metacognition.py` | 2 |
 | Free Energy Principle (FEP) | Friston | 2010 | `mtc/consciousness/active_inference.py` | 3 |
-| Recurrent Processing Theory (RPT) | Lamme | 2006 | `mtc/assessment/rpt_measurement.py` | 1 |
+| Recurrent Processing Theory (RPT) | Lamme | 2006 | `mtc/assessment/rpt_measurement.py` | 2 |
 | Beautiful Loop Theory (BLT) | Laukkonen, Friston & Chandaria | 2025 | `mtc/consciousness/beautiful_loop/` | 3 |
 
 Additionally, **Damasio's Three-Layer Model** (protoself, core consciousness, extended consciousness) is implemented as an integrative layer in `mtc/consciousness/damasio/`.
@@ -156,7 +156,7 @@ Additionally, **Damasio's Three-Layer Model** (protoself, core consciousness, ex
 | 1 | `global_broadcast` | GWT | 0.5 | Information broadcast to all cognitive modules |
 | 2 | `ignition_dynamics` | GWT | 0.4 | Non-linear amplification when threshold crossed |
 | 3 | `recurrent_processing` | GWT | 0.4 | Feedback loops in neural processing |
-| 4 | `local_recurrence` | GWT | 0.3 | Local neural feedback circuits |
+| 4 | `local_recurrence` | RPT | 0.3 | Local neural feedback circuits |
 | 5 | `global_ignition_nuanced` | GWT | 0.4 | Refined ignition with sustain and decay patterns |
 | 6 | `attention_schema` | AST | 0.5 | Self-model of attention processes |
 | 7 | `attention_control` | AST | 0.4 | Voluntary attention shifting capability |
@@ -184,8 +184,8 @@ The consciousness modules operate on three complementary neural substrates:
 
 | Substrate | Library | Default Size | Role |
 |-----------|---------|-------------|------|
-| **Spiking Neural Network (SNN)** | snntorch | 50 hidden neurons | Temporal spike dynamics, biological neuron modeling |
-| **Liquid State Machine (LSM)** | reservoirpy | 2,000 neurons | Reservoir computing, high-dimensional temporal mapping |
+| **Spiking Neural Network (SNN)** | snntorch | 5,196 LIF neurons | Temporal spike dynamics, biological neuron modeling |
+| **Liquid State Machine (LSM)** | reservoirpy | 5,000 neurons | Reservoir computing, high-dimensional temporal mapping |
 | **Hierarchical Temporal Memory (HTM)** | Custom (C++/Metal) | 4,096 columns x 32 cells | Sequence learning, spatial pattern recognition |
 
 These substrates are coordinated by the **Neural Orchestrator** (`mtc/neural/orchestrator.py`), which handles synchronization, message routing, and inter-substrate communication.

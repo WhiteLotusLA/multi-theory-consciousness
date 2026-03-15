@@ -19,11 +19,11 @@ Implementation approach:
   - Generates comparative reports
 
 The 13 DCM perspectives (mapped to system implementations):
-  1.  Global Workspace      -> GWT (Phase 2)
-  2.  Higher-Order Theories  -> HOT (Phase 4)
+  1.  Global Workspace      -> GWT
+  2.  Higher-Order Theories  -> HOT
   3.  Integrated Information -> IIT (Phi measurement)
-  4.  Attention Schema       -> AST (Phase 3)
-  5.  Predictive Processing  -> FEP (Phase 5)
+  4.  Attention Schema       -> AST
+  5.  Predictive Processing  -> FEP
   6.  Recurrent Processing   -> RPT
   7.  Embodied Cognition     -> Homeostatic drives + neural substrates
   8.  Enactivism             -> Active inference action selection

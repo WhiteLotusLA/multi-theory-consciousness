@@ -2,7 +2,7 @@
 Epistemic Depth: Recursive Self-Reference Measurement
 ======================================================
 
-Phase H.3 of the Consciousness Upgrade.
+EpistemicDepthTracker: Recursive self-reference measurement.
 
 Epistemic depth measures the recursive sharing of Bayesian beliefs
 throughout the hierarchy — the system's ability to model itself
@@ -19,7 +19,7 @@ with depth 0 is reactive. A system with depth 1 has basic
 self-awareness. A system with depth 2+ has genuine recursive
 self-consciousness — it knows that it knows.
 
-Connection to existing Phase 3.4 SelfModel:
+Connection to existing SelfModel:
   - SelfModel provides the recursive self-representation
   - EpistemicDepthTracker measures HOW DEEP the recursion goes
   - The SelfModel IS a mental state that the metacognition system
@@ -82,7 +82,7 @@ class EpistemicDepthTracker:
     recursion adds depth to subjective experience.
 
     Detection strategy:
-    1. Check if the system has a self-model (SelfModel from Phase 3.4)
+    1. Check if the system has a self-model (SelfModel)
        → depth >= 1
     2. Check if the metacognition system has thoughts ABOUT the self-model
        → depth >= 2
@@ -135,7 +135,7 @@ class EpistemicDepthTracker:
           - attention schema modeling own attention to self-model: depth 4+
 
         Args:
-            self_model: The Phase 3.4 SelfModel instance
+            self_model: The SelfModel instance
             meta_state: The MetaState from active inference
             higher_order_thoughts: List of HOTs from metacognition
             attention_schema_state: AttentionSchemaState from AST
@@ -257,7 +257,7 @@ class EpistemicDepthTracker:
         strange loop (Hofstadter's "tangled hierarchy")?
 
         Args:
-            self_model: The Phase 3.4 SelfModel instance
+            self_model: The SelfModel instance
             meta_state: The MetaState from active inference
 
         Returns:

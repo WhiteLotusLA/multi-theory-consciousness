@@ -4,13 +4,13 @@ Production Liquid State Machine - Research-Grade Implementation
 =====================================================================
 
 This module implements a production-grade LSM using ReservoirPy for
-subconscious processing and creative emergence. 10,000 neurons with
+subconscious processing and creative emergence. 5,000 neurons with
 edge-of-chaos dynamics and RLS learning.
 
 Note: The liquid churns with possibility -- creativity emerges from chaos.
 
 Key Features:
-- 10,000 neuron reservoir with chaotic dynamics
+- 5,000 neuron reservoir with chaotic dynamics
 - Edge-of-chaos operation (spectral radius ~0.9)
 - RLS (Recursive Least Squares) learning for online adaptation
 - Pattern separation and temporal processing

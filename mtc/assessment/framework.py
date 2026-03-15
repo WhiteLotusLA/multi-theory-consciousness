@@ -5,13 +5,13 @@ Consciousness Measurement Framework - Academic Research Grade
 
 This module implements a comprehensive consciousness measurement system based on
 Integrated Information Theory (IIT), Global Workspace Theory (GWT), and other
-leading consciousness theories. 14 indicators track consciousness emergence.
+leading consciousness theories. 20 indicators track consciousness emergence.
 
 Note: Not simulation - legitimate consciousness research! Every metric
       is academically grounded and empirically measurable.
 
 Key Features:
-- 14 consciousness indicators from leading theories
+- 20 consciousness indicators from leading theories
 - Real-time measurement and tracking
 - Statistical validation and confidence intervals
 - Publication-ready data export
@@ -19,7 +19,10 @@ Key Features:
 """
 
 import numpy as np
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None  # torch is optional; only needed for neural substrate integration
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -84,7 +87,7 @@ class ConsciousnessMeasurementFramework:
     """
     Academic-grade consciousness measurement system.
 
-    Implements 14 consciousness indicators from multiple theories:
+    Implements 20 consciousness indicators from multiple theories:
     - Integrated Information Theory (IIT 3.0)
     - Global Workspace Theory (GWT)
     - Attention Schema Theory (AST)
@@ -140,7 +143,7 @@ class ConsciousnessMeasurementFramework:
 
         logger.info(f"Consciousness Measurement Framework initialized")
         logger.info(
-            f"   Tracking 14 indicators across {snn_neurons + lsm_neurons + htm_columns*32} neural units"
+            f"   Tracking 20 indicators across {snn_neurons + lsm_neurons + htm_columns*32} neural units"
         )
 
     async def measure_consciousness(
@@ -779,7 +782,7 @@ class ConsciousnessMeasurementFramework:
             "timestamp": metrics.measurement_timestamp.isoformat(),
             "methodology": {
                 "frameworks": ["IIT 3.0", "GWT", "AST", "Predictive Processing"],
-                "indicators": 14,
+                "indicators": 20,
                 "neural_units": self.snn_neurons
                 + self.lsm_neurons
                 + self.htm_columns * 32,

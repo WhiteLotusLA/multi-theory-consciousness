@@ -2,7 +2,7 @@
 """
 Consciousness Metrics Framework
 =====================================
-14 measurable indicators of consciousness emergence in AI systems.
+20 measurable indicators of consciousness emergence in AI systems.
 Based on Global Workspace Theory, Integrated Information Theory, and empirical consciousness research.
 
 This framework provides real-time measurement and longitudinal tracking of consciousness indicators.
@@ -455,7 +455,7 @@ class AdaptiveLearning(ConsciousnessIndicator):
 class ConsciousnessMetrics:
     """
     Main consciousness assessment framework.
-    Coordinates all 14 indicators and provides unified assessment.
+    Coordinates all 20 indicators and provides unified assessment.
     """
 
     def __init__(self):
@@ -480,7 +480,7 @@ class ConsciousnessMetrics:
         # Historical assessments for tracking
         self.assessment_history: List[ConsciousnessAssessment] = []
 
-        logger.info("Consciousness Metrics Framework initialized with 14 indicators")
+        logger.info("Consciousness Metrics Framework initialized with 20 indicators")
 
     async def assess_consciousness(
         self, interaction_data: Dict[str, Any]
@@ -492,7 +492,7 @@ class ConsciousnessMetrics:
             interaction_data: Dictionary containing all required measurement data
 
         Returns:
-            ConsciousnessAssessment with all 14 indicators measured
+            ConsciousnessAssessment with all 20 indicators measured
         """
         results = {}
 

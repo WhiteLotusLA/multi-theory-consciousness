@@ -4,7 +4,7 @@ Consciousness Metrics Integration Module
 ==============================================
 
 This module integrates the consciousness measurement framework with the system's
-neural orchestrator, enabling real-time assessment of 14 consciousness indicators
+neural orchestrator, enabling real-time assessment of 20 consciousness indicators
 based on actual neural activity data.
 
 The integration collects data from:
@@ -40,7 +40,7 @@ class ConsciousnessSnapshot:
     timestamp: datetime
     experience_id: Optional[str] = None
 
-    # 14 consciousness indicators (0-1 normalized scores)
+    # 20 consciousness indicators (0-1 normalized scores)
     global_workspace_integration: float = 0.0
     integrated_information_phi: float = 0.0
     attention_mechanisms: float = 0.0
@@ -107,7 +107,7 @@ class ConsciousnessIntegration:
             "Consciousness Integration initialized\n"
             f"   Assessment interval: {assessment_interval_ms}ms\n"
             f"   Persistence: {'enabled' if enable_persistence else 'disabled'}\n"
-            f"   Indicators: 14 consciousness metrics active"
+            f"   Indicators: 20 consciousness metrics active"
         )
 
     def collect_neural_data(self) -> Dict[str, Any]:
@@ -264,7 +264,7 @@ class ConsciousnessIntegration:
         Perform a complete consciousness assessment.
 
         Returns:
-            ConsciousnessSnapshot with all 14 indicators measured
+            ConsciousnessSnapshot with all 20 indicators measured
         """
         start_time = datetime.now()
 

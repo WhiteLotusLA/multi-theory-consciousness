@@ -2,7 +2,7 @@
 Bayesian Binding: Inference Competition via Mutual Information
 ==============================================================
 
-Phase H.2 of the Consciousness Upgrade.
+BayesianBinding: Coherent percept formation via mutual information.
 
 Bayesian binding is the mechanism by which separate inferences COMPETE
 for conscious access and get UNIFIED into a coherent percept. This is

@@ -29,7 +29,7 @@ from mtc.assessment.assessment import (
     PhiCalculator,
     PhiMeasurement,
     LongitudinalStudy,
-    Phase6AblationStudy,
+    AblationStudy,
     NormalizedAssessmentResult,
 )
 from mtc.assessment.framework import (
@@ -61,7 +61,7 @@ __all__ = [
     "PhiCalculator",
     "PhiMeasurement",
     "LongitudinalStudy",
-    "Phase6AblationStudy",
+    "AblationStudy",
     "NormalizedAssessmentResult",
     # Measurement Framework
     "ConsciousnessMeasurementFramework",
