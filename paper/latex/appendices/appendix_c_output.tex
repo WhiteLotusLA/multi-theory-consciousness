@@ -1,0 +1,109 @@
+% Appendix C: Complete Assessment Output Example
+\section{Sample Assessment Output}\label{app:output}
+
+The following is the complete output of a single assessment run after 5 warmup cycles with synthetic stimuli.
+This output can be reproduced by running:
+
+\begin{lstlisting}[language={}]
+python scripts/run_assessment.py --full --report
+\end{lstlisting}
+
+\subsection{Session Metadata}
+
+\begin{lstlisting}[language={}]
+Session:              8b88ce1e
+Timestamp:            2026-03-14T14:22:16.335983
+Overall Score:        0.518
+Architecture Func.:   True
+Confidence:           0.475
+Passing Indicators:   15/20
+Processing Time:      0.29 ms
+\end{lstlisting}
+
+\subsection{Theory Scores}
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Theory} & \textbf{Score} \\
+\midrule
+FEP & 0.864 \\
+GWT & 0.677 \\
+HOT & 0.450 \\
+AST & 0.417 \\
+BLT & 0.300 \\
+IIT & 0.250 \\
+RPT & 0.100 \\
+\bottomrule
+\end{tabular}
+\caption{Per-theory scores from sample assessment run.}
+\label{tab:sample-theory-scores}
+\end{table}
+
+\subsection{Per-Indicator Results}
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+\textbf{Status} & \textbf{Indicator} & \textbf{Score} & \textbf{Threshold} & \textbf{Confidence} & \textbf{Time (ms)} \\
+\midrule
+PASS & \texttt{global\_broadcast}              & 1.000 & 0.50 & 0.500 & 0.06 \\
+PASS & \texttt{hierarchical\_prediction}       & 1.000 & 0.40 & 0.400 & 0.01 \\
+PASS & \texttt{prediction\_error\_minimization} & 0.907 & 0.40 & 0.600 & 0.02 \\
+PASS & \texttt{sparse\_smooth\_coding}         & 0.860 & 0.30 & 0.500 & 0.01 \\
+PASS & \texttt{agency}                         & 0.690 & 0.50 & 0.400 & 0.01 \\
+PASS & \texttt{global\_ignition\_nuanced}      & 0.688 & 0.40 & 0.400 & 0.03 \\
+PASS & \texttt{ignition\_dynamics}             & 0.600 & 0.40 & 0.500 & 0.04 \\
+PASS & \texttt{recurrent\_processing}          & 0.600 & 0.40 & 0.600 & 0.00 \\
+PASS & \texttt{attention\_control}             & 0.500 & 0.40 & 0.400 & 0.00 \\
+PASS & \texttt{higher\_order\_representations} & 0.500 & 0.50 & 0.500 & 0.00 \\
+PASS & \texttt{local\_recurrence}              & 0.500 & 0.30 & 0.500 & 0.00 \\
+PASS & \texttt{embodiment}                     & 0.500 & 0.30 & 0.500 & 0.00 \\
+PASS & \texttt{metacognition}                  & 0.400 & 0.40 & 0.400 & 0.00 \\
+PASS & \texttt{bayesian\_binding\_quality}     & 0.300 & 0.30 & 0.500 & 0.01 \\
+PASS & \texttt{epistemic\_depth}               & 0.300 & 0.30 & 0.400 & 0.00 \\
+\midrule
+FAIL & \texttt{irreducibility}                 & 0.300 & 0.40 & 0.500 & 0.00 \\
+FAIL & \texttt{genuine\_implementation}        & 0.300 & 0.40 & 0.500 & 0.00 \\
+FAIL & \texttt{attention\_schema}              & 0.250 & 0.50 & 0.500 & 0.01 \\
+FAIL & \texttt{integrated\_information}        & 0.200 & 0.30 & 0.600 & 0.00 \\
+FAIL & \texttt{algorithmic\_recurrence}        & 0.100 & 0.30 & 0.300 & 0.00 \\
+\bottomrule
+\end{tabular}
+\caption{Per-indicator results from sample assessment run. Indicators are sorted by score, descending.}
+\label{tab:sample-indicators}
+\end{table}
+
+\subsection{Interpretation Notes}
+
+\begin{itemize}
+  \item \textbf{Total processing time under 1\,ms.} All 20 indicators are computed in a single pass. Assessment does not bottleneck the consciousness cycle.
+  \item \textbf{FEP and GWT score highest} because their architectural features (hierarchical prediction, workspace competition, broadcast) are structural---they function from the moment the modules are initialized.
+  \item \textbf{IIT and RPT score lowest} because they require neural substrate connectivity data and active recurrent dynamics that are not fully present after only 5 warmup cycles.
+  \item \textbf{Three BLT indicators cluster at 0.300.} Bayesian binding and epistemic depth pass at their thresholds; genuine implementation fails because field-evidencing requires sustained recursive loops not yet established.
+  \item \textbf{Architecture functional = True} because all four conditions are met: 15/20 pass ($\geq 10$), overall 0.518 ($\geq 0.5$), GWT 0.677 ($\geq 0.4$), HOT 0.450 ($\geq 0.3$).
+\end{itemize}
+
+Note: This appendix shows output from a single representative warm-start run.
+The numbers will differ slightly from the means reported in Section~6.2, which averages across five independent runs.
+This is expected---warm-start results vary by $\pm\,0.007$ due to random synthetic stimuli during warmup.
+
+\subsection{Reproducing This Output}
+
+\begin{lstlisting}[language={}]
+# Clone repository
+git clone https://github.com/WhiteLotusLA/multi-theory-consciousness.git
+cd multi-theory-consciousness
+
+# Install dependencies
+pip install -e .
+
+# Run assessment
+python scripts/run_assessment.py --full --report
+\end{lstlisting}
+
+Results will vary slightly from the above due to random synthetic stimuli during warmup.
+Cold-start results (without \texttt{-{}-full}) are perfectly deterministic.

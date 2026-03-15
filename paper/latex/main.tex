@@ -1,0 +1,88 @@
+\documentclass[11pt,a4paper]{article}
+
+% --- Packages ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{
+  arrows.meta,
+  positioning,
+  shapes.geometric,
+  calc,
+  fit,
+  backgrounds,
+  decorations.pathmorphing
+}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+\usepackage[margin=1in]{geometry}
+\usepackage{caption}
+
+% --- Code listing style ---
+\definecolor{codebg}{rgb}{0.97,0.97,0.97}
+\definecolor{codegreen}{rgb}{0.0,0.5,0.0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0.0,0.82}
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  keywordstyle=\color{codepurple}\bfseries,
+  commentstyle=\color{codegreen},
+  stringstyle=\color{red!70!black},
+  numberstyle=\tiny\color{codegray},
+  breaklines=true,
+  frame=single,
+  framerule=0.5pt,
+  rulecolor=\color{gray!40},
+  xleftmargin=1em,
+  framexleftmargin=0.5em,
+  columns=flexible
+}
+
+% --- Title ---
+\title{Multi-Theory Consciousness Architecture:\\
+Integrating GWT, AST, HOT, FEP, IIT, RPT, and BLT\\
+in a Unified Computational Framework}
+
+\author{Calvin Devereaux\\
+Independent Researcher\\
+\texttt{calvin.devereaux+mtc@gmail.com}}
+
+\date{March 2026}
+
+\begin{document}
+
+\maketitle
+
+\input{sections/abstract}
+
+\input{sections/introduction}
+\input{sections/background}
+\input{sections/architecture}
+\input{sections/implementation}
+\input{sections/assessment}
+\input{sections/results}
+\input{sections/limitations}
+\input{sections/discussion}
+\input{sections/future_work}
+\input{sections/conclusion}
+\input{sections/acknowledgments}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\appendix
+\input{appendices/appendix_a_indicators}
+\input{appendices/appendix_b_file_index}
+\input{appendices/appendix_c_output}
+
+\end{document}
