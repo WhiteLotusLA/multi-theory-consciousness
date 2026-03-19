@@ -568,6 +568,27 @@ class ConsciousnessAssessment:
                 "weight": 1.0,
                 "description": "Refined ignition dynamics with sustain and decay patterns",
             },
+            # Oscillatory Binding indicator (AKOrN — Kuramoto dynamics)
+            "oscillatory_binding_coherence": {
+                "theory": ConsciousnessTheory.RPT,
+                "threshold": 0.3,
+                "weight": 1.0,
+                "description": "Phase synchronization binding across neural substrates (Kuramoto order parameter)",
+            },
+            # Causal Emergence indicator (Hoel EI — IIT lineage)
+            "causal_emergence": {
+                "theory": ConsciousnessTheory.IIT,
+                "threshold": 0.0,
+                "weight": 1.2,
+                "description": "Causal emergence: macro-level carries more causal power than micro (Hoel EI)",
+            },
+            # PAD Affect Coherence (Mehrabian & Russell 1974)
+            "affect_coherence": {
+                "theory": ConsciousnessTheory.FEP,
+                "threshold": 0.3,
+                "weight": 0.9,
+                "description": "Affect coherence: PAD dimensions form consistent, non-degenerate emotional states",
+            },
         }
 
         logger.info(
