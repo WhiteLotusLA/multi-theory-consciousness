@@ -6,7 +6,8 @@ Consciousness measurement and validation tools:
 - ConsciousnessAssessment: 20-indicator assessment across 7 theories
 - ConsciousnessMeasurementFramework: Academic-grade measurement system
 - RPTMeasurement: Recurrent Processing Theory measurement
-- DCMScorer: Digital Consciousness Model (13-perspective) scoring
+- BenchmarkRunner: Full Bayesian DCM benchmark (Shiller & Duffy 2026)
+- DCMEvaluator: LLM-based DCM indicator evaluator
 - PhiCalculator: IIT Phi calculation (exact + approximation)
 - LongitudinalStudy: Track consciousness emergence over time
 - AblationStudy: Component contribution analysis
@@ -35,12 +36,18 @@ from mtc.assessment.rpt_measurement import (
     RecurrenceMetrics,
     RecurrenceType,
 )
-from mtc.assessment.dcm_scoring import (
-    DCMScorer,
-    DCMReport,
-    PerspectiveScore,
-    DCM_PERSPECTIVES,
-    COMPARISON_THRESHOLDS,
+from mtc.assessment.dcm_benchmark import (
+    BenchmarkRunner,
+    DCMBenchmarkResult,
+    DCMEvidenceAdapter,
+    ModelSpecManager,
+    BayesianEngine,
+    ParsedSpec,
+    StanceNode,
+    IndicatorScore,
+)
+from mtc.assessment.dcm_evaluator import (
+    DCMEvaluator,
 )
 
 __all__ = [
@@ -64,10 +71,14 @@ __all__ = [
     "RPTMeasurement",
     "RecurrenceMetrics",
     "RecurrenceType",
-    # DCM
-    "DCMScorer",
-    "DCMReport",
-    "PerspectiveScore",
-    "DCM_PERSPECTIVES",
-    "COMPARISON_THRESHOLDS",
+    # DCM Benchmark (Bayesian, Shiller & Duffy 2026)
+    "BenchmarkRunner",
+    "DCMBenchmarkResult",
+    "DCMEvidenceAdapter",
+    "ModelSpecManager",
+    "BayesianEngine",
+    "ParsedSpec",
+    "StanceNode",
+    "IndicatorScore",
+    "DCMEvaluator",
 ]
