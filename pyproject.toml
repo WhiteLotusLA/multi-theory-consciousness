@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multi-theory-consciousness"
-version = "0.1.0"
+version = "0.2.0"
 description = "A research framework implementing seven theories of consciousness as interacting computational modules"
 readme = "README.md"
 license = "Apache-2.0"
@@ -58,6 +58,11 @@ databases = [
     "asyncpg>=0.29",
     "sqlalchemy>=2.0",
 ]
+assessment = [
+    "pymc>=5.0",
+    "anthropic>=0.50",
+    "requests>=2.28",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
@@ -65,7 +70,7 @@ dev = [
     "flake8>=6.0",
 ]
 all = [
-    "multi-theory-consciousness[neural,fep,databases,dev]",
+    "multi-theory-consciousness[neural,fep,databases,assessment,dev]",
 ]
 
 [project.urls]

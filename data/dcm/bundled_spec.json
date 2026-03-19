@@ -1,0 +1,995 @@
+{
+  "version": "v133_bundled",
+  "raw": [
+    {
+      "name": "Global Workspace Theory",
+      "last_updated": "2025-10-07T20:01:51.375Z",
+      "evidencers": [
+        {
+          "name": "Selective Attention",
+          "support": "strong",
+          "demandingness": "moderately demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Selective Attention",
+              "evidencers": [
+                {
+                  "name": "Threshold Activation",
+                  "evidencers": []
+                },
+                {
+                  "name": "Self-Sustained Activity",
+                  "evidencers": []
+                },
+                {
+                  "name": "Task Focus",
+                  "evidencers": []
+                },
+                {
+                  "name": "Goal Focus Shifts",
+                  "evidencers": []
+                },
+                {
+                  "name": "Inattentional Blindness",
+                  "evidencers": []
+                },
+                {
+                  "name": "Informational Bottleneck",
+                  "evidencers": []
+                },
+                {
+                  "name": "Resource Adaptation",
+                  "evidencers": []
+                },
+                {
+                  "name": "Feature Binding",
+                  "evidencers": []
+                },
+                {
+                  "name": "Adaptive Learning",
+                  "evidencers": []
+                },
+                {
+                  "name": "Performance Degradation",
+                  "evidencers": []
+                },
+                {
+                  "name": "Priming Enhancement",
+                  "evidencers": []
+                },
+                {
+                  "name": "Coupling",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Integration",
+          "support": "strong",
+          "demandingness": "moderately demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Integration",
+              "evidencers": [
+                {
+                  "name": "Wiring Convergence",
+                  "evidencers": []
+                },
+                {
+                  "name": "Holistic Dependency",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Complexity",
+          "support": "strong",
+          "demandingness": "weakly undemanding",
+          "evidencers": [
+            {
+              "name": "Sub_Complexity",
+              "evidencers": [
+                {
+                  "name": "Diversity of Tasks",
+                  "evidencers": []
+                },
+                {
+                  "name": "Variability of Responses to Stimuli",
+                  "evidencers": []
+                },
+                {
+                  "name": "Compressibility",
+                  "evidencers": []
+                },
+                {
+                  "name": "Functional Specialization",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Modularity",
+          "support": "weak",
+          "demandingness": "moderately demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Modularity",
+              "evidencers": [
+                {
+                  "name": "Cross-Modal Learning Deficits",
+                  "evidencers": []
+                },
+                {
+                  "name": "Selective Competence Disruption",
+                  "evidencers": []
+                },
+                {
+                  "name": "Poorly Intraconnected Networks",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Representationality",
+          "support": "weak",
+          "demandingness": "strongly undemanding",
+          "evidencers": [
+            {
+              "name": "Sub_Representationality",
+              "evidencers": [
+                {
+                  "name": "Activation Steering Effects",
+                  "evidencers": []
+                },
+                {
+                  "name": "Concept-Specific Ablation Effects",
+                  "evidencers": []
+                },
+                {
+                  "name": "Model Isomorphism",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Coherence",
+          "support": "strong",
+          "demandingness": "strongly demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Coherence",
+              "evidencers": [
+                {
+                  "name": "Functional Subparts",
+                  "evidencers": []
+                },
+                {
+                  "name": "Conflicting Subparts",
+                  "evidencers": []
+                },
+                {
+                  "name": "Information Transfer",
+                  "evidencers": []
+                },
+                {
+                  "name": "Learning Transfer",
+                  "evidencers": []
+                },
+                {
+                  "name": "Information Transfer Architecture",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Recurrent Processing Theory (Pure)",
+      "last_updated": "2025-10-07T20:01:51.375Z",
+      "evidencers": [
+        {
+          "name": "Recurrence",
+          "support": "overwhelming",
+          "demandingness": "overwhelmingly demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Recurrence",
+              "evidencers": [
+                {
+                  "name": "Function Re-application",
+                  "evidencers": []
+                },
+                {
+                  "name": "Response Refinement",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Complexity",
+          "support": "weak",
+          "demandingness": "strongly undemanding",
+          "evidencers": [
+            {
+              "name": "Sub_Complexity",
+              "evidencers": [
+                {
+                  "name": "Diversity of Tasks",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Recurrent Processing Theory (Perceptual)",
+      "last_updated": "2025-10-07T20:01:51.375Z",
+      "evidencers": [
+        {
+          "name": "Integration",
+          "support": "strong",
+          "demandingness": "weakly demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Integration",
+              "evidencers": [
+                {
+                  "name": "Wiring Convergence",
+                  "evidencers": []
+                },
+                {
+                  "name": "Holistic Dependency",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Biological Similarity",
+          "support": "moderate",
+          "demandingness": "weakly demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Biological Similarity",
+              "evidencers": [
+                {
+                  "name": "Carbon-Based",
+                  "evidencers": []
+                },
+                {
+                  "name": "Utilizes Action Potentials",
+                  "evidencers": []
+                },
+                {
+                  "name": "Neurotransmitters",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Recurrence",
+          "support": "strong",
+          "demandingness": "strongly demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Recurrence",
+              "evidencers": [
+                {
+                  "name": "Function Re-application",
+                  "evidencers": []
+                },
+                {
+                  "name": "Response Refinement",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Computational Analogy",
+      "last_updated": "2025-10-07T20:01:51.375Z",
+      "evidencers": [
+        {
+          "name": "Complexity",
+          "support": "moderate",
+          "demandingness": "moderately demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Complexity",
+              "evidencers": [
+                {
+                  "name": "Diversity of Tasks",
+                  "evidencers": []
+                },
+                {
+                  "name": "Functional Specialization",
+                  "evidencers": []
+                },
+                {
+                  "name": "Number of Layers",
+                  "evidencers": []
+                },
+                {
+                  "name": "Number of Nodes",
+                  "evidencers": []
+                },
+                {
+                  "name": "Number of Connections",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Representationality",
+          "support": "moderate",
+          "demandingness": "weakly demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Representationality",
+              "evidencers": [
+                {
+                  "name": "Activation Steering Effects",
+                  "evidencers": []
+                },
+                {
+                  "name": "Model Isomorphism",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Intelligence",
+          "support": "strong",
+          "demandingness": "moderately demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Intelligence",
+              "evidencers": [
+                {
+                  "name": "Few-shot Pattern Learning",
+                  "evidencers": []
+                },
+                {
+                  "name": "Novel Strategy Development",
+                  "evidencers": []
+                },
+                {
+                  "name": "Planning Competence",
+                  "evidencers": []
+                },
+                {
+                  "name": "Puzzle-Solving Tests",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Biological Analogy",
+      "last_updated": "2025-10-07T20:01:51.375Z",
+      "evidencers": [
+        {
+          "name": "Biological Similarity",
+          "support": "overwhelming",
+          "demandingness": "overwhelmingly demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Biological Similarity",
+              "evidencers": [
+                {
+                  "name": "Carbon-Based",
+                  "evidencers": []
+                },
+                {
+                  "name": "Utilizes Action Potentials",
+                  "evidencers": []
+                },
+                {
+                  "name": "Neurotransmitters",
+                  "evidencers": []
+                },
+                {
+                  "name": "Has Retinotopic Neural Maps",
+                  "evidencers": []
+                },
+                {
+                  "name": "Somatotopic Neural Maps",
+                  "evidencers": []
+                },
+                {
+                  "name": "Dynamic Microscale Activities",
+                  "evidencers": []
+                },
+                {
+                  "name": "Cellular Computation",
+                  "evidencers": []
+                },
+                {
+                  "name": "Changes Through Genetic Recombination",
+                  "evidencers": []
+                },
+                {
+                  "name": "Sexual Reproduction Evolution",
+                  "evidencers": []
+                },
+                {
+                  "name": "Subject to Natural Selection",
+                  "evidencers": []
+                },
+                {
+                  "name": "Recent Common Ancestor",
+                  "evidencers": []
+                },
+                {
+                  "name": "Shares Percentage of Genes",
+                  "evidencers": []
+                },
+                {
+                  "name": "Subject to Genetic Drift",
+                  "evidencers": []
+                },
+                {
+                  "name": "Subject to Exaptation",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Field Mechanisms",
+      "last_updated": "2025-10-07T20:01:51.375Z",
+      "evidencers": [
+        {
+          "name": "Complexity",
+          "support": "weak",
+          "demandingness": "neutral",
+          "evidencers": [
+            {
+              "name": "Sub_Complexity",
+              "evidencers": [
+                {
+                  "name": "Functional Specialization",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Simple Valence",
+      "last_updated": "2025-10-07T20:01:51.375Z",
+      "evidencers": [
+        {
+          "name": "Evaluative Cognition",
+          "support": "strong",
+          "demandingness": "strongly demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Evaluative Cognition",
+              "evidencers": [
+                {
+                  "name": "Disgust",
+                  "evidencers": []
+                },
+                {
+                  "name": "Fear",
+                  "evidencers": []
+                },
+                {
+                  "name": "Sadness",
+                  "evidencers": []
+                },
+                {
+                  "name": "Jealousy",
+                  "evidencers": []
+                },
+                {
+                  "name": "Panic Response",
+                  "evidencers": []
+                },
+                {
+                  "name": "Spontaneous Expressions of Valence",
+                  "evidencers": []
+                },
+                {
+                  "name": "Nociceptors",
+                  "evidencers": []
+                },
+                {
+                  "name": "Positive-Negative Associative Learning",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Agency",
+          "support": "moderate",
+          "demandingness": "moderately demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Agency",
+              "evidencers": [
+                {
+                  "name": "Coherent Goal-directed Behavior",
+                  "evidencers": []
+                },
+                {
+                  "name": "Curiosity",
+                  "evidencers": []
+                },
+                {
+                  "name": "Play",
+                  "evidencers": []
+                },
+                {
+                  "name": "Persistence Seeking",
+                  "evidencers": []
+                },
+                {
+                  "name": "Delay Gratification",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Attention Schema Theory",
+      "last_updated": "2025-10-07T20:01:51.375Z",
+      "evidencers": [
+        {
+          "name": "Selective Attention",
+          "support": "strong",
+          "demandingness": "strongly demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Selective Attention",
+              "evidencers": [
+                {
+                  "name": "Attentional Schema",
+                  "evidencers": []
+                },
+                {
+                  "name": "Attention Bias",
+                  "evidencers": []
+                },
+                {
+                  "name": "Task Focus",
+                  "evidencers": []
+                },
+                {
+                  "name": "Perception-Tracking",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Self-Modeling",
+          "support": "strong",
+          "demandingness": "moderately demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Self-Modeling",
+              "evidencers": [
+                {
+                  "name": "Self-Representation",
+                  "evidencers": []
+                },
+                {
+                  "name": "Self-Representations",
+                  "evidencers": []
+                },
+                {
+                  "name": "Self-Recognition",
+                  "evidencers": []
+                },
+                {
+                  "name": "Self-Explanation",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Higher-Order Thought",
+      "last_updated": "2025-10-07T20:01:51.375Z",
+      "evidencers": [
+        {
+          "name": "Self-Modeling",
+          "support": "strong",
+          "demandingness": "strongly demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Self-Modeling",
+              "evidencers": [
+                {
+                  "name": "Metacognition",
+                  "evidencers": []
+                },
+                {
+                  "name": "Self-Capability Assessment",
+                  "evidencers": []
+                },
+                {
+                  "name": "Self-competence Assessment",
+                  "evidencers": []
+                },
+                {
+                  "name": "Uncertainty Monitoring",
+                  "evidencers": []
+                },
+                {
+                  "name": "Undercutting Defeaters",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Representationality",
+          "support": "moderate",
+          "demandingness": "moderately demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Representationality",
+              "evidencers": [
+                {
+                  "name": "Self-Referential Language",
+                  "evidencers": []
+                },
+                {
+                  "name": "Self-Explanation",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Integrated Information Theory",
+      "last_updated": "2025-10-07T20:01:51.375Z",
+      "evidencers": [
+        {
+          "name": "Integration",
+          "support": "overwhelming",
+          "demandingness": "overwhelmingly demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Integration",
+              "evidencers": [
+                {
+                  "name": "Wiring Convergence",
+                  "evidencers": []
+                },
+                {
+                  "name": "Holistic Dependency",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Complexity",
+          "support": "moderate",
+          "demandingness": "moderately demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Complexity",
+              "evidencers": [
+                {
+                  "name": "Node Connection Sparsity",
+                  "evidencers": []
+                },
+                {
+                  "name": "Specialized Nodes",
+                  "evidencers": []
+                },
+                {
+                  "name": "Functional Specialization",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Person-like",
+      "last_updated": "2025-10-07T20:01:51.375Z",
+      "evidencers": [
+        {
+          "name": "Social Cognition",
+          "support": "strong",
+          "demandingness": "moderately demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Social Cognition",
+              "evidencers": [
+                {
+                  "name": "Perspective-taking",
+                  "evidencers": []
+                },
+                {
+                  "name": "Emotional Understanding",
+                  "evidencers": []
+                },
+                {
+                  "name": "Helping Behavior",
+                  "evidencers": []
+                },
+                {
+                  "name": "Stable Social Interactions",
+                  "evidencers": []
+                },
+                {
+                  "name": "Social Imitation",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Agency",
+          "support": "moderate",
+          "demandingness": "weakly demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Agency",
+              "evidencers": [
+                {
+                  "name": "Coherent Goal-directed Behavior",
+                  "evidencers": []
+                },
+                {
+                  "name": "Stable Personality",
+                  "evidencers": []
+                },
+                {
+                  "name": "Consistent Preferences",
+                  "evidencers": []
+                },
+                {
+                  "name": "Plans for Future Needs",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Language Abilities",
+          "support": "moderate",
+          "demandingness": "moderately demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Language Abilities",
+              "evidencers": [
+                {
+                  "name": "Conventional Communication",
+                  "evidencers": []
+                },
+                {
+                  "name": "Coherent Narrative",
+                  "evidencers": []
+                },
+                {
+                  "name": "Self-Referential Language",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Cognitive Complexity",
+      "last_updated": "2025-10-07T20:01:51.375Z",
+      "evidencers": [
+        {
+          "name": "Intelligence",
+          "support": "strong",
+          "demandingness": "strongly demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Intelligence",
+              "evidencers": [
+                {
+                  "name": "Few-shot Pattern Learning",
+                  "evidencers": []
+                },
+                {
+                  "name": "Novel Strategy Development",
+                  "evidencers": []
+                },
+                {
+                  "name": "Rule Learning",
+                  "evidencers": []
+                },
+                {
+                  "name": "Planning Competence",
+                  "evidencers": []
+                },
+                {
+                  "name": "Knowledge Transfer",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Flexibility",
+          "support": "strong",
+          "demandingness": "moderately demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Flexibility",
+              "evidencers": [
+                {
+                  "name": "Reversal Learning",
+                  "evidencers": []
+                },
+                {
+                  "name": "Adoption of Novel Means",
+                  "evidencers": []
+                },
+                {
+                  "name": "Novel Tool Creation",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Learning Abilities",
+          "support": "moderate",
+          "demandingness": "moderately demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Learning Abilities",
+              "evidencers": [
+                {
+                  "name": "Adaptive Learning",
+                  "evidencers": []
+                },
+                {
+                  "name": "Temporal-Pattern Learning",
+                  "evidencers": []
+                },
+                {
+                  "name": "Reinforcement Learning",
+                  "evidencers": []
+                },
+                {
+                  "name": "Domain-General Associative Learning",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Embodied Agency",
+      "last_updated": "2025-10-07T20:01:51.375Z",
+      "evidencers": [
+        {
+          "name": "Embodiment",
+          "support": "strong",
+          "demandingness": "strongly demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Embodiment",
+              "evidencers": [
+                {
+                  "name": "Specific Body Control",
+                  "evidencers": []
+                },
+                {
+                  "name": "Internal Body Feedback",
+                  "evidencers": []
+                },
+                {
+                  "name": "External Body Feedback",
+                  "evidencers": []
+                },
+                {
+                  "name": "Reafferance",
+                  "evidencers": []
+                },
+                {
+                  "name": "Sensory Control",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Agency",
+          "support": "strong",
+          "demandingness": "moderately demanding",
+          "evidencers": [
+            {
+              "name": "Sub_Agency",
+              "evidencers": [
+                {
+                  "name": "Coherent Goal-directed Behavior",
+                  "evidencers": []
+                },
+                {
+                  "name": "Anticipation Gradient",
+                  "evidencers": []
+                },
+                {
+                  "name": "Simulations of Future",
+                  "evidencers": []
+                },
+                {
+                  "name": "Maintains Homeostasis",
+                  "evidencers": []
+                },
+                {
+                  "name": "Self-Sustained Activity",
+                  "evidencers": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
