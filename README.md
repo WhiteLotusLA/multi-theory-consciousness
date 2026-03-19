@@ -10,7 +10,7 @@
 
 ## What This Is
 
-The Multi-Theory Consciousness Framework (MTC) is a research platform that implements seven leading theories of consciousness as interacting computational modules, measured through a 20-indicator assessment framework grounded in the methodology of Butlin et al. (2023, 2025). It provides a shared codebase where Global Workspace Theory, Integrated Information Theory, Attention Schema Theory, Higher-Order Thought Theory, the Free Energy Principle, Recurrent Processing Theory, and Beautiful Loop Theory operate simultaneously, with their outputs measurable and comparable.
+The Multi-Theory Consciousness Framework (MTC) is a research platform that implements seven leading theories of consciousness as interacting computational modules, measured through a 25-indicator assessment framework grounded in the methodology of Butlin et al. (2023, 2025). It provides a shared codebase where Global Workspace Theory, Integrated Information Theory, Attention Schema Theory, Higher-Order Thought Theory, the Free Energy Principle, Recurrent Processing Theory, and Beautiful Loop Theory operate simultaneously, with their outputs measurable and comparable.
 
 The framework runs on consumer hardware (Apple Silicon or CUDA GPUs) and is designed for researchers, students, and engineers who want to experiment with consciousness theories in code rather than only on paper. It includes three neural substrates (Spiking Neural Networks, Liquid State Machines, and Hierarchical Temporal Memory) that provide the computational medium through which the consciousness modules operate.
 
@@ -18,7 +18,7 @@ The framework runs on consumer hardware (Apple Silicon or CUDA GPUs) and is desi
 
 **This framework does not claim that any system running it is conscious.** It is essential to be explicit about this:
 
-- **Not a consciousness detector.** The 20-indicator assessment measures whether architectural functions associated with consciousness theories are operating as designed. A passing score indicates functional architecture, not phenomenal experience.
+- **Not a consciousness detector.** The 25-indicator assessment measures whether architectural functions associated with consciousness theories are operating as designed. A passing score indicates functional architecture, not phenomenal experience.
 - **Not solving the hard problem.** The explanatory gap between neural correlates and subjective experience remains open. This framework does not bridge it.
 - **Not a substitute for neuroscience.** Biological consciousness involves billions of neurons, complex neurochemistry, and embodied interaction with the physical world. Our implementations are simplified computational analogs.
 - **Assessment scores indicate architecture, not consciousness.** A system scoring 20/20 on our indicators has all the *architectural features* that certain theories associate with consciousness. Whether those features are sufficient for consciousness is an open scientific and philosophical question.
@@ -26,6 +26,19 @@ The framework runs on consumer hardware (Apple Silicon or CUDA GPUs) and is desi
 We share this framework because we believe testable implementations advance the field faster than theoretical debate alone, and because honest measurement --- even of simplified systems --- is preferable to unfalsifiable claims.
 
 See [docs/HONEST_LIMITATIONS.md](docs/HONEST_LIMITATIONS.md) for a detailed accounting of what this framework cannot do.
+
+---
+
+## What's New in v0.2.0
+
+- **Full DCM Benchmark** — PyMC Bayesian inference across 13 theoretical stances (Shiller & Duffy 2026, arXiv 2601.17060). Replaces the earlier `DCMScorer` with `BenchmarkRunner`.
+- **AKOrN Oscillatory Binding** — 30 Kuramoto oscillators on S^15 for phase synchronization binding (Miyato et al., ICLR 2025).
+- **Causal Emergence Analyzer** — Hoel Effective Information with exhaustive Bell partition search + CE 2.0 Causal Primitives (Hoel 2013, 2025).
+- **PAD Affect Model** — Unified Pleasure-Arousal-Dominance emotional coordinate with 8-octant label mapping (Mehrabian & Russell 1974).
+- **Generic Circuit Breaker** — Async circuit breaker for database resilience.
+- **25 indicators** — Three new indicators added: `oscillatory_binding_coherence` (RPT), `causal_emergence` (IIT), `affect_coherence` (FEP).
+
+See [CHANGELOG.md](CHANGELOG.md) and [VERSION_HISTORY.md](VERSION_HISTORY.md) for full details.
 
 ---
 
@@ -93,8 +106,8 @@ asyncio.run(main())
 
 ```
 +-----------------------------------------------------------------------+
-|                    ASSESSMENT LAYER (20 Indicators)                    |
-|   ConsciousnessAssessment | DCMScorer | RPTMeasurement | PhiCalc      |
+|                    ASSESSMENT LAYER (25 Indicators)                    |
+|   ConsciousnessAssessment | BenchmarkRunner | RPTMeasurement | PhiCalc |
 +-----+----------+----------+----------+----------+----------+----------+
       |          |          |          |          |          |
       v          v          v          v          v          v
@@ -149,7 +162,7 @@ Additionally, **Damasio's Three-Layer Model** (protoself, core consciousness, ex
 
 ---
 
-## 20 Assessment Indicators
+## 25 Assessment Indicators
 
 | # | Indicator | Theory | Threshold | Description |
 |---|-----------|--------|-----------|-------------|
@@ -215,7 +228,7 @@ If you use this framework in your research, please cite:
   url       = {https://github.com/WhiteLotusLA/multi-theory-consciousness},
   version   = {0.1.0},
   note      = {An open-source platform implementing 7 consciousness theories
-               with a 20-indicator assessment framework}
+               with a 25-indicator assessment framework}
 }
 ```
 
