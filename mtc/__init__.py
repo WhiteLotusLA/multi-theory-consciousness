@@ -42,11 +42,12 @@ from mtc.assessment.rpt_measurement import (
     RecurrenceMetrics,
     RecurrenceType,
 )
-from mtc.assessment.dcm_scoring import (
-    DCMScorer,
-    DCMReport,
-    PerspectiveScore,
+from mtc.assessment.dcm_benchmark import (
+    BenchmarkRunner,
+    DCMBenchmarkResult,
+    DCMEvidenceAdapter,
 )
+from mtc.assessment.dcm_evaluator import DCMEvaluator
 from mtc.core.config import Settings, get_settings
 
 __all__ = [
@@ -71,10 +72,11 @@ __all__ = [
     "RPTMeasurement",
     "RecurrenceMetrics",
     "RecurrenceType",
-    # DCM
-    "DCMScorer",
-    "DCMReport",
-    "PerspectiveScore",
+    # DCM Benchmark (Bayesian, Shiller & Duffy 2026)
+    "BenchmarkRunner",
+    "DCMBenchmarkResult",
+    "DCMEvidenceAdapter",
+    "DCMEvaluator",
     # Config
     "Settings",
     "get_settings",
