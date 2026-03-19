@@ -3,11 +3,12 @@ MTC Assessment Module
 ======================
 
 Consciousness measurement and validation tools:
-- ConsciousnessAssessment: 20-indicator assessment across 7 theories
+- ConsciousnessAssessment: 25-indicator assessment across 7 theories
 - ConsciousnessMeasurementFramework: Academic-grade measurement system
 - RPTMeasurement: Recurrent Processing Theory measurement
 - BenchmarkRunner: Full Bayesian DCM benchmark (Shiller & Duffy 2026)
 - DCMEvaluator: LLM-based DCM indicator evaluator
+- CausalEmergenceAnalyzer: Hoel Effective Information + CE 2.0
 - PhiCalculator: IIT Phi calculation (exact + approximation)
 - LongitudinalStudy: Track consciousness emergence over time
 - AblationStudy: Component contribution analysis
@@ -49,6 +50,9 @@ from mtc.assessment.dcm_benchmark import (
 from mtc.assessment.dcm_evaluator import (
     DCMEvaluator,
 )
+from mtc.assessment.causal_emergence import (
+    CausalEmergenceAnalyzer,
+)
 
 __all__ = [
     # Assessment core
@@ -81,4 +85,6 @@ __all__ = [
     "StanceNode",
     "IndicatorScore",
     "DCMEvaluator",
+    # Causal Emergence (v0.2.0)
+    "CausalEmergenceAnalyzer",
 ]
