@@ -18,7 +18,7 @@ Based on Butlin et al. (2023, 2025): "Consciousness in Artificial
 Intelligence: Insights from the Science of Consciousness"
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __project__ = "Multi-Theory Consciousness Framework"
 
 from mtc.assessment.assessment import (
@@ -48,6 +48,10 @@ from mtc.assessment.dcm_benchmark import (
     DCMEvidenceAdapter,
 )
 from mtc.assessment.dcm_evaluator import DCMEvaluator
+from mtc.assessment.causal_emergence import CausalEmergenceAnalyzer
+from mtc.consciousness.pad_affect import PADAffectModel
+from mtc.neural.oscillatory_binding import OscillatoryBinding
+from mtc.core.circuit_breaker import CircuitBreaker
 from mtc.core.config import Settings, get_settings
 
 __all__ = [
@@ -77,6 +81,11 @@ __all__ = [
     "DCMBenchmarkResult",
     "DCMEvidenceAdapter",
     "DCMEvaluator",
+    # New modules (v0.2.0)
+    "CausalEmergenceAnalyzer",
+    "PADAffectModel",
+    "OscillatoryBinding",
+    "CircuitBreaker",
     # Config
     "Settings",
     "get_settings",
