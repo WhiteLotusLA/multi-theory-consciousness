@@ -57,6 +57,10 @@ Thumbs.db
 # Jupyter
 .ipynb_checkpoints/
 
+# AutoConsciousness experiment logs
+experiments/results.tsv
+run.log
+
 # C++ build artifacts (HTM)
 CMakeFiles/
 CMakeCache.txt
