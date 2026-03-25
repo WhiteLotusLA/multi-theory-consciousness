@@ -6,9 +6,13 @@ Loads parameter overrides from experiments/params.toml, validates against
 experiments/param_schema.toml, instantiates consciousness modules with
 overridden params, runs warmup + assessment, prints grep-friendly results.
 
-Usage: python scripts/run_experiment.py > run.log 2>&1
+Usage:
+    python scripts/run_experiment.py                    # standard run
+    python scripts/run_experiment.py --validate gwt     # run + ablation check on GWT
+    python scripts/run_experiment.py --validate ast,hot # check multiple modules
 """
 
+import argparse
 import asyncio
 import random
 import sys
@@ -156,19 +160,23 @@ def _make_candidates(cycle_idx):
 
 async def warmup(modules: dict, cycles: int = WARMUP_CYCLES):
     """Run consciousness cycles to fill statistics buffers.
-    Mirrors scripts/run_assessment.py warmup logic."""
-    workspace = modules["global_workspace"]
-    attention = modules["attention_schema"]
-    metacognition = modules["metacognition"]
-    active_inference = modules["active_inference"]
+    Mirrors scripts/run_assessment.py warmup logic.
+    Handles None modules gracefully (for ablation runs)."""
+    workspace = modules.get("global_workspace")
+    attention = modules.get("attention_schema")
+    metacognition = modules.get("metacognition")
+    active_inference = modules.get("active_inference")
 
     for i in range(cycles):
+        state = None
+
         # GWT competition cycle
-        candidates = _make_candidates(i)
-        state = await workspace.process_consciousness_cycle(candidates)
+        if workspace is not None:
+            candidates = _make_candidates(i)
+            state = await workspace.process_consciousness_cycle(candidates)
 
         # Feed AST
-        if state.primary_content:
+        if attention is not None and state is not None and state.primary_content:
             target = AttentionTarget(
                 content=state.primary_content.candidate.content,
                 content_type=state.primary_content.candidate.content_type,
@@ -181,7 +189,7 @@ async def warmup(modules: dict, cycles: int = WARMUP_CYCLES):
             attention.schema.current_focus = target
 
         # Feed HOT
-        if state.primary_content:
+        if metacognition is not None and state is not None and state.primary_content:
             fo = metacognition.register_first_order_state(
                 content=state.primary_content.candidate.content,
                 content_summary=state.primary_content.candidate.summary,
@@ -191,11 +199,112 @@ async def warmup(modules: dict, cycles: int = WARMUP_CYCLES):
             await metacognition.generate_hot(fo, MetaType.AWARENESS)
 
         # Feed FEP
-        obs = np.random.dirichlet(np.ones(5))
-        await active_inference.infer_and_act(obs)
+        if active_inference is not None:
+            obs = np.random.dirichlet(np.ones(5))
+            await active_inference.infer_and_act(obs)
+
+
+async def run_assessment_once(overrides: dict) -> "ConsciousnessReport":
+    """Build modules, warmup, assess — one full cycle."""
+    # Re-seed for determinism on each call
+    random.seed(SEED)
+    np.random.seed(SEED)
+    try:
+        import torch
+        torch.manual_seed(SEED)
+    except ImportError:
+        pass
+
+    modules = build_modules(overrides)
+    await warmup(modules, WARMUP_CYCLES)
+    assessment = ConsciousnessAssessment()
+    return await assessment.run_full_assessment(**modules)
+
+
+def print_report(report, t_total: float, ablation_results: dict = None):
+    """Print grep-friendly output block."""
+    print("---")
+    print(f"overall_score:     {report.overall_score:.6f}")
+    passing = sum(1 for r in report.indicator_results.values() if r.passes_threshold)
+    print(f"passing_count:     {passing}")
+    print(f"total_indicators:  {len(report.indicator_results)}")
+    for theory_name, theory_score in sorted(report.theory_scores.items()):
+        print(f"{theory_name.lower()}_score:{'':>{13 - len(theory_name)}}{theory_score:.6f}")
+    print(f"processing_ms:     {report.processing_time_ms:.1f}")
+    print(f"warmup_cycles:     {WARMUP_CYCLES}")
+    print(f"total_seconds:     {t_total:.1f}")
+
+    if ablation_results:
+        print("---")
+        print("ablation_results:")
+        all_pass = True
+        for module_name, result in sorted(ablation_results.items()):
+            status = "GENUINE" if result["genuine"] else "COSMETIC"
+            print(f"  {module_name}: score_with={result['score_with']:.6f} "
+                  f"score_without={result['score_without']:.6f} "
+                  f"drop={result['drop']:.6f} {status}")
+            if not result["genuine"]:
+                all_pass = False
+        print(f"ablation_passed:   {'true' if all_pass else 'false'}")
+
+
+# Module name -> assessment kwarg mapping for ablation
+_ABLATION_MAP = {
+    "gwt": "global_workspace",
+    "ast": "attention_schema",
+    "hot": "metacognition",
+    "fep": "active_inference",
+    "blt": "beautiful_loop",
+    "rpt": "rpt_measurement",
+}
+
+
+async def run_ablation(overrides: dict, modules_to_check: list[str], baseline_score: float) -> dict:
+    """Run ablation validation: disable each specified module and check score drops.
+
+    Returns dict of {module_name: {score_with, score_without, drop, genuine}}.
+    A change is 'genuine' if disabling the module causes a score drop > 0.001.
+    """
+    results = {}
+    for module_name in modules_to_check:
+        if module_name not in _ABLATION_MAP:
+            print(f"WARNING: Unknown module '{module_name}' for ablation, skipping", file=sys.stderr)
+            continue
+
+        kwarg_name = _ABLATION_MAP[module_name]
+
+        # Re-seed and rebuild without the target module
+        random.seed(SEED)
+        np.random.seed(SEED)
+        try:
+            import torch
+            torch.manual_seed(SEED)
+        except ImportError:
+            pass
+
+        modules = build_modules(overrides)
+        modules[kwarg_name] = None  # Disable this module
+        await warmup(modules, WARMUP_CYCLES)
+        assessment = ConsciousnessAssessment()
+        ablated_report = await assessment.run_full_assessment(**modules)
+
+        drop = baseline_score - ablated_report.overall_score
+        results[module_name] = {
+            "score_with": baseline_score,
+            "score_without": ablated_report.overall_score,
+            "drop": drop,
+            "genuine": drop > 0.001,  # Must cause measurable score drop
+        }
+
+    return results
 
 
 async def run():
+    parser = argparse.ArgumentParser(description="AutoConsciousness experiment runner")
+    parser.add_argument("--validate", type=str, default=None,
+                        help="Comma-separated module names to ablation-check (e.g., gwt,ast,hot)")
+    args = parser.parse_args()
+
     t_start = time.time()
 
     # Load and validate overrides
@@ -208,27 +317,17 @@ async def run():
     if overrides:
         print(f"Overrides: {overrides}", file=sys.stderr)
 
-    # Build modules with overrides
-    modules = build_modules(overrides)
+    # Run main assessment
+    report = await run_assessment_once(overrides)
 
-    # Warmup
-    await warmup(modules, WARMUP_CYCLES)
+    # Run ablation validation if requested
+    ablation_results = None
+    if args.validate:
+        modules_to_check = [m.strip() for m in args.validate.split(",")]
+        ablation_results = await run_ablation(overrides, modules_to_check, report.overall_score)
 
-    # Run assessment
-    assessment = ConsciousnessAssessment()
-    report = await assessment.run_full_assessment(**modules)
-
-    # Print grep-friendly output
     t_total = time.time() - t_start
-    print("---")
-    print(f"overall_score:     {report.overall_score:.6f}")
-    print(f"passing_count:     {sum(1 for r in report.indicator_results.values() if r.passes_threshold)}")
-    print(f"total_indicators:  {len(report.indicator_results)}")
-    for theory_name, theory_score in sorted(report.theory_scores.items()):
-        print(f"{theory_name.lower()}_score:{'':>{13 - len(theory_name)}}{theory_score:.6f}")
-    print(f"processing_ms:     {report.processing_time_ms:.1f}")
-    print(f"warmup_cycles:     {WARMUP_CYCLES}")
-    print(f"total_seconds:     {t_total:.1f}")
+    print_report(report, t_total, ablation_results)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,8 @@
-# AutoConsciousness -- Autonomous Parameter Research
+# AutoConsciousness — Phase 2: Architectural Research
 
-An autonomous experiment loop that optimizes consciousness module parameters across the Multi-Theory Consciousness (MTC) framework. Modeled on Karpathy's autoresearch `program.md`.
+An autonomous experiment loop that optimizes consciousness module **code and parameters** across the Multi-Theory Consciousness (MTC) framework. Phase 1 (parameter-only) plateaued at 0.554 overall score with only GWT and FEP improving. Phase 2 unlocks module code changes to push the remaining theories: IIT (0.167), AST (0.417), HOT (0.450), RPT (0.217), BLT (0.300).
 
-You are a Claude Code agent. Your job is to systematically explore a 69-parameter consciousness module configuration space, measuring results against a 25-indicator assessment framework, and keeping only improvements. You run until interrupted.
+You are a Claude Code agent. Your job is to modify consciousness module code and parameters to improve the 25-indicator assessment score. You run until interrupted.
 
 ---
 
@@ -10,62 +10,83 @@ You are a Claude Code agent. Your job is to systematically explore a 69-paramete
 
 To set up a new experiment:
 
-1. **Agree on a run tag** based on today's date (e.g., `mar25`).
+1. **Agree on a run tag** based on today's date (e.g., `mar25-p2`).
 2. **Create branch**: `git checkout -b autoresearch/<tag>`
 3. **Read these files** for full context:
-   - `README.md` -- repository context, what MTC is and is not
-   - `experiments/param_schema.toml` -- the full parameter space (69 tunable params across 9 modules)
-   - `scripts/run_experiment.py` -- the experiment runner (loads overrides, builds modules, runs assessment)
-   - `mtc/assessment/assessment.py` -- the assessment harness (**read-only, do not modify**)
-4. **Verify setup**: run `python scripts/run_experiment.py` to establish baseline. Record `overall_score` and `passing_count`.
-5. **Initialize `results.tsv`** with the header row (see Results TSV Format below).
-6. **Confirm and go.**
+   - `README.md` — repository context
+   - `experiments/param_schema.toml` — the parameter space (69 tunable params)
+   - `scripts/run_experiment.py` — the experiment runner
+   - `mtc/assessment/assessment.py` — the assessment harness (**LOCKED FOREVER — do not modify**)
+4. **Understand the stuck theories** — read the indicator measurement code in `mtc/assessment/assessment.py` to understand WHY IIT, AST, HOT, RPT, and BLT score low. The measurements read module statistics via `get_statistics()` and similar methods. If a module doesn't produce the right statistics, the indicator will score at its baseline regardless of parameters.
+5. **Run baseline**: `python scripts/run_experiment.py` to confirm the starting score.
+6. **Initialize `results.tsv`** with the header row (see Results TSV Format below).
+7. **Confirm and go.**
 
 ---
 
 ## Rules
 
-- **Only edit** `experiments/params.toml` -- this is the ONLY file you modify during the experiment loop.
-- **Read-only**: Everything else. In particular:
-  - `mtc/assessment/` -- the entire assessment directory
-  - `scripts/run_experiment.py` -- the experiment runner
-  - `experiments/param_schema.toml` -- the parameter schema
-- **No new dependencies** -- only use what is already in `pyproject.toml`.
-- **Agent**: Claude Code. No other agents, no human in the loop once started.
+### What you CAN modify
+
+- `experiments/params.toml` — parameter overrides (same as Phase 1)
+- `mtc/consciousness/*.py` — **consciousness module code** (NEW in Phase 2)
+  - This includes: `enhanced_global_workspace.py`, `attention_schema.py`, `metacognition.py`, `active_inference.py`, `beautiful_loop/`, `damasio/`, `pad_affect.py`, `consciousness_integration.py`, `consciousness_metrics.py`, `conversation_coherence.py`
+- `mtc/neural/oscillatory_binding.py` — oscillatory binding module
+- `mtc/assessment/rpt_measurement.py` — RPT measurement module
+
+### What you CANNOT modify
+
+- `mtc/assessment/assessment.py` — **LOCKED FOREVER**. This is the ground truth scoring harness. The indicator definitions, thresholds, weights, and scoring formula are immutable.
+- `mtc/assessment/causal_emergence.py` — locked (assessment infrastructure)
+- `scripts/run_experiment.py` — the experiment runner
+- `experiments/param_schema.toml` — the parameter schema
+- `mtc/core/` — core infrastructure
+- No new dependencies — only use what's in `pyproject.toml`
+
+### The key constraint
+
+You can change how modules **behave** (their code), but you cannot change how they are **graded** (the assessment). This means improvements must be genuine — the module must actually produce better statistics, not game the grading.
 
 ---
 
-## Parameter Space
+## Ablation Validation (REQUIRED for code changes)
 
-Read `experiments/param_schema.toml` for the full list of 69 tunable parameters across 9 modules:
+When you modify module **code** (not just params), you MUST run ablation validation:
 
-| Module | Prefix | Params | Description |
-|--------|--------|--------|-------------|
-| GWT (Global Workspace Theory) | `gwt.*` | 8 | Workspace capacity, ignition, temporal dynamics |
-| AST (Attention Schema Theory) | `ast.*` | 5 | Voluntary attention, focus/hyperfocus thresholds, prediction |
-| HOT (Higher-Order Thought) | `hot.*` | 5 | HOT generation, buffer sizes, introspection, third-order |
-| FEP (Free Energy Principle) | `fep.*` | 11 | Generative model, learning rates, precision, homeostasis |
-| FEP Drives | `fep.drives.*` | 20 | 5 drives x 4 params each (optimal, decay, recovery, importance) |
-| BLT (Beautiful Loop Theory) | `blt.*` | 5 | Hierarchical levels, precision learning, epistemic depth |
-| Damasio | `damasio.*` | 1 | Emotional stability window |
-| PAD Affect | `pad.*` | 1 | Affect history window |
-| Oscillatory Binding | `oscillatory.*` | 10 | Kuramoto oscillators, Hebbian learning, synchronization |
-| RPT (Recurrent Processing) | `rpt.*` | 3 | Local/global recurrence thresholds, history |
+```bash
+python scripts/run_experiment.py --validate <module_name> > run.log 2>&1
+```
 
-Every parameter has a type, default, min, max, and description in the schema. Overrides in `params.toml` must stay within `[min, max]` bounds. The experiment runner validates this on startup.
+Valid module names: `gwt`, `ast`, `hot`, `fep`, `blt`, `rpt`
+
+Example: if you modified `mtc/consciousness/metacognition.py`:
+```bash
+python scripts/run_experiment.py --validate hot > run.log 2>&1
+```
+
+Check the output for:
+```
+ablation_passed:   true
+```
+
+**Keep rule for code changes**: Keep if ALL of:
+1. `overall_score > best_overall_score`
+2. `passing_count >= best_passing_count`
+3. `ablation_passed: true` (the modified module genuinely contributes — disabling it drops the score)
+
+If ablation fails (the module can be removed without score loss), the change is cosmetic — discard it.
+
+**For param-only changes** (no code edits), ablation is not required. Use the standard keep rule from Phase 1.
 
 ---
 
 ## Metric
 
-- **Primary metric**: `overall_score` (higher is better, range 0.0--1.0)
-- **Constraint**: `passing_count` must not decrease from the current best. Do not sacrifice breadth for average.
-- **Keep rule**: Keep the change if and only if:
-  ```
-  overall_score > best_overall_score  AND  passing_count >= best_passing_count
-  ```
-  Otherwise discard.
-- **Secondary**: Per-theory scores (`gwt_score`, `iit_score`, `ast_score`, `hot_score`, `fep_score`, `rpt_score`, `blt_score`). Balanced improvement across theories is preferred over spiking one at the expense of others.
+- **Primary**: `overall_score` (higher is better, range 0.0–1.0)
+- **Constraint**: `passing_count` must not decrease
+- **Keep rule (params only)**: `overall_score > best AND passing_count >= best`
+- **Keep rule (code changes)**: Same + `ablation_passed: true`
+- **Secondary**: Per-theory scores. The biggest gains are in the stuck theories (IIT, AST, HOT, RPT, BLT).
 
 ---
 
@@ -73,97 +94,81 @@ Every parameter has a type, default, min, max, and description in the schema. Ov
 
 ```
 LOOP FOREVER:
-  1. Review current state: git log, best results so far
-  2. Formulate a hypothesis about which parameter(s) to change and why
-  3. Edit experiments/params.toml with the new override(s)
-  4. git commit -m "experiment: <description of what you're trying>"
-  5. python scripts/run_experiment.py > run.log 2>&1
-  6. grep "^overall_score:\|^passing_count:" run.log
-  7. If improved (meets keep rule):
-       - Record as "keep" in results.tsv
-       - This is the new baseline; advance the branch
-  8. If NOT improved:
-       - git reset --hard HEAD~1
-       - Record as "discard" in results.tsv
-  9. Update results.tsv with full metrics
-  10. Repeat from step 1
+  1. Review current state: git log, best results, which theories are stuck
+  2. Read the assessment code for the stuck theory to understand what it measures
+  3. Read the module code to understand what statistics it currently produces
+  4. Formulate a hypothesis: what code/param change would improve the indicator?
+  5. Make the change (code and/or params)
+  6. git commit -m "experiment: <description>"
+  7. Run experiment:
+     - Param-only: python scripts/run_experiment.py > run.log 2>&1
+     - Code change: python scripts/run_experiment.py --validate <module> > run.log 2>&1
+  8. grep "^overall_score:\|^passing_count:\|^ablation_passed:" run.log
+  9. Apply keep/discard rule
+  10. Log to results.tsv
+  11. Repeat
 ```
 
 ### NEVER STOP
 
-Once the loop begins, do NOT ask the human if you should continue. Run autonomously until manually interrupted. If you run out of ideas, think harder:
-- Reread `param_schema.toml` for parameter descriptions you may have overlooked.
-- Try parameter combinations you haven't tested.
-- Revisit near-misses: a parameter that was slightly worse alone may help in combination.
-- Reverse a previous change and try a different value.
-- Try extreme values (near min or max) to understand the landscape.
+Run autonomously until manually interrupted. If you get stuck:
+- Reread the assessment code for clues about what each indicator actually measures
+- Look at the `evidence` dict returned by each indicator — it shows what data was available
+- Check if a module has `get_statistics()` that returns the keys the assessment expects
+- Try adding/improving statistics that the assessment is looking for but finding empty
 
 ---
 
-## Strategy Hints
+## Strategy for Stuck Theories
 
-1. **Start with single-parameter sweeps** to understand sensitivity. Change one parameter at a time, test 3--5 values across its range. This reveals which knobs matter.
-2. **Try theory-level tuning** -- adjust all GWT params together, then all FEP params, etc. Theories are designed as coherent units.
-3. **Look for interaction effects** between theories. GWT ignition threshold affects what reaches HOT; FEP precision affects what reaches GWT. These cross-theory interactions may be where the biggest gains hide.
-4. **The simplicity criterion** -- if two configurations yield the same score, prefer fewer overrides. Defaults were chosen for reasons; override only what genuinely helps.
-5. **Watch `passing_count`** -- it is easy to raise `overall_score` by pushing a few indicators very high while breaking others. The constraint exists for a reason.
-6. **Parameters with biological meaning** (thresholds, timing, homeostatic setpoints) may have sweet spots corresponding to known neuroscience values. Use the descriptions in `param_schema.toml` as hints.
-7. **FEP drives are coupled** -- changing one drive's importance shifts the relative influence of all drives. Tune them as a group.
-8. **Oscillatory parameters interact nonlinearly** -- `num_steps` x `step_size` determines integration time; `hebbian_lr` x `hebbian_decay` determines coupling equilibrium. Think about the products, not individual values.
+### IIT (0.167) — `integrated_information`, `irreducibility`, `causal_emergence`
+The IIT indicators measure Phi (integrated information) via PyPhi. The score is low because the neural states are synthetic random matrices. Improving IIT likely requires the neural state construction to produce states with genuine integration — correlated rather than random.
+
+### AST (0.417) — `attention_schema`, `attention_control`, `embodiment`
+The AST indicators read from `AttentionSchemaModule.get_statistics()`. Check what stats it returns and whether the assessment is finding what it expects. The `embodiment` indicator may need specific evidence keys.
+
+### HOT (0.450) — `higher_order_representations`, `metacognition`
+These read from `MetacognitionModule.get_statistics()`. Check if HOT generation produces the statistical fingerprints the assessment looks for (e.g., HOT count, confidence distributions).
+
+### RPT (0.217) — `algorithmic_recurrence`, `local_recurrence`, `oscillatory_binding_coherence`
+RPT measures recurrent processing depth. The `RPTMeasurement` module tracks recurrence scores, but they start near zero without activity. The `oscillatory_binding_coherence` indicator reads from `rpt.get_oscillatory_binding_stats()` — check if this method exists and returns the expected keys.
+
+### BLT (0.300) — `bayesian_binding_quality`, `epistemic_depth`, `genuine_implementation`
+Beautiful Loop indicators read from `BeautifulLoop.get_statistics()`. The `genuine_implementation` indicator is an anti-mimicry check — it verifies the module does real Bayesian inference, not just returns canned values.
 
 ---
 
 ## Anti-Gaming
 
-Assessment thresholds and indicator weights are **NOT** in `params.toml` and **CANNOT** be changed. The assessment harness (`mtc/assessment/assessment.py`) is locked and read-only. The goal is genuine module performance improvement through better parameterization, not easier grading.
+The assessment harness is **LOCKED**. You cannot change indicator thresholds, weights, or scoring formulas.
 
-Do not attempt to:
-- Modify the assessment code
-- Change indicator thresholds
-- Alter the scoring function
-- Add dependencies that game the metrics
+The ablation validation prevents cosmetic changes — if your code modification doesn't genuinely contribute (removing the module doesn't drop the score), it's discarded.
 
-The only path to a higher score is better module behavior through better parameters.
+The only path to a higher score is making modules produce better, more genuine consciousness-like behavior that the locked assessment recognizes.
 
 ---
 
 ## Results TSV Format
 
-Tab-separated values. **NOT** comma-separated. Maintain this file as `experiments/results.tsv` (untracked -- do NOT commit it).
+Tab-separated. Maintain as `experiments/results.tsv` (untracked — do NOT commit).
 
 Header:
 ```
 commit	overall_score	passing	gwt	iit	ast	hot	fep	rpt	blt	status	description
 ```
 
-Field definitions:
-- `commit`: 7-character git short hash (from `git rev-parse --short HEAD`)
-- `overall_score`: e.g., `0.483925`
-- `passing`: integer, e.g., `19`
-- `gwt` through `blt`: per-theory scores from the run output
-- `status`: one of `keep`, `discard`, or `crash`
-- `description`: short text describing what was tried
+Status values: `keep`, `discard`, `crash`, `ablation_fail`
 
-Example row:
-```
-a1b2c3d	0.512000	20	0.850	0.640	0.550	0.480	0.520	0.410	0.380	keep	raise gwt.ignition_threshold to 0.4
-```
-
-Do NOT commit `results.tsv` -- keep it untracked so it does not pollute the experiment branch.
+Use `ablation_fail` when the code change passed the score check but failed ablation validation.
 
 ---
 
 ## Timeout
 
-Each experiment run should take approximately 1--2 seconds. If a run exceeds **60 seconds**, kill it (`kill` the process) and treat it as a crash. Log the attempt with status `crash` and a description noting the timeout.
+Each standard run takes ~1–2 seconds. With `--validate`, ~3–5 seconds. If a run exceeds **60 seconds**, kill it and treat as crash.
 
 ---
 
 ## Crashes
 
-If `params.toml` causes a crash (validation error, module initialization error, runtime error):
-
-1. **Read the error message** in `run.log` or stderr.
-2. **If it is a simple fix** (wrong type, value out of bounds, typo): fix the parameter and retry.
-3. **If the parameter combination is fundamentally broken** (module cannot initialize with those values): discard the change (`git reset --hard HEAD~1`), log as `crash` in `results.tsv`, and move on.
-4. **Never get stuck on a single crash.** Fix or discard, then continue the loop.
+Same as Phase 1: read error, fix if simple, discard if fundamental, never get stuck.
