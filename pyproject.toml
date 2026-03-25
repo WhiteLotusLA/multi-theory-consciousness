@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multi-theory-consciousness"
-version = "0.2.0"
+version = "0.2.1"
 description = "A research framework implementing seven theories of consciousness as interacting computational modules"
 readme = "README.md"
 license = "Apache-2.0"
