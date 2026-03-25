@@ -1,0 +1,7 @@
+# AutoConsciousness experiment parameters
+# ========================================
+# Only uncommented values override module defaults.
+# See param_schema.toml for the full parameter space with bounds.
+#
+# This file starts empty (all defaults). The agent adds overrides
+# as it experiments.

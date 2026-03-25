@@ -5,6 +5,16 @@ All notable changes to the Multi-Theory Consciousness Framework will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-03-25
+
+### Added
+- Indicators #24-25: `temporal_prediction_depth`, `agent_environment_coupling` (FEP)
+- ConTraSt theory-level empirical weighting for overall score calculation
+
+### Fixed
+- `local_recurrence` now measured via RPT module (was dead code in GWT block)
+- `float()`/`bool()` casts in IndicatorResult for robust serialization
+
 ## [0.2.0] - 2026-03-18
 
 ### Added

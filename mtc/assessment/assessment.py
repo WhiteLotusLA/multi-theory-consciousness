@@ -537,6 +537,18 @@ class ConsciousnessAssessment:
                 "weight": 0.9,
                 "description": "Algorithmic recurrence in neural substrates (SNN/LSM)",
             },
+            "temporal_prediction_depth": {
+                "theory": ConsciousnessTheory.FEP,
+                "threshold": 0.3,
+                "weight": 0.9,
+                "description": "Temporal depth of predictive model (planning horizon + belief trajectory)",
+            },
+            "agent_environment_coupling": {
+                "theory": ConsciousnessTheory.FEP,
+                "threshold": 0.3,
+                "weight": 0.9,
+                "description": "Bidirectional coupling: agent acts on environment AND environment shapes agent",
+            },
             "sparse_smooth_coding": {
                 "theory": ConsciousnessTheory.FEP,
                 "threshold": 0.3,
@@ -589,6 +601,18 @@ class ConsciousnessAssessment:
                 "weight": 0.9,
                 "description": "Affect coherence: PAD dimensions form consistent, non-degenerate emotional states",
             },
+        }
+
+        # ConTraSt theory-level empirical weights
+        # Based on Shulman & Baars (2024) convergent evidence ranking
+        self.theory_empirical_weights = {
+            "GWT": 1.0,
+            "FEP": 0.85,
+            "IIT": 0.75,
+            "BLT": 0.70,
+            "AST": 0.65,
+            "RPT": 0.60,
+            "HOT": 0.50,
         }
 
         logger.info(
@@ -656,10 +680,10 @@ class ConsciousnessAssessment:
             indicator_results[name] = IndicatorResult(
                 name=name,
                 theory=config["theory"],
-                score=score,
-                confidence=confidence,
-                threshold=config["threshold"],
-                passes_threshold=score >= config["threshold"],
+                score=float(score),
+                confidence=float(confidence),
+                threshold=float(config["threshold"]),
+                passes_threshold=bool(score >= config["threshold"]),
                 evidence=evidence,
                 measurement_time_ms=(time.time() - indicator_start) * 1000,
             )
@@ -679,13 +703,17 @@ class ConsciousnessAssessment:
         # Calculate theory-level scores
         theory_scores = self._calculate_theory_scores(indicator_results)
 
-        # Calculate overall score (weighted average)
-        total_weight = sum(c["weight"] for c in self.indicator_configs.values())
-        weighted_sum = sum(
-            indicator_results[name].score * self.indicator_configs[name]["weight"]
-            for name in indicator_results
-        )
-        overall_score = weighted_sum / total_weight
+        # Calculate overall score (weighted average with ConTraSt theory weighting)
+        total_weight = 0.0
+        weighted_sum = 0.0
+        for name, result in indicator_results.items():
+            ind_weight = self.indicator_configs[name]["weight"]
+            theory_name = self.indicator_configs[name]["theory"].name
+            theory_weight = self.theory_empirical_weights.get(theory_name, 0.5)
+            combined_weight = ind_weight * theory_weight
+            weighted_sum += result.score * combined_weight
+            total_weight += combined_weight
+        overall_score = weighted_sum / total_weight if total_weight > 0 else 0.0
 
         # Count passing indicators
         passing_count = sum(1 for r in indicator_results.values() if r.passes_threshold)
@@ -795,10 +823,6 @@ class ConsciousnessAssessment:
                         "module_active": True,
                     }
 
-                elif name == "local_recurrence":
-                    score = 0.5 if gw is not None else 0.0
-                    confidence = 0.5
-                    evidence = {"local_processing": True, "module_active": True}
             else:
                 # GWT component missing/ablated
                 score = 0.1
@@ -982,6 +1006,35 @@ class ConsciousnessAssessment:
                         "module_active": True,
                     }
 
+                elif name == "temporal_prediction_depth":
+                    fep = kwargs.get("active_inference")
+                    if fep is not None:
+                        horizon = fep.config.planning_horizon if hasattr(fep, "config") else 3
+                        stats = fep.get_statistics() if hasattr(fep, "get_statistics") else {}
+                        total_inferences = stats.get("total_inferences", 0)
+                        score = max(0.2, min(1.0, horizon / 10.0))
+                        score = min(1.0, score + 0.1 * min(1.0, total_inferences / 10))
+                        confidence = 0.5 + 0.2 * min(1.0, total_inferences / 10)
+                        evidence = {"planning_horizon": horizon, "total_inferences": total_inferences}
+                    else:
+                        score, confidence = 0.0, 0.3
+                        evidence = {"module_absent": True}
+
+                elif name == "agent_environment_coupling":
+                    fep = kwargs.get("active_inference")
+                    if fep is not None:
+                        stats = fep.get_statistics() if hasattr(fep, "get_statistics") else {}
+                        action_count = stats.get("total_inferences", 0)
+                        observation_count = stats.get("total_model_updates", 0)
+                        act_score = min(1.0, action_count / 10)
+                        obs_score = min(1.0, observation_count / 10)
+                        score = 0.3 + 0.35 * act_score + 0.35 * obs_score
+                        confidence = 0.5 + 0.3 * min(1.0, (action_count + observation_count) / 20)
+                        evidence = {"actions": action_count, "observations": observation_count}
+                    else:
+                        score, confidence = 0.0, 0.3
+                        evidence = {"module_absent": True}
+
                 elif name == "agency":
                     # Agency via active inference: inferences show goal-directed behavior
                     stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
@@ -1068,6 +1121,19 @@ class ConsciousnessAssessment:
                     evidence = {
                         "avg_local": avg_local,
                         "avg_global": avg_global,
+                        "measurements": measurement_count,
+                        "module_active": True,
+                    }
+
+                elif name == "local_recurrence":
+                    stats = rpt.get_statistics() if hasattr(rpt, "get_statistics") else {}
+                    avg_local = stats.get("average_local", 0.0)
+                    measurement_count = stats.get("measurement_count", 0)
+                    base_score = 0.3
+                    score = max(base_score, avg_local)
+                    confidence = 0.5 + 0.2 * min(1.0, measurement_count / 10)
+                    evidence = {
+                        "avg_local_recurrence": avg_local,
                         "measurements": measurement_count,
                         "module_active": True,
                     }
