@@ -6,6 +6,9 @@
 # This file starts empty (all defaults). The agent adds overrides
 # as it experiments.
 
+[gwt]
+ignition_threshold = 0.2
+
 [fep]
 learning_rate_A = 0.3
 planning_horizon = 7
