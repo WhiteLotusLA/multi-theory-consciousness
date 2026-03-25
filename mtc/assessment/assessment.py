@@ -680,10 +680,10 @@ class ConsciousnessAssessment:
             indicator_results[name] = IndicatorResult(
                 name=name,
                 theory=config["theory"],
-                score=score,
-                confidence=confidence,
-                threshold=config["threshold"],
-                passes_threshold=score >= config["threshold"],
+                score=float(score),
+                confidence=float(confidence),
+                threshold=float(config["threshold"]),
+                passes_threshold=bool(score >= config["threshold"]),
                 evidence=evidence,
                 measurement_time_ms=(time.time() - indicator_start) * 1000,
             )
@@ -823,10 +823,6 @@ class ConsciousnessAssessment:
                         "module_active": True,
                     }
 
-                elif name == "local_recurrence":
-                    score = 0.5 if gw is not None else 0.0
-                    confidence = 0.5
-                    evidence = {"local_processing": True, "module_active": True}
             else:
                 # GWT component missing/ablated
                 score = 0.1
@@ -1125,6 +1121,19 @@ class ConsciousnessAssessment:
                     evidence = {
                         "avg_local": avg_local,
                         "avg_global": avg_global,
+                        "measurements": measurement_count,
+                        "module_active": True,
+                    }
+
+                elif name == "local_recurrence":
+                    stats = rpt.get_statistics() if hasattr(rpt, "get_statistics") else {}
+                    avg_local = stats.get("average_local", 0.0)
+                    measurement_count = stats.get("measurement_count", 0)
+                    base_score = 0.3
+                    score = max(base_score, avg_local)
+                    confidence = 0.5 + 0.2 * min(1.0, measurement_count / 10)
+                    evidence = {
+                        "avg_local_recurrence": avg_local,
                         "measurements": measurement_count,
                         "module_active": True,
                     }
