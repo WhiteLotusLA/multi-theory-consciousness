@@ -603,6 +603,18 @@ class ConsciousnessAssessment:
             },
         }
 
+        # ConTraSt theory-level empirical weights
+        # Based on Shulman & Baars (2024) convergent evidence ranking
+        self.theory_empirical_weights = {
+            "GWT": 1.0,
+            "FEP": 0.85,
+            "IIT": 0.75,
+            "BLT": 0.70,
+            "AST": 0.65,
+            "RPT": 0.60,
+            "HOT": 0.50,
+        }
+
         logger.info(
             f"Consciousness Assessment initialized with {len(self.indicator_configs)} indicators"
         )
@@ -691,13 +703,17 @@ class ConsciousnessAssessment:
         # Calculate theory-level scores
         theory_scores = self._calculate_theory_scores(indicator_results)
 
-        # Calculate overall score (weighted average)
-        total_weight = sum(c["weight"] for c in self.indicator_configs.values())
-        weighted_sum = sum(
-            indicator_results[name].score * self.indicator_configs[name]["weight"]
-            for name in indicator_results
-        )
-        overall_score = weighted_sum / total_weight
+        # Calculate overall score (weighted average with ConTraSt theory weighting)
+        total_weight = 0.0
+        weighted_sum = 0.0
+        for name, result in indicator_results.items():
+            ind_weight = self.indicator_configs[name]["weight"]
+            theory_name = self.indicator_configs[name]["theory"].name
+            theory_weight = self.theory_empirical_weights.get(theory_name, 0.5)
+            combined_weight = ind_weight * theory_weight
+            weighted_sum += result.score * combined_weight
+            total_weight += combined_weight
+        overall_score = weighted_sum / total_weight if total_weight > 0 else 0.0
 
         # Count passing indicators
         passing_count = sum(1 for r in indicator_results.values() if r.passes_threshold)
