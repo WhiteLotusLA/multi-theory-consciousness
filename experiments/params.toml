@@ -13,3 +13,5 @@ amplification_factor = 3.0
 [fep]
 learning_rate_A = 0.3
 planning_horizon = 7
+num_hidden_states = 4
+learning_rate_D = 0.05
