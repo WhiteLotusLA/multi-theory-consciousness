@@ -5,3 +5,7 @@
 #
 # This file starts empty (all defaults). The agent adds overrides
 # as it experiments.
+
+[fep]
+learning_rate_A = 0.3
+planning_horizon = 5
