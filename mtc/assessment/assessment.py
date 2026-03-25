@@ -537,6 +537,18 @@ class ConsciousnessAssessment:
                 "weight": 0.9,
                 "description": "Algorithmic recurrence in neural substrates (SNN/LSM)",
             },
+            "temporal_prediction_depth": {
+                "theory": ConsciousnessTheory.FEP,
+                "threshold": 0.3,
+                "weight": 0.9,
+                "description": "Temporal depth of predictive model (planning horizon + belief trajectory)",
+            },
+            "agent_environment_coupling": {
+                "theory": ConsciousnessTheory.FEP,
+                "threshold": 0.3,
+                "weight": 0.9,
+                "description": "Bidirectional coupling: agent acts on environment AND environment shapes agent",
+            },
             "sparse_smooth_coding": {
                 "theory": ConsciousnessTheory.FEP,
                 "threshold": 0.3,
@@ -981,6 +993,35 @@ class ConsciousnessAssessment:
                         "inferences": inferences,
                         "module_active": True,
                     }
+
+                elif name == "temporal_prediction_depth":
+                    fep = kwargs.get("active_inference")
+                    if fep is not None:
+                        horizon = fep.config.planning_horizon if hasattr(fep, "config") else 3
+                        stats = fep.get_statistics() if hasattr(fep, "get_statistics") else {}
+                        total_inferences = stats.get("total_inferences", 0)
+                        score = max(0.2, min(1.0, horizon / 10.0))
+                        score = min(1.0, score + 0.1 * min(1.0, total_inferences / 10))
+                        confidence = 0.5 + 0.2 * min(1.0, total_inferences / 10)
+                        evidence = {"planning_horizon": horizon, "total_inferences": total_inferences}
+                    else:
+                        score, confidence = 0.0, 0.3
+                        evidence = {"module_absent": True}
+
+                elif name == "agent_environment_coupling":
+                    fep = kwargs.get("active_inference")
+                    if fep is not None:
+                        stats = fep.get_statistics() if hasattr(fep, "get_statistics") else {}
+                        action_count = stats.get("total_inferences", 0)
+                        observation_count = stats.get("total_model_updates", 0)
+                        act_score = min(1.0, action_count / 10)
+                        obs_score = min(1.0, observation_count / 10)
+                        score = 0.3 + 0.35 * act_score + 0.35 * obs_score
+                        confidence = 0.5 + 0.3 * min(1.0, (action_count + observation_count) / 20)
+                        evidence = {"actions": action_count, "observations": observation_count}
+                    else:
+                        score, confidence = 0.0, 0.3
+                        evidence = {"module_absent": True}
 
                 elif name == "agency":
                     # Agency via active inference: inferences show goal-directed behavior
