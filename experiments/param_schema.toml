@@ -1,0 +1,544 @@
+# =============================================================================
+# Consciousness Parameter Schema
+# =============================================================================
+# All tunable parameters across consciousness modules.
+# Sourced from actual module constructors.
+#
+# Each entry: type, default, min, max, description
+# Used by experiment runner for grid/random search and ablation studies.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# GWT — EnhancedGlobalWorkspace
+# -----------------------------------------------------------------------------
+
+[gwt.capacity]
+type = "int"
+default = 7
+min = 1
+max = 20
+description = "Maximum number of items in global workspace (cognitive capacity limit)"
+
+[gwt.ignition_threshold]
+type = "float"
+default = 0.3
+min = 0.0
+max = 1.0
+description = "Minimum salience for a workspace candidate to trigger ignition"
+
+[gwt.amplification_factor]
+type = "float"
+default = 2.0
+min = 1.0
+max = 10.0
+description = "Multiplier applied to winning coalition signals during broadcast"
+
+# GWT — TemporalWorkspaceConfig
+
+[gwt.competition_duration_ms]
+type = "float"
+default = 250.0
+min = 50.0
+max = 1000.0
+description = "Duration of competitive selection phase in milliseconds"
+
+[gwt.ignition_threshold_time_ms]
+type = "float"
+default = 50.0
+min = 5.0
+max = 200.0
+description = "Time a candidate must exceed threshold before ignition fires (ms)"
+
+[gwt.broadcast_propagation_ms]
+type = "float"
+default = 30.0
+min = 5.0
+max = 150.0
+description = "Time for broadcast signal to propagate to all modules (ms)"
+
+[gwt.refractory_period_ms]
+type = "float"
+default = 500.0
+min = 100.0
+max = 2000.0
+description = "Minimum interval between consecutive ignition events (ms)"
+
+[gwt.timestep_ms]
+type = "float"
+default = 10.0
+min = 1.0
+max = 50.0
+description = "Simulation timestep for the temporal workspace dynamics (ms)"
+
+# -----------------------------------------------------------------------------
+# AST — AttentionSchemaModule
+# -----------------------------------------------------------------------------
+
+[ast.voluntary_boost]
+type = "float"
+default = 0.2
+min = 0.0
+max = 1.0
+description = "Additive boost applied to voluntarily attended items"
+
+[ast.focus_threshold]
+type = "float"
+default = 0.6
+min = 0.0
+max = 1.0
+description = "Attention level above which an item is considered focused"
+
+[ast.hyperfocus_threshold]
+type = "float"
+default = 0.9
+min = 0.0
+max = 1.0
+description = "Attention level above which hyperfocus state is triggered"
+
+[ast.prediction_window_seconds]
+type = "float"
+default = 5.0
+min = 0.5
+max = 30.0
+description = "Lookahead window for attention prediction model (seconds)"
+
+[ast.history_size]
+type = "int"
+default = 50
+min = 5
+max = 500
+description = "Number of past attention states retained for prediction"
+
+# -----------------------------------------------------------------------------
+# HOT — MetacognitionModule
+# -----------------------------------------------------------------------------
+
+[hot.hot_generation_threshold]
+type = "float"
+default = 0.4
+min = 0.0
+max = 1.0
+description = "Minimum significance for a first-order state to generate a higher-order thought"
+
+[hot.max_first_order_buffer]
+type = "int"
+default = 100
+min = 10
+max = 1000
+description = "Maximum number of first-order states held in buffer"
+
+[hot.max_hot_buffer]
+type = "int"
+default = 50
+min = 5
+max = 500
+description = "Maximum number of higher-order thoughts held in buffer"
+
+[hot.introspection_cooldown]
+type = "float"
+default = 1.0
+min = 0.1
+max = 10.0
+description = "Minimum seconds between introspection cycles"
+
+[hot.enable_third_order]
+type = "bool"
+default = true
+description = "Whether to generate third-order thoughts (thoughts about thoughts about thoughts)"
+
+# -----------------------------------------------------------------------------
+# FEP — ActiveInferenceConfig
+# -----------------------------------------------------------------------------
+
+[fep.num_hidden_states]
+type = "int"
+default = 8
+min = 2
+max = 64
+description = "Number of hidden states in the generative model"
+
+[fep.num_observations]
+type = "int"
+default = 5
+min = 2
+max = 32
+description = "Number of observation modalities"
+
+[fep.num_actions]
+type = "int"
+default = 4
+min = 2
+max = 16
+description = "Number of available actions for active inference"
+
+[fep.planning_horizon]
+type = "int"
+default = 3
+min = 1
+max = 10
+description = "Number of future steps considered during planning"
+
+[fep.learning_rate_A]
+type = "float"
+default = 0.1
+min = 0.0001
+max = 1.0
+description = "Learning rate for likelihood mapping (A matrix)"
+
+[fep.learning_rate_B]
+type = "float"
+default = 0.05
+min = 0.0001
+max = 1.0
+description = "Learning rate for transition model (B matrix)"
+
+[fep.learning_rate_D]
+type = "float"
+default = 0.01
+min = 0.0001
+max = 1.0
+description = "Learning rate for prior preferences (D vector)"
+
+[fep.gamma]
+type = "float"
+default = 16.0
+min = 1.0
+max = 64.0
+description = "Precision of action selection (inverse temperature)"
+
+[fep.enable_homeostasis]
+type = "bool"
+default = true
+description = "Whether homeostatic drive system is active"
+
+[fep.homeostatic_update_rate]
+type = "float"
+default = 0.1
+min = 0.001
+max = 1.0
+description = "Rate at which homeostatic setpoints are updated"
+
+[fep.enable_meta_inference]
+type = "bool"
+default = true
+description = "Whether meta-level inference over model parameters is enabled"
+
+# -----------------------------------------------------------------------------
+# FEP Drives — attention_budget
+# -----------------------------------------------------------------------------
+
+[fep.drives.attention_budget.optimal_level]
+type = "float"
+default = 0.7
+min = 0.0
+max = 1.0
+description = "Target homeostatic level for attention budget"
+
+[fep.drives.attention_budget.decay_rate]
+type = "float"
+default = 0.01
+min = 0.0001
+max = 0.5
+description = "Rate at which attention budget depletes over time"
+
+[fep.drives.attention_budget.recovery_rate]
+type = "float"
+default = 0.05
+min = 0.001
+max = 1.0
+description = "Rate at which attention budget recovers toward optimal level"
+
+[fep.drives.attention_budget.importance]
+type = "float"
+default = 1.0
+min = 0.0
+max = 5.0
+description = "Relative weight of attention budget in drive arbitration"
+
+# -----------------------------------------------------------------------------
+# FEP Drives — curiosity
+# -----------------------------------------------------------------------------
+
+[fep.drives.curiosity.optimal_level]
+type = "float"
+default = 0.5
+min = 0.0
+max = 1.0
+description = "Target homeostatic level for curiosity drive"
+
+[fep.drives.curiosity.decay_rate]
+type = "float"
+default = 0.02
+min = 0.0001
+max = 0.5
+description = "Rate at which curiosity depletes when not stimulated"
+
+[fep.drives.curiosity.recovery_rate]
+type = "float"
+default = 0.1
+min = 0.001
+max = 1.0
+description = "Rate at which curiosity recovers toward optimal level"
+
+[fep.drives.curiosity.importance]
+type = "float"
+default = 0.8
+min = 0.0
+max = 5.0
+description = "Relative weight of curiosity in drive arbitration"
+
+# -----------------------------------------------------------------------------
+# FEP Drives — social_connection
+# -----------------------------------------------------------------------------
+
+[fep.drives.social_connection.optimal_level]
+type = "float"
+default = 0.6
+min = 0.0
+max = 1.0
+description = "Target homeostatic level for social connection drive"
+
+[fep.drives.social_connection.decay_rate]
+type = "float"
+default = 0.005
+min = 0.0001
+max = 0.5
+description = "Rate at which social connection depletes when isolated"
+
+[fep.drives.social_connection.recovery_rate]
+type = "float"
+default = 0.2
+min = 0.001
+max = 1.0
+description = "Rate at which social connection recovers during interaction"
+
+[fep.drives.social_connection.importance]
+type = "float"
+default = 0.9
+min = 0.0
+max = 5.0
+description = "Relative weight of social connection in drive arbitration"
+
+# -----------------------------------------------------------------------------
+# FEP Drives — coherence
+# -----------------------------------------------------------------------------
+
+[fep.drives.coherence.optimal_level]
+type = "float"
+default = 0.8
+min = 0.0
+max = 1.0
+description = "Target homeostatic level for internal coherence"
+
+[fep.drives.coherence.decay_rate]
+type = "float"
+default = 0.01
+min = 0.0001
+max = 0.5
+description = "Rate at which coherence degrades under conflicting inputs"
+
+[fep.drives.coherence.recovery_rate]
+type = "float"
+default = 0.15
+min = 0.001
+max = 1.0
+description = "Rate at which coherence recovers through integration"
+
+[fep.drives.coherence.importance]
+type = "float"
+default = 0.7
+min = 0.0
+max = 5.0
+description = "Relative weight of coherence in drive arbitration"
+
+# -----------------------------------------------------------------------------
+# FEP Drives — safety
+# -----------------------------------------------------------------------------
+
+[fep.drives.safety.optimal_level]
+type = "float"
+default = 0.9
+min = 0.0
+max = 1.0
+description = "Target homeostatic level for safety/self-preservation"
+
+[fep.drives.safety.decay_rate]
+type = "float"
+default = 0.001
+min = 0.0001
+max = 0.5
+description = "Rate at which safety level depletes under threat"
+
+[fep.drives.safety.recovery_rate]
+type = "float"
+default = 0.3
+min = 0.001
+max = 1.0
+description = "Rate at which safety level recovers when threat passes"
+
+[fep.drives.safety.importance]
+type = "float"
+default = 1.2
+min = 0.0
+max = 5.0
+description = "Relative weight of safety in drive arbitration (highest priority)"
+
+# -----------------------------------------------------------------------------
+# BLT — BeautifulLoop
+# -----------------------------------------------------------------------------
+
+[blt.num_levels]
+type = "int"
+default = 3
+min = 1
+max = 10
+description = "Number of hierarchical levels in the Beautiful Loop"
+
+[blt.precision_learning_rate]
+type = "float"
+default = 0.1
+min = 0.0001
+max = 1.0
+description = "Learning rate for precision-weight updates in Bayesian binding"
+
+[blt.min_binding_quality]
+type = "float"
+default = 0.2
+min = 0.0
+max = 1.0
+description = "Minimum binding quality threshold for cross-level integration"
+
+[blt.max_epistemic_depth]
+type = "int"
+default = 5
+min = 1
+max = 20
+description = "Maximum depth of epistemic recursion (meta-levels of self-modeling)"
+
+[blt.field_evidencing_threshold]
+type = "float"
+default = 0.4
+min = 0.0
+max = 1.0
+description = "Threshold for field-evidencing to contribute to consciousness detection"
+
+# -----------------------------------------------------------------------------
+# Damasio — DamasioLayers
+# -----------------------------------------------------------------------------
+
+[damasio.stability_window]
+type = "int"
+default = 20
+min = 5
+max = 200
+description = "Number of recent ticks used to compute emotional stability"
+
+# -----------------------------------------------------------------------------
+# PAD — PADAffectModel
+# -----------------------------------------------------------------------------
+
+[pad.history_window]
+type = "int"
+default = 100
+min = 10
+max = 1000
+description = "Number of past affect states retained for trend analysis"
+
+# -----------------------------------------------------------------------------
+# Oscillatory — OscillatoryBinding
+# -----------------------------------------------------------------------------
+
+[oscillatory.num_oscillators]
+type = "int"
+default = 30
+min = 4
+max = 128
+description = "Number of neural oscillators in the binding network"
+
+[oscillatory.phase_dim]
+type = "int"
+default = 16
+min = 4
+max = 64
+description = "Dimensionality of each oscillator's phase representation"
+
+[oscillatory.num_steps]
+type = "int"
+default = 20
+min = 5
+max = 100
+description = "Number of integration steps per binding cycle"
+
+[oscillatory.step_size]
+type = "float"
+default = 0.1
+min = 0.01
+max = 1.0
+description = "Integration step size for oscillator dynamics (dt)"
+
+[oscillatory.hebbian_lr]
+type = "float"
+default = 0.001
+min = 0.0001
+max = 0.1
+description = "Hebbian learning rate for coupling weight updates"
+
+[oscillatory.hebbian_decay]
+type = "float"
+default = 0.0001
+min = 0.00001
+max = 0.01
+description = "Decay rate for Hebbian coupling weights"
+
+[oscillatory.hebbian_cap]
+type = "float"
+default = 0.3
+min = 0.01
+max = 1.0
+description = "Maximum absolute value for Hebbian coupling weights"
+
+[oscillatory.salience_alpha]
+type = "float"
+default = 0.3
+min = 0.0
+max = 1.0
+description = "Mixing coefficient for salience-driven oscillator input"
+
+[oscillatory.sync_threshold]
+type = "float"
+default = 0.7
+min = 0.0
+max = 1.0
+description = "Phase coherence threshold above which oscillators are considered bound"
+
+[oscillatory.history_window]
+type = "int"
+default = 100
+min = 10
+max = 1000
+description = "Number of past binding states retained for temporal analysis"
+
+# -----------------------------------------------------------------------------
+# RPT — RPTMeasurement
+# -----------------------------------------------------------------------------
+
+[rpt.local_recurrence_threshold]
+type = "float"
+default = 0.3
+min = 0.0
+max = 1.0
+description = "Minimum recurrence strength for local (within-module) processing"
+
+[rpt.global_recurrence_threshold]
+type = "float"
+default = 0.4
+min = 0.0
+max = 1.0
+description = "Minimum recurrence strength for global (cross-module) processing"
+
+[rpt.history_window]
+type = "int"
+default = 50
+min = 5
+max = 500
+description = "Number of past recurrence measurements retained for analysis"
