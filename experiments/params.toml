@@ -8,4 +8,4 @@
 
 [fep]
 learning_rate_A = 0.3
-planning_horizon = 5
+planning_horizon = 7
