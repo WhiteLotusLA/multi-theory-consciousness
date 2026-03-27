@@ -82,7 +82,7 @@ class ActiveInferenceConfig:
     num_actions: int = 4  # Number of possible actions
 
     # Planning parameters
-    planning_horizon: int = 3  # How far ahead to plan (policy length)
+    planning_horizon: int = 5  # Empirically optimized (AutoResearch Phase 1: FEP +16%)
     inference_algo: str = (
         "VANILLA"  # Standard belief updating (MMP returns different format)
     )
