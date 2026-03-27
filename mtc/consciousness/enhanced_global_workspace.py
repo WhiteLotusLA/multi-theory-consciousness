@@ -1268,7 +1268,7 @@ class EnhancedGlobalWorkspace:
                 num_hidden_states=8,  # Internal states the system can be in
                 num_observations=5,  # Types of observations
                 num_actions=4,  # Possible actions
-                planning_horizon=3,  # How far ahead to plan
+                planning_horizon=5,  # Empirically optimized (AutoResearch Phase 1)
                 enable_homeostasis=True,  # Track internal needs
             )
         )
