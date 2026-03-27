@@ -1198,7 +1198,7 @@ class EnhancedGlobalWorkspace:
     def __init__(
         self,
         capacity: int = 7,
-        ignition_threshold: float = 0.3,
+        ignition_threshold: float = 0.1,  # Empirically optimized (AutoResearch Phase 1: GWT 0.763→0.975)
         amplification_factor: float = 2.0,
         integration_dimensions: int = 512,
         temporal_config: Optional[TemporalWorkspaceConfig] = None,
