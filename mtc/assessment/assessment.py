@@ -630,6 +630,8 @@ class ConsciousnessAssessment:
         ablation_config: Optional[Dict[str, bool]] = None,
         beautiful_loop=None,
         rpt_measurement=None,
+        pad_affect_model=None,
+        causal_emergence_analyzer=None,
     ) -> ConsciousnessReport:
         """
         Run comprehensive consciousness assessment.
@@ -653,6 +655,22 @@ class ConsciousnessAssessment:
 
         logger.info(f"Starting consciousness assessment (session: {session_id})")
 
+        # Calculate Phi BEFORE the indicator loop so integrated_information
+        # can use the real value instead of a placeholder.
+        phi_measurement = None
+        phi_value = 0.0
+        if neural_states and "combined_state" in neural_states:
+            try:
+                state = neural_states["combined_state"]
+                connectivity = neural_states.get("connectivity", np.eye(len(state)))
+                phi_measurement = await self.phi_calculator.calculate_phi(
+                    state, connectivity
+                )
+                if phi_measurement and phi_measurement.phi_normalized is not None:
+                    phi_value = phi_measurement.phi_normalized
+            except Exception as e:
+                logger.warning(f"Phi calculation failed: {e}")
+
         indicator_results = {}
 
         # Measure each indicator
@@ -672,6 +690,9 @@ class ConsciousnessAssessment:
                     ablation_config=ablation_config,
                     beautiful_loop=beautiful_loop,
                     rpt_measurement=rpt_measurement,
+                    pad_affect_model=pad_affect_model,
+                    causal_emergence_analyzer=causal_emergence_analyzer,
+                    phi_value=phi_value,
                 )
             except Exception as e:
                 logger.warning(f"Failed to measure {name}: {e}")
@@ -687,18 +708,6 @@ class ConsciousnessAssessment:
                 evidence=evidence,
                 measurement_time_ms=(time.time() - indicator_start) * 1000,
             )
-
-        # Calculate Phi if neural states available
-        phi_measurement = None
-        if neural_states and "combined_state" in neural_states:
-            try:
-                state = neural_states["combined_state"]
-                connectivity = neural_states.get("connectivity", np.eye(len(state)))
-                phi_measurement = await self.phi_calculator.calculate_phi(
-                    state, connectivity
-                )
-            except Exception as e:
-                logger.warning(f"Phi calculation failed: {e}")
 
         # Calculate theory-level scores
         theory_scores = self._calculate_theory_scores(indicator_results)
@@ -806,7 +815,7 @@ class ConsciousnessAssessment:
                     sustain_bonus = (
                         min(0.3, sustain_rate * 0.5) if sustain_rate > 0 else 0.0
                     )
-                    score = max(base_score, activity_score + sustain_bonus)
+                    score = min(1.0, max(base_score, activity_score + sustain_bonus))
                     confidence = 0.7 if ignitions > 5 else 0.5
                     evidence = {
                         "ignitions": ignitions,
@@ -815,11 +824,27 @@ class ConsciousnessAssessment:
                     }
 
                 elif name == "recurrent_processing":
-                    # Check workspace feedback loops
-                    score = 0.6 if gw is not None else 0.0
-                    confidence = 0.6
+                    # Recurrent processing = feedback loops in neural processing.
+                    # Measured through broadcast coverage (re-entrant signal
+                    # reaching all modules) and cycle count (sustained processing).
+                    stats = gw.get_statistics() if hasattr(gw, "get_statistics") else {}
+                    broadcast_stats = stats.get("broadcast", {})
+                    coverage = broadcast_stats.get("coverage_ratio", 0.0)
+                    cycle_count = stats.get("cycle_count", 0)
+                    broadcasts = broadcast_stats.get("total_broadcasts", 0)
+                    base_score = 0.4 if gw is not None else 0.0
+                    # Coverage measures re-entrant connectivity
+                    coverage_score = min(1.0, coverage) if coverage > 0 else 0.0
+                    # Sustained cycles = recurrent activity
+                    cycle_score = min(1.0, cycle_count / 5)
+                    # Broadcasts = information flowing back through system
+                    broadcast_score = min(1.0, broadcasts / 8)
+                    score = max(base_score, 0.4 * coverage_score + 0.3 * cycle_score + 0.3 * broadcast_score)
+                    confidence = 0.6 + 0.2 * min(1.0, cycle_count / 5)
                     evidence = {
-                        "workspace_active": gw is not None,
+                        "coverage": coverage,
+                        "cycles": cycle_count,
+                        "broadcasts": broadcasts,
                         "module_active": True,
                     }
 
@@ -903,10 +928,29 @@ class ConsciousnessAssessment:
                     }
 
                 elif name == "embodiment":
-                    # AST implies embodiment through attention boundaries
-                    score = 0.5 if ast is not None else 0.0
-                    confidence = 0.5
-                    evidence = {"attention_boundaries": ast is not None}
+                    # Embodiment = sense of boundaries and presence.
+                    # Measured through attention capacity usage (bounded
+                    # resource), focus history (situated perspective),
+                    # and voluntary control (agency over attention).
+                    stats = ast.get_statistics() if hasattr(ast, "get_statistics") else {}
+                    base_score = 0.4 if ast is not None else 0.0
+                    capacity = stats.get("capacity_used", 0.0)
+                    history_len = stats.get("history_length", 0)
+                    vol_ratio = stats.get("voluntary_ratio", 0.0)
+                    # Bounded attention = embodied constraint
+                    capacity_score = min(1.0, capacity * 2) if capacity > 0 else 0.3
+                    # Situated perspective = has tracked multiple foci
+                    perspective_score = min(1.0, history_len / 5)
+                    # Agency = voluntary control over attention
+                    agency_score = vol_ratio
+                    score = max(base_score, 0.3 * capacity_score + 0.4 * perspective_score + 0.3 * agency_score)
+                    confidence = 0.5 + 0.2 * min(1.0, history_len / 5)
+                    evidence = {
+                        "capacity_used": capacity,
+                        "history_length": history_len,
+                        "voluntary_ratio": vol_ratio,
+                        "module_active": True,
+                    }
             else:
                 score = 0.1
                 confidence = 0.3
@@ -1071,6 +1115,28 @@ class ConsciousnessAssessment:
                         "free_energy": free_energy,
                         "module_active": True,
                     }
+
+                elif name == "affect_coherence":
+                    pad = kwargs.get("pad_affect_model")
+                    if pad is not None:
+                        score = pad.compute_coherence()
+                        confidence = 0.5 + 0.3 * min(1.0, len(pad._history) / 20)
+                        latest = pad.get_latest()
+                        evidence = {
+                            "coherence_score": score,
+                            "history_length": len(pad._history),
+                            "latest_pad": {
+                                "pleasure": latest.pleasure if latest else None,
+                                "arousal": latest.arousal if latest else None,
+                                "dominance": latest.dominance if latest else None,
+                                "label": latest.label if latest else None,
+                            },
+                            "module_active": True,
+                        }
+                    else:
+                        score = 0.1
+                        confidence = 0.3
+                        evidence = {"ablated": True, "reason": "pad_affect_model not provided"}
             else:
                 score = 0.1
                 confidence = 0.3
@@ -1080,14 +1146,23 @@ class ConsciousnessAssessment:
         elif theory == ConsciousnessTheory.IIT:
             neural = kwargs.get("neural_states", {})
             if name == "integrated_information":
-                # This will be calculated separately in run_full_assessment
-                if neural and "combined_state" in neural:
-                    score = 0.5  # Placeholder - real value from phi_measurement
-                    evidence = {"phi_pending": True}
+                # Use pre-computed Phi value (calculated before the indicator loop)
+                phi_val = kwargs.get("phi_value", 0.0)
+                if phi_val > 0:
+                    score = min(1.0, 0.3 + phi_val * 1.4)
+                    confidence = 0.7
+                    evidence = {
+                        "phi_normalized": phi_val,
+                        "source": "pre_computed_phi",
+                    }
+                elif neural and "combined_state" in neural:
+                    score = 0.3
+                    confidence = 0.5
+                    evidence = {"phi_zero": True, "neural_present": True}
                 else:
                     score = 0.2
+                    confidence = 0.4
                     evidence = {"neural_states_missing": True}
-                confidence = 0.6
 
             elif name == "irreducibility":
                 # Estimate based on neural connectivity
@@ -1101,6 +1176,28 @@ class ConsciousnessAssessment:
                     score = 0.3
                     evidence = {"connectivity_missing": True}
                 confidence = 0.5
+
+            elif name == "causal_emergence":
+                ce_analyzer = kwargs.get("causal_emergence_analyzer")
+                if ce_analyzer is not None:
+                    ce_val = ce_analyzer.get_latest_ce()
+                    if ce_val is not None:
+                        # Sigmoid mapping: CE=0 -> 0.5, CE>0 -> above 0.5
+                        score = 1.0 / (1.0 + np.exp(-ce_val * 2.0))
+                        confidence = 0.7
+                        evidence = {
+                            "causal_emergence": ce_val,
+                            "macro_beats_micro": ce_val > 0,
+                            "module_active": True,
+                        }
+                    else:
+                        score = 0.3  # warming up
+                        confidence = 0.3
+                        evidence = {"warming_up": True}
+                else:
+                    score = 0.1
+                    confidence = 0.3
+                    evidence = {"ablated": True, "reason": "analyzer not provided"}
 
         # RPT Indicators (from RPTMeasurement -- Lamme 2006)
         elif theory == ConsciousnessTheory.RPT:
@@ -1136,6 +1233,28 @@ class ConsciousnessAssessment:
                         "avg_local_recurrence": avg_local,
                         "measurements": measurement_count,
                         "module_active": True,
+                    }
+
+                elif name == "oscillatory_binding_coherence":
+                    osc_stats = rpt.get_oscillatory_binding_stats() if hasattr(
+                        rpt, "get_oscillatory_binding_stats"
+                    ) else {}
+                    global_r = osc_stats.get("global_order_parameter", 0.0)
+                    cross_vals = osc_stats.get("cross_coherence", {})
+                    if cross_vals:
+                        mean_cross = max(0.0, float(np.mean(list(cross_vals.values()))))
+                    else:
+                        mean_cross = 0.0
+                    score = 0.6 * global_r + 0.4 * mean_cross
+                    base_score = 0.25 if rpt is not None else 0.0
+                    score = max(base_score, score)
+                    confidence = 0.5 + 0.3 * min(1.0, osc_stats.get("binding_count", 0) / 10)
+                    evidence = {
+                        "global_order_parameter": global_r,
+                        "cross_coherence": cross_vals,
+                        "mean_cross_coherence": mean_cross,
+                        "binding_count": osc_stats.get("binding_count", 0),
+                        "module_active": bool(osc_stats),
                     }
             else:
                 score = 0.1
