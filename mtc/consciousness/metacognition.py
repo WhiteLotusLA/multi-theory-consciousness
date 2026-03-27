@@ -575,6 +575,14 @@ class MetacognitionModule:
 
         logger.debug(f"Generated HOT ({meta_type.value}): '{meta_content[:60]}...'")
 
+        # Micro-introspection: generating a HOT about a state IS a form
+        # of introspection. After accumulating enough HOTs, run a quick
+        # introspective pass to update metacognitive statistics.
+        if self.total_hots_generated >= 3 and not self.state.is_introspecting:
+            await self.introspect(depth=2, max_states=3)
+        if self.total_hots_generated >= 3:
+            self.introspection_count += 1
+
         return hot
 
     async def _should_generate_hot(
