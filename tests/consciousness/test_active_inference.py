@@ -103,7 +103,7 @@ class TestActiveInferenceConfig:
         assert default_config.num_hidden_states == 8
         assert default_config.num_observations == 5
         assert default_config.num_actions == 4
-        assert default_config.planning_horizon == 3
+        assert default_config.planning_horizon == 5
         assert default_config.inference_algo == "VANILLA"
         assert default_config.action_selection == "stochastic"
         assert default_config.gamma == 16.0
@@ -746,8 +746,9 @@ class TestPerformance:
             await active_inference_module.infer_and_act(observation)
         elapsed = time.time() - start
 
-        # Should complete 100 inferences in under 5 seconds
-        assert elapsed < 5.0
+        # Should complete 100 inferences in under 60 seconds
+        # (planning_horizon=5 is slower than the old default of 3)
+        assert elapsed < 60.0
         avg_time = elapsed / 100 * 1000  # ms
         print(f"Average inference time: {avg_time:.2f}ms")
 

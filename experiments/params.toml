@@ -5,11 +5,3 @@
 #
 # This file starts empty (all defaults). The agent adds overrides
 # as it experiments.
-
-[gwt]
-ignition_threshold = 0.1
-
-[fep]
-planning_horizon = 10
-num_hidden_states = 2
-num_actions = 2

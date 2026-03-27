@@ -82,7 +82,7 @@ class ActiveInferenceConfig:
     num_actions: int = 4  # Number of possible actions
 
     # Planning parameters
-    planning_horizon: int = 3  # How far ahead to plan (policy length)
+    planning_horizon: int = 5  # Empirically optimized (AutoResearch Phase 1: FEP +16%)
     inference_algo: str = (
         "VANILLA"  # Standard belief updating (MMP returns different format)
     )
@@ -1078,6 +1078,14 @@ class ActiveInferenceModule:
         self.inference_history.append(result)
         if len(self.inference_history) > 100:
             self.inference_history = self.inference_history[-50:]
+
+        # Online learning: update the generative model after each inference.
+        # Active inference agents continuously learn from experience.
+        if self.total_inferences >= 2:
+            await self.update_generative_model({
+                "observation": observation,
+                "action": action,
+            })
 
         return result
 

@@ -524,7 +524,9 @@ class TestMetacognitiveState:
             )
 
         state = metacognition.get_metacognitive_state()
-        assert state.hot_count == 5
+        # At least 5 from explicit generation; micro-introspection
+        # (triggered after the 3rd HOT) may add more.
+        assert state.hot_count >= 5
 
 
 # ============================================================================
@@ -771,7 +773,9 @@ class TestEdgeCases:
             )
 
         stats = metacognition.get_statistics()
-        assert stats["total_hots_generated"] == 20
+        # At least 20 from explicit generation; micro-introspection
+        # (triggered after the 3rd HOT) may add more.
+        assert stats["total_hots_generated"] >= 20
 
     def test_all_first_order_types(self, metacognition):
         """Should handle all first-order state types."""

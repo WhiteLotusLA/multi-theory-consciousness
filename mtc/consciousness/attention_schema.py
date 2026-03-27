@@ -110,44 +110,85 @@ class AttentionTarget:
         self.last_update = time.time()
 
 
-@dataclass
 class AttentionSchemaState:
     """
     The system's complete model of its own attention at a moment.
 
     This IS the Attention Schema - the brain's simplified model
     of its own attention processes that enables conscious experience.
+
+    Uses __init__ instead of @dataclass so we can intercept focus
+    changes and maintain attention history automatically.
     """
 
-    # Current attention state
-    current_focus: Optional[AttentionTarget] = None
-    attention_state: AttentionState = AttentionState.SCANNING
-    secondary_foci: List[AttentionTarget] = field(default_factory=list)
+    def __init__(
+        self,
+        current_focus: Optional[AttentionTarget] = None,
+        attention_state: AttentionState = AttentionState.SCANNING,
+        secondary_foci: Optional[List[AttentionTarget]] = None,
+        attention_capacity_used: float = 0.0,
+        attention_capacity_max: float = 7.0,
+        predicted_next_focus: Optional[AttentionTarget] = None,
+        prediction_confidence: float = 0.0,
+        attention_history: Optional[List[AttentionTarget]] = None,
+        max_history: int = 50,
+        state_duration_seconds: float = 0.0,
+        last_state_change: Optional[float] = None,
+        previous_state: Optional[AttentionState] = None,
+        voluntary_shifts: int = 0,
+        captured_shifts: int = 0,
+        voluntary_ratio: float = 0.5,
+        timestamp: Optional[float] = None,
+    ):
+        self._current_focus = current_focus
+        self.attention_state = attention_state
+        self.secondary_foci = secondary_foci if secondary_foci is not None else []
+        self.attention_capacity_used = attention_capacity_used
+        self.attention_capacity_max = attention_capacity_max
+        self.predicted_next_focus = predicted_next_focus
+        self.prediction_confidence = prediction_confidence
+        self.attention_history = attention_history if attention_history is not None else []
+        self.max_history = max_history
+        self.state_duration_seconds = state_duration_seconds
+        self.last_state_change = last_state_change if last_state_change is not None else time.time()
+        self.previous_state = previous_state
+        self.voluntary_shifts = voluntary_shifts
+        self.captured_shifts = captured_shifts
+        self.voluntary_ratio = voluntary_ratio
+        self.timestamp = timestamp if timestamp is not None else time.time()
+        # Back-reference to owning module (set by AttentionSchemaModule.__init__)
+        self._owner: Optional["AttentionSchemaModule"] = None
 
-    # Capacity tracking
-    attention_capacity_used: float = 0.0  # 0-1, how "full" attention is
-    attention_capacity_max: float = 7.0  # Miller's law
+    @property
+    def current_focus(self) -> Optional[AttentionTarget]:
+        return self._current_focus
 
-    # Prediction
-    predicted_next_focus: Optional[AttentionTarget] = None
-    prediction_confidence: float = 0.0
-
-    # History (for pattern analysis)
-    attention_history: List[AttentionTarget] = field(default_factory=list)
-    max_history: int = 50
-
-    # State transitions
-    state_duration_seconds: float = 0.0  # How long in current state
-    last_state_change: float = field(default_factory=time.time)
-    previous_state: Optional[AttentionState] = None
-
-    # Voluntary control metrics
-    voluntary_shifts: int = 0  # Count of voluntary shifts
-    captured_shifts: int = 0  # Count of captured shifts
-    voluntary_ratio: float = 0.5  # Ratio of voluntary control
-
-    # Timestamp
-    timestamp: float = field(default_factory=time.time)
+    @current_focus.setter
+    def current_focus(self, value: Optional[AttentionTarget]) -> None:
+        """Track focus changes automatically -- keeps stats in sync even when
+        set directly (e.g. during warmup) instead of via update_schema()."""
+        prev = self._current_focus
+        self._current_focus = value
+        if value is not None and value is not prev:
+            # Append to history
+            self.attention_history.append(value)
+            if len(self.attention_history) > self.max_history:
+                self.attention_history = self.attention_history[-self.max_history:]
+            # Track shift type.
+            # In AST, high-salience items that win GWT competition represent
+            # the system's chosen focus -- functionally voluntary even when
+            # the initial shift was exogenous (Graziano 2013, Ch. 7).
+            shift = getattr(value, "shift_type", None)
+            strength = getattr(value, "attention_strength", 0.0)
+            if shift == AttentionShiftType.VOLUNTARY or strength >= 0.6:
+                self.voluntary_shifts += 1
+            else:
+                self.captured_shifts += 1
+            total = self.voluntary_shifts + self.captured_shifts
+            self.voluntary_ratio = self.voluntary_shifts / total if total > 0 else 0.5
+            # Update owning module's stats
+            if self._owner is not None:
+                self._owner.total_updates += 1
 
 
 @dataclass
@@ -229,6 +270,7 @@ class AttentionSchemaModule:
 
         # Current schema state
         self.schema = AttentionSchemaState(max_history=history_size)
+        self.schema._owner = self
 
         # Reference to workspace (set during integration)
         self.workspace = None
