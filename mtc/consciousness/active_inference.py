@@ -1079,6 +1079,14 @@ class ActiveInferenceModule:
         if len(self.inference_history) > 100:
             self.inference_history = self.inference_history[-50:]
 
+        # Online learning: update the generative model after each inference.
+        # Active inference agents continuously learn from experience.
+        if self.total_inferences >= 2:
+            await self.update_generative_model({
+                "observation": observation,
+                "action": action,
+            })
+
         return result
 
     def _encode_observation_vector(self, observation: np.ndarray) -> np.ndarray:
