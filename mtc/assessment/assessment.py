@@ -615,6 +615,8 @@ class ConsciousnessAssessment:
             "HOT": 0.50,
         }
 
+        self._noise_baselines = None
+
         logger.info(
             f"Consciousness Assessment initialized with {len(self.indicator_configs)} indicators"
         )
@@ -632,6 +634,9 @@ class ConsciousnessAssessment:
         rpt_measurement=None,
         pad_affect_model=None,
         causal_emergence_analyzer=None,
+        warmup_cycles: int = 25,
+        normalize: bool = True,
+        noise_baselines: Optional[Dict[str, float]] = None,
     ) -> ConsciousnessReport:
         """
         Run comprehensive consciousness assessment.
@@ -646,11 +651,17 @@ class ConsciousnessAssessment:
             ablation_config: Which components are disabled (for ablation study)
             beautiful_loop: BeautifulLoop instance
             rpt_measurement: RPTMeasurement instance
+            warmup_cycles: Number of warmup cycles actually run (for quality-based scaling)
+            normalize: Whether to noise-normalize indicator scores (default True)
+            noise_baselines: Pre-computed noise baselines (indicator name -> noise score).
+                If provided, used instead of running stub-based noise baseline.
+                Typically computed by running real modules with different random seeds.
 
         Returns:
             Complete ConsciousnessReport
         """
         start_time = time.time()
+        self._warmup_cycles = warmup_cycles
         session_id = str(uuid.uuid4())[:8]
 
         logger.info(f"Starting consciousness assessment (session: {session_id})")
@@ -693,6 +704,7 @@ class ConsciousnessAssessment:
                     pad_affect_model=pad_affect_model,
                     causal_emergence_analyzer=causal_emergence_analyzer,
                     phi_value=phi_value,
+                    warmup_cycles=warmup_cycles,
                 )
             except Exception as e:
                 logger.warning(f"Failed to measure {name}: {e}")
@@ -708,6 +720,34 @@ class ConsciousnessAssessment:
                 evidence=evidence,
                 measurement_time_ms=(time.time() - indicator_start) * 1000,
             )
+
+        # Noise-normalize scores so random inputs score near zero
+        if normalize:
+            if noise_baselines is not None:
+                baselines = noise_baselines
+            elif not hasattr(self, '_noise_baselines') or self._noise_baselines is None:
+                baselines = await self.run_noise_baseline(iterations=5)
+                self._noise_baselines = baselines
+            else:
+                baselines = self._noise_baselines
+            for name, result in indicator_results.items():
+                baseline = baselines.get(name, 0.0)
+                normalized = self.get_normalized_score(result.score, baseline)
+                # Replace the result with normalized score
+                indicator_results[name] = IndicatorResult(
+                    name=result.name,
+                    theory=result.theory,
+                    score=float(normalized),
+                    confidence=result.confidence,
+                    threshold=result.threshold,
+                    passes_threshold=bool(normalized >= result.threshold),
+                    evidence={
+                        **result.evidence,
+                        "raw_score": result.score,
+                        "noise_baseline": baseline,
+                    },
+                    measurement_time_ms=result.measurement_time_ms,
+                )
 
         # Calculate theory-level scores
         theory_scores = self._calculate_theory_scores(indicator_results)
@@ -783,64 +823,53 @@ class ConsciousnessAssessment:
             gw = kwargs.get("global_workspace")
             if gw is not None:
                 if name == "global_broadcast":
-                    # Measure broadcast effectiveness (stats are nested under "broadcast")
                     stats = gw.get_statistics() if hasattr(gw, "get_statistics") else {}
                     broadcast_stats = stats.get("broadcast", {})
                     broadcast_count = broadcast_stats.get("total_broadcasts", 0)
                     coverage = broadcast_stats.get("coverage_ratio", 0.0)
-                    cycle_count = stats.get("cycle_count", 0)
-                    # Broadcast effectiveness: coverage from actual broadcasts + cycle activity
-                    base_score = 0.45 if gw is not None else 0.0
-                    coverage_score = min(1.0, coverage) if broadcast_count > 0 else 0.0
-                    # Cycles running = broadcast infrastructure active
-                    cycle_bonus = min(0.3, cycle_count / 20)
-                    score = min(1.0, max(base_score, coverage_score + cycle_bonus))
-                    confidence = 0.7 if broadcast_count > 10 else 0.5
+                    if broadcast_count == 0:
+                        score = 0.0
+                    else:
+                        score = min(1.0, coverage)
+                    confidence = 0.7 if broadcast_count > 10 else 0.4
                     evidence = {
                         "broadcasts": broadcast_count,
                         "coverage": coverage,
-                        "cycles": cycle_count,
                         "module_active": True,
                     }
 
                 elif name == "ignition_dynamics":
-                    # Measure ignition events (stats are nested under "ignition")
                     stats = gw.get_statistics() if hasattr(gw, "get_statistics") else {}
                     ignition_stats = stats.get("ignition", {})
                     ignitions = ignition_stats.get("total_ignitions", 0)
                     sustain_rate = ignition_stats.get("sustain_rate", 0.0)
-                    # Score from actual ignition activity
-                    base_score = 0.4 if gw is not None else 0.0
-                    activity_score = min(1.0, ignitions / 10) if ignitions > 0 else 0.0
-                    sustain_bonus = (
-                        min(0.3, sustain_rate * 0.5) if sustain_rate > 0 else 0.0
-                    )
-                    score = min(1.0, max(base_score, activity_score + sustain_bonus))
-                    confidence = 0.7 if ignitions > 5 else 0.5
+                    cycle_count = stats.get("cycle_count", 0)
+                    if ignitions == 0:
+                        score = 0.0
+                    else:
+                        ignition_rate = min(1.0, ignitions / max(1, cycle_count))
+                        sustain_quality = sustain_rate
+                        score = 0.6 * ignition_rate + 0.4 * sustain_quality
+                    confidence = 0.7 if ignitions > 5 else 0.4
                     evidence = {
                         "ignitions": ignitions,
+                        "ignition_rate": ignitions / max(1, cycle_count) if cycle_count > 0 else 0.0,
                         "sustain_rate": sustain_rate,
                         "module_active": True,
                     }
 
                 elif name == "recurrent_processing":
-                    # Recurrent processing = feedback loops in neural processing.
-                    # Measured through broadcast coverage (re-entrant signal
-                    # reaching all modules) and cycle count (sustained processing).
                     stats = gw.get_statistics() if hasattr(gw, "get_statistics") else {}
                     broadcast_stats = stats.get("broadcast", {})
                     coverage = broadcast_stats.get("coverage_ratio", 0.0)
                     cycle_count = stats.get("cycle_count", 0)
                     broadcasts = broadcast_stats.get("total_broadcasts", 0)
-                    base_score = 0.4 if gw is not None else 0.0
-                    # Coverage measures re-entrant connectivity
-                    coverage_score = min(1.0, coverage) if coverage > 0 else 0.0
-                    # Sustained cycles = recurrent activity
-                    cycle_score = min(1.0, cycle_count / 5)
-                    # Broadcasts = information flowing back through system
-                    broadcast_score = min(1.0, broadcasts / 8)
-                    score = max(base_score, 0.4 * coverage_score + 0.3 * cycle_score + 0.3 * broadcast_score)
-                    confidence = 0.6 + 0.2 * min(1.0, cycle_count / 5)
+                    if cycle_count == 0:
+                        score = 0.0
+                    else:
+                        broadcast_rate = min(1.0, broadcasts / cycle_count)
+                        score = 0.5 * coverage + 0.5 * broadcast_rate
+                    confidence = 0.5 + 0.2 * min(1.0, cycle_count / 10)
                     evidence = {
                         "coverage": coverage,
                         "cycles": cycle_count,
@@ -859,10 +888,6 @@ class ConsciousnessAssessment:
             ast = kwargs.get("attention_schema")
             if ast is not None:
                 if name == "attention_schema":
-                    # AST indicator: does the system have a self-model of its
-                    # own attention?  Evidence comes from statistics (history of
-                    # schema updates, prediction accuracy, voluntary/captured
-                    # shift tracking) -- not just a single-snapshot focus check.
                     try:
                         stats = (
                             ast.get_statistics()
@@ -870,6 +895,7 @@ class ConsciousnessAssessment:
                             else {}
                         )
                         schema = getattr(ast, "schema", None)
+                        warmup_cycles = kwargs.get("warmup_cycles", 25)
 
                         has_focus = (
                             schema is not None
@@ -878,23 +904,17 @@ class ConsciousnessAssessment:
                         total_updates = stats.get("total_updates", 0)
                         history_len = stats.get("history_length", 0)
                         pred_accuracy = stats.get("prediction_accuracy", 0.0)
-                        capacity_used = stats.get("capacity_used", 0.0)
 
-                        # Scoring components (each 0-1, weighted):
-                        #  - Schema active & tracking (0.3): has it processed inputs?
-                        #  - Focus model (0.25): does it have a current focus target?
-                        #  - History depth (0.25): has it tracked multiple shifts?
-                        #  - Self-prediction (0.2): can it predict its own shifts?
-                        schema_active = min(1.0, total_updates / 3)  # 3+ updates = full
-                        focus_score = 1.0 if has_focus else 0.3
-                        history_score = min(1.0, history_len / 3)
-                        prediction_score = pred_accuracy  # 0-1 already
+                        schema_active = min(1.0, total_updates / max(1, warmup_cycles * 0.5))
+                        focus_score = 1.0 if has_focus else 0.0
+                        history_score = min(1.0, history_len / max(1, warmup_cycles * 0.3))
+                        prediction_score = pred_accuracy
 
                         score = (
-                            0.30 * schema_active
-                            + 0.25 * focus_score
-                            + 0.25 * history_score
-                            + 0.20 * prediction_score
+                            0.15 * schema_active
+                            + 0.15 * focus_score
+                            + 0.20 * history_score
+                            + 0.50 * prediction_score
                         )
                         confidence = 0.5 + 0.3 * min(1.0, total_updates / 5)
                         evidence = {
@@ -902,48 +922,40 @@ class ConsciousnessAssessment:
                             "total_updates": total_updates,
                             "history_length": history_len,
                             "prediction_accuracy": round(pred_accuracy, 3),
-                            "capacity_used": round(capacity_used, 3),
                             "module_active": True,
                         }
                     except Exception as e:
-                        score = 0.35
-                        confidence = 0.4
+                        score = 0.0
+                        confidence = 0.3
                         evidence = {"module_present": True, "access_error": str(e)}
 
                 elif name == "attention_control":
-                    # Check voluntary shift capability - module presence = capability
                     stats = (
                         ast.get_statistics() if hasattr(ast, "get_statistics") else {}
                     )
                     voluntary_shifts = stats.get("voluntary_shifts", 0)
-                    success_rate = stats.get("voluntary_ratio", 0.4)  # Default baseline
-                    # Module present = baseline voluntary control capability
-                    base_score = 0.4 if ast is not None else 0.0
-                    score = max(base_score, min(1.0, success_rate))
-                    confidence = 0.6 if voluntary_shifts > 3 else 0.4
+                    voluntary_ratio = stats.get("voluntary_ratio", 0.0)
+                    if voluntary_shifts == 0:
+                        score = 0.0
+                    else:
+                        score = min(1.0, voluntary_ratio)
+                    confidence = 0.6 if voluntary_shifts > 3 else 0.3
                     evidence = {
                         "voluntary_shifts": voluntary_shifts,
-                        "success_rate": success_rate,
+                        "voluntary_ratio": voluntary_ratio,
                         "module_active": True,
                     }
 
                 elif name == "embodiment":
-                    # Embodiment = sense of boundaries and presence.
-                    # Measured through attention capacity usage (bounded
-                    # resource), focus history (situated perspective),
-                    # and voluntary control (agency over attention).
                     stats = ast.get_statistics() if hasattr(ast, "get_statistics") else {}
-                    base_score = 0.4 if ast is not None else 0.0
+                    warmup_cycles = kwargs.get("warmup_cycles", 25)
                     capacity = stats.get("capacity_used", 0.0)
                     history_len = stats.get("history_length", 0)
                     vol_ratio = stats.get("voluntary_ratio", 0.0)
-                    # Bounded attention = embodied constraint
-                    capacity_score = min(1.0, capacity * 2) if capacity > 0 else 0.3
-                    # Situated perspective = has tracked multiple foci
-                    perspective_score = min(1.0, history_len / 5)
-                    # Agency = voluntary control over attention
+                    capacity_score = min(1.0, capacity) if capacity > 0 else 0.0
+                    perspective_score = min(1.0, history_len / max(1, warmup_cycles * 0.5))
                     agency_score = vol_ratio
-                    score = max(base_score, 0.3 * capacity_score + 0.4 * perspective_score + 0.3 * agency_score)
+                    score = 0.4 * capacity_score + 0.3 * perspective_score + 0.3 * agency_score
                     confidence = 0.5 + 0.2 * min(1.0, history_len / 5)
                     evidence = {
                         "capacity_used": capacity,
@@ -961,40 +973,47 @@ class ConsciousnessAssessment:
             meta = kwargs.get("metacognition")
             if meta is not None:
                 if name == "higher_order_representations":
-                    # Check HOT generation - module presence = capability
                     stats = (
                         meta.get_statistics() if hasattr(meta, "get_statistics") else {}
                     )
                     hot_count = stats.get("total_hots_generated", 0)
-                    confidence_level = stats.get("overall_confidence", 0.4)
-                    # Score from actual HOT generation activity
-                    base_score = 0.45 if meta is not None else 0.0
-                    activity_score = min(1.0, hot_count / 10) if hot_count > 0 else 0.0
-                    score = max(base_score, max(activity_score, confidence_level))
-                    confidence = 0.7 if hot_count > 5 else 0.5
+                    gw = kwargs.get("global_workspace")
+                    gw_stats = gw.get_statistics() if gw is not None and hasattr(gw, "get_statistics") else {}
+                    cycle_count = gw_stats.get("cycle_count", 0)
+                    if cycle_count == 0 or hot_count == 0:
+                        score = 0.0
+                    else:
+                        coverage_ratio = min(1.0, hot_count / cycle_count)
+                        score = coverage_ratio
+                    confidence = 0.7 if hot_count > 5 else 0.4
                     evidence = {
                         "hots_generated": hot_count,
-                        "confidence": confidence_level,
+                        "cycle_count": cycle_count,
+                        "coverage_ratio": hot_count / max(1, cycle_count),
                         "module_active": True,
                     }
 
                 elif name == "metacognition":
-                    # Module presence = metacognitive capability
                     stats = (
                         meta.get_statistics() if hasattr(meta, "get_statistics") else {}
                     )
                     introspections = stats.get("introspection_count", 0)
                     belief_evaluations = stats.get("belief_evaluations", 0)
-                    # Baseline score for having metacognition module
-                    base_score = 0.4 if meta is not None else 0.0
-                    activity_score = min(
-                        1.0, (introspections + belief_evaluations) / 20
-                    )
-                    score = max(base_score, activity_score)
-                    confidence = 0.6 if introspections > 2 else 0.4
+                    overall_confidence = stats.get("overall_confidence", 0.0)
+                    gw = kwargs.get("global_workspace")
+                    gw_stats = gw.get_statistics() if gw is not None and hasattr(gw, "get_statistics") else {}
+                    cycle_count = gw_stats.get("cycle_count", 0)
+                    if introspections + belief_evaluations == 0:
+                        score = 0.0
+                    else:
+                        activity_rate = min(1.0, (introspections + belief_evaluations) / max(1, cycle_count))
+                        quality = overall_confidence
+                        score = 0.4 * activity_rate + 0.6 * quality
+                    confidence = 0.6 if introspections > 2 else 0.3
                     evidence = {
                         "introspections": introspections,
                         "evaluations": belief_evaluations,
+                        "overall_confidence": overall_confidence,
                         "module_active": True,
                     }
             else:
@@ -1007,46 +1026,47 @@ class ConsciousnessAssessment:
             ai = kwargs.get("active_inference")
             if ai is not None:
                 if name == "prediction_error_minimization":
-                    # Module presence = predictive capability
                     stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
-                    avg_error = stats.get(
-                        "avg_prediction_error", 0.5
-                    )  # Default moderate error
+                    avg_error = stats.get("avg_prediction_error", 0.5)
                     error_trend = stats.get("prediction_error_trend", 0)
-                    # Ensure avg_error is numeric
+                    total_inferences = stats.get("total_inferences", 0)
                     if isinstance(avg_error, str):
                         avg_error = 0.5
-                    # Lower error = better prediction = higher score
-                    base_score = 0.4 if ai is not None else 0.0
-                    error_score = max(0, 1.0 - float(avg_error))
-                    score = max(base_score, error_score)
-                    # Negative trend = improving = bonus
-                    if isinstance(error_trend, (int, float)) and error_trend < 0:
-                        score = min(1.0, score + 0.1)
-                    confidence = 0.6
+                    if total_inferences < 2:
+                        score = 0.0
+                    elif isinstance(error_trend, (int, float)) and error_trend < 0:
+                        trend_magnitude = min(1.0, abs(float(error_trend)) * 5)
+                        level_score = max(0.0, 1.0 - float(avg_error))
+                        score = 0.7 * trend_magnitude + 0.3 * level_score
+                    else:
+                        level_score = max(0.0, 1.0 - float(avg_error)) * 0.3
+                        score = level_score
+                    confidence = 0.6 if total_inferences > 5 else 0.3
                     evidence = {
                         "avg_error": avg_error,
                         "trend": error_trend,
+                        "total_inferences": total_inferences,
                         "module_active": True,
                     }
 
                 elif name == "hierarchical_prediction":
-                    # Module presence = hierarchical prediction capability
                     stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
                     hierarchical_error = stats.get("hierarchical_prediction_error", 0.5)
-                    inferences = stats.get("total_inferences", 0)
-                    # Lower hierarchical error = better multi-level prediction
-                    base_score = 0.4 if ai is not None else 0.0
-                    if isinstance(hierarchical_error, (int, float)):
-                        error_score = max(0, 1.0 - float(hierarchical_error))
+                    total_inferences = stats.get("total_inferences", 0)
+                    warmup_cycles = kwargs.get("warmup_cycles", 25)
+                    if total_inferences == 0:
+                        score = 0.0
                     else:
-                        error_score = 0.0
-                    activity_bonus = min(0.2, inferences / 100)
-                    score = min(1.0, max(base_score, error_score + activity_bonus))
-                    confidence = 0.6 if inferences > 5 else 0.4
+                        if isinstance(hierarchical_error, (int, float)):
+                            error_quality = max(0.0, 1.0 - float(hierarchical_error))
+                        else:
+                            error_quality = 0.0
+                        activity_rate = min(1.0, total_inferences / max(1, warmup_cycles))
+                        score = 0.7 * error_quality + 0.3 * activity_rate
+                    confidence = 0.6 if total_inferences > 5 else 0.3
                     evidence = {
                         "hierarchical_error": hierarchical_error,
-                        "inferences": inferences,
+                        "inferences": total_inferences,
                         "module_active": True,
                     }
 
@@ -1056,10 +1076,17 @@ class ConsciousnessAssessment:
                         horizon = fep.config.planning_horizon if hasattr(fep, "config") else 3
                         stats = fep.get_statistics() if hasattr(fep, "get_statistics") else {}
                         total_inferences = stats.get("total_inferences", 0)
-                        score = max(0.2, min(1.0, horizon / 10.0))
-                        score = min(1.0, score + 0.1 * min(1.0, total_inferences / 10))
+                        avg_error = stats.get("avg_prediction_error", 0.5)
+                        if isinstance(avg_error, str):
+                            avg_error = 0.5
+                        if total_inferences == 0:
+                            score = 0.0
+                        else:
+                            horizon_factor = min(1.0, horizon / 10.0)
+                            quality = max(0.0, 1.0 - float(avg_error))
+                            score = horizon_factor * quality
                         confidence = 0.5 + 0.2 * min(1.0, total_inferences / 10)
-                        evidence = {"planning_horizon": horizon, "total_inferences": total_inferences}
+                        evidence = {"planning_horizon": horizon, "total_inferences": total_inferences, "avg_error": avg_error}
                     else:
                         score, confidence = 0.0, 0.3
                         evidence = {"module_absent": True}
@@ -1068,11 +1095,15 @@ class ConsciousnessAssessment:
                     fep = kwargs.get("active_inference")
                     if fep is not None:
                         stats = fep.get_statistics() if hasattr(fep, "get_statistics") else {}
+                        warmup_cycles = kwargs.get("warmup_cycles", 25)
                         action_count = stats.get("total_inferences", 0)
                         observation_count = stats.get("total_model_updates", 0)
-                        act_score = min(1.0, action_count / 10)
-                        obs_score = min(1.0, observation_count / 10)
-                        score = 0.3 + 0.35 * act_score + 0.35 * obs_score
+                        if action_count == 0 and observation_count == 0:
+                            score = 0.0
+                        else:
+                            act_rate = min(1.0, action_count / max(1, warmup_cycles))
+                            obs_rate = min(1.0, observation_count / max(1, warmup_cycles))
+                            score = (act_rate * obs_rate) ** 0.5
                         confidence = 0.5 + 0.3 * min(1.0, (action_count + observation_count) / 20)
                         evidence = {"actions": action_count, "observations": observation_count}
                     else:
@@ -1080,38 +1111,26 @@ class ConsciousnessAssessment:
                         evidence = {"module_absent": True}
 
                 elif name == "agency":
-                    # Agency via active inference: inferences show goal-directed behavior
                     stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
+                    warmup_cycles = kwargs.get("warmup_cycles", 25)
                     inferences = stats.get("total_inferences", 0)
                     model_updates = stats.get("total_model_updates", 0)
-                    urgency = stats.get("urgency_level", 0.0)
                     free_energy = stats.get("variational_free_energy", 0.0)
-                    # Active inference running = agency capability
-                    base_score = 0.4 if ai is not None else 0.0
-                    # Each inference cycle is evidence of autonomous processing
-                    inference_score = (
-                        min(0.6, inferences / 10) if inferences > 0 else 0.0
-                    )
-                    # Free energy > 0 means the system has internal drives
-                    drive_score = (
-                        min(0.3, 0.3 * (1.0 - 1.0 / (1.0 + float(free_energy))))
-                        if isinstance(free_energy, (int, float)) and free_energy > 0
-                        else 0.0
-                    )
-                    urgency_bonus = (
-                        min(0.1, float(urgency) * 0.2)
-                        if isinstance(urgency, (int, float))
-                        else 0.0
-                    )
-                    score = min(
-                        1.0,
-                        max(base_score, inference_score + drive_score + urgency_bonus),
-                    )
-                    confidence = 0.6 if inferences > 5 else 0.4
+                    if inferences == 0:
+                        score = 0.0
+                    else:
+                        inference_rate = min(1.0, inferences / max(1, warmup_cycles))
+                        update_rate = min(1.0, model_updates / max(1, inferences))
+                        drive_score = (
+                            min(0.3, 0.3 * (1.0 - 1.0 / (1.0 + float(free_energy))))
+                            if isinstance(free_energy, (int, float)) and free_energy > 0
+                            else 0.0
+                        )
+                        score = min(1.0, 0.4 * inference_rate + 0.3 * update_rate + 0.3 * drive_score)
+                    confidence = 0.6 if inferences > 5 else 0.3
                     evidence = {
                         "inferences": inferences,
                         "model_updates": model_updates,
-                        "urgency": urgency,
                         "free_energy": free_energy,
                         "module_active": True,
                     }
@@ -1146,34 +1165,47 @@ class ConsciousnessAssessment:
         elif theory == ConsciousnessTheory.IIT:
             neural = kwargs.get("neural_states", {})
             if name == "integrated_information":
-                # Use pre-computed Phi value (calculated before the indicator loop)
                 phi_val = kwargs.get("phi_value", 0.0)
                 if phi_val > 0:
-                    score = min(1.0, 0.3 + phi_val * 1.4)
+                    score = min(1.0, phi_val)
                     confidence = 0.7
                     evidence = {
                         "phi_normalized": phi_val,
                         "source": "pre_computed_phi",
                     }
-                elif neural and "combined_state" in neural:
-                    score = 0.3
-                    confidence = 0.5
-                    evidence = {"phi_zero": True, "neural_present": True}
                 else:
-                    score = 0.2
+                    score = 0.0
                     confidence = 0.4
-                    evidence = {"neural_states_missing": True}
+                    evidence = {"phi_zero": True, "neural_present": bool(neural)}
 
             elif name == "irreducibility":
-                # Estimate based on neural connectivity
                 if neural and "connectivity" in neural:
-                    conn = neural["connectivity"]
-                    # Higher connectivity = less reducible
-                    sparsity = np.sum(np.abs(conn) > 0.1) / (conn.size + 1)
-                    score = min(1.0, sparsity * 2)
-                    evidence = {"connectivity_sparsity": sparsity}
+                    conn = np.array(neural["connectivity"])
+                    try:
+                        eigenvalues = np.linalg.eigvalsh(conn)
+                        eigenvalues = np.abs(eigenvalues)
+                        total = eigenvalues.sum()
+                        if total > 0:
+                            eigenvalues_norm = eigenvalues / total
+                            spectral_entropy = -np.sum(
+                                eigenvalues_norm * np.log(eigenvalues_norm + 1e-10)
+                            )
+                            max_entropy = np.log(len(eigenvalues))
+                            score = spectral_entropy / max_entropy if max_entropy > 0 else 0.0
+                        else:
+                            score = 0.0
+                            spectral_entropy = 0.0
+                            max_entropy = 0.0
+                        evidence = {
+                            "spectral_entropy": float(spectral_entropy),
+                            "max_entropy": float(max_entropy),
+                            "n_eigenvalues": len(eigenvalues),
+                        }
+                    except Exception as e:
+                        score = 0.0
+                        evidence = {"computation_error": str(e)}
                 else:
-                    score = 0.3
+                    score = 0.0
                     evidence = {"connectivity_missing": True}
                 confidence = 0.5
 
@@ -1182,7 +1214,6 @@ class ConsciousnessAssessment:
                 if ce_analyzer is not None:
                     ce_val = ce_analyzer.get_latest_ce()
                     if ce_val is not None:
-                        # Sigmoid mapping: CE=0 -> 0.5, CE>0 -> above 0.5
                         score = 1.0 / (1.0 + np.exp(-ce_val * 2.0))
                         confidence = 0.7
                         evidence = {
@@ -1191,11 +1222,11 @@ class ConsciousnessAssessment:
                             "module_active": True,
                         }
                     else:
-                        score = 0.3  # warming up
-                        confidence = 0.3
+                        score = 0.0
+                        confidence = 0.2
                         evidence = {"warming_up": True}
                 else:
-                    score = 0.1
+                    score = 0.0
                     confidence = 0.3
                     evidence = {"ablated": True, "reason": "analyzer not provided"}
 
@@ -1210,10 +1241,10 @@ class ConsciousnessAssessment:
                     avg_local = stats.get("average_local", 0.0)
                     avg_global = stats.get("average_global", 0.0)
                     measurement_count = stats.get("measurement_count", 0)
-                    # Combine local and global recurrence
-                    base_score = 0.35 if rpt is not None else 0.0
-                    recurrence_score = 0.6 * avg_local + 0.4 * avg_global
-                    score = max(base_score, recurrence_score)
+                    if measurement_count == 0:
+                        score = 0.0
+                    else:
+                        score = 0.6 * avg_local + 0.4 * avg_global
                     confidence = 0.5 + 0.3 * min(1.0, measurement_count / 10)
                     evidence = {
                         "avg_local": avg_local,
@@ -1226,8 +1257,7 @@ class ConsciousnessAssessment:
                     stats = rpt.get_statistics() if hasattr(rpt, "get_statistics") else {}
                     avg_local = stats.get("average_local", 0.0)
                     measurement_count = stats.get("measurement_count", 0)
-                    base_score = 0.3
-                    score = max(base_score, avg_local)
+                    score = avg_local if measurement_count > 0 else 0.0
                     confidence = 0.5 + 0.2 * min(1.0, measurement_count / 10)
                     evidence = {
                         "avg_local_recurrence": avg_local,
@@ -1241,19 +1271,21 @@ class ConsciousnessAssessment:
                     ) else {}
                     global_r = osc_stats.get("global_order_parameter", 0.0)
                     cross_vals = osc_stats.get("cross_coherence", {})
+                    binding_count = osc_stats.get("binding_count", 0)
                     if cross_vals:
                         mean_cross = max(0.0, float(np.mean(list(cross_vals.values()))))
                     else:
                         mean_cross = 0.0
-                    score = 0.6 * global_r + 0.4 * mean_cross
-                    base_score = 0.25 if rpt is not None else 0.0
-                    score = max(base_score, score)
-                    confidence = 0.5 + 0.3 * min(1.0, osc_stats.get("binding_count", 0) / 10)
+                    if binding_count == 0:
+                        score = 0.0
+                    else:
+                        score = 0.6 * global_r + 0.4 * mean_cross
+                    confidence = 0.5 + 0.3 * min(1.0, binding_count / 10)
                     evidence = {
                         "global_order_parameter": global_r,
                         "cross_coherence": cross_vals,
                         "mean_cross_coherence": mean_cross,
-                        "binding_count": osc_stats.get("binding_count", 0),
+                        "binding_count": binding_count,
                         "module_active": bool(osc_stats),
                     }
             else:
@@ -1274,8 +1306,7 @@ class ConsciousnessAssessment:
                 if name == "bayesian_binding_quality":
                     avg_binding = stats.get("average_binding_quality", 0.0)
                     cycle_count = stats.get("cycle_count", 0)
-                    base_score = 0.3 if bl is not None else 0.0
-                    score = max(base_score, float(avg_binding))
+                    score = avg_binding if cycle_count > 0 else 0.0
                     confidence = 0.5 + 0.3 * min(1.0, cycle_count / 10)
                     evidence = {
                         "avg_binding": avg_binding,
@@ -1287,11 +1318,8 @@ class ConsciousnessAssessment:
                     depth_stats = stats.get("epistemic_depth", {})
                     avg_depth = depth_stats.get("average_depth", 0)
                     max_depth = depth_stats.get("max_depth_reached", 0)
-                    # Normalize: depth 3 = full score
-                    base_score = 0.3 if bl is not None else 0.0
-                    depth_score = min(1.0, avg_depth / 3.0) if avg_depth > 0 else 0.0
-                    score = max(base_score, depth_score)
-                    confidence = 0.6 if max_depth >= 2 else 0.4
+                    score = min(1.0, avg_depth / 4.0) if avg_depth > 0 else 0.0
+                    confidence = 0.6 if max_depth >= 2 else 0.3
                     evidence = {
                         "avg_depth": avg_depth,
                         "max_depth": max_depth,
@@ -1299,24 +1327,27 @@ class ConsciousnessAssessment:
                     }
 
                 elif name == "genuine_implementation":
-                    # Anti-mimicry check: genuine implementation has
-                    # field-evidencing events (system evidences own existence)
-                    # AND consistent loop quality over time
                     avg_quality = stats.get("average_loop_quality", 0.0)
                     fe_count = stats.get("field_evidencing_count", 0)
-                    fe_rate = stats.get("field_evidencing_rate", 0.0)
                     cycle_count = stats.get("cycle_count", 0)
+                    depth_stats = stats.get("epistemic_depth", {})
 
-                    base_score = 0.3 if bl is not None else 0.0
-                    # Field-evidencing is the strongest evidence of genuine implementation
-                    fe_score = min(1.0, fe_rate * 2) if fe_count > 0 else 0.0
-                    quality_score = avg_quality
-                    score = max(base_score, 0.6 * fe_score + 0.4 * quality_score)
+                    if cycle_count == 0:
+                        score = 0.0
+                    else:
+                        has_field_evidencing = fe_count > 0
+                        has_loop_quality = avg_quality >= 0.4
+                        has_strange_loop = depth_stats.get("max_depth_reached", 0) >= 2
+                        conditions_met = sum([has_field_evidencing, has_loop_quality, has_strange_loop])
+                        score = conditions_met / 3.0
                     confidence = 0.5 + 0.3 * min(1.0, cycle_count / 20)
                     evidence = {
                         "avg_loop_quality": avg_quality,
                         "field_evidencing_count": fe_count,
-                        "field_evidencing_rate": fe_rate,
+                        "has_field_evidencing": fe_count > 0,
+                        "has_loop_quality": avg_quality >= 0.4,
+                        "has_strange_loop": depth_stats.get("max_depth_reached", 0) >= 2,
+                        "conditions_met": sum([fe_count > 0, avg_quality >= 0.4, depth_stats.get("max_depth_reached", 0) >= 2]),
                         "module_active": True,
                     }
             else:
@@ -1329,19 +1360,19 @@ class ConsciousnessAssessment:
             ai = kwargs.get("active_inference")
             if ai is not None:
                 stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
-                # Sparse coding = prediction errors are concentrated, not uniform
-                # Smooth = predictions change gradually, not discontinuously
                 avg_error = stats.get("avg_prediction_error", 0.5)
+                total_inferences = stats.get("total_inferences", 0)
                 if isinstance(avg_error, str):
                     avg_error = 0.5
-                # Lower, more focused errors = sparser coding
-                sparsity_score = max(0.0, 1.0 - float(avg_error) * 1.5)
-                base_score = 0.3 if ai is not None else 0.0
-                score = max(base_score, sparsity_score)
+                if total_inferences == 0:
+                    score = 0.0
+                else:
+                    sparsity_score = max(0.0, 1.0 - float(avg_error) * 2.0)
+                    score = sparsity_score
                 confidence = 0.5
                 evidence = {
                     "avg_error": avg_error,
-                    "sparsity_proxy": sparsity_score,
+                    "sparsity_proxy": score,
                     "module_active": True,
                 }
             else:
@@ -1357,13 +1388,13 @@ class ConsciousnessAssessment:
                 ignitions = ignition_stats.get("total_ignitions", 0)
                 sustain_rate = ignition_stats.get("sustain_rate", 0.0)
                 decay_rate = ignition_stats.get("decay_rate", 0.0)
-                # Nuanced ignition: sustained but with natural decay
-                # (not just on/off but proper dynamics)
-                base_score = 0.35 if gw is not None else 0.0
-                ignition_score = min(1.0, ignitions / 8) if ignitions > 0 else 0.0
-                # Good dynamics: high sustain with moderate decay
-                dynamics_score = sustain_rate * 0.7 + (1.0 - decay_rate) * 0.3
-                score = max(base_score, 0.5 * ignition_score + 0.5 * dynamics_score)
+                cycle_count = stats.get("cycle_count", 0)
+                if ignitions == 0:
+                    score = 0.0
+                else:
+                    ignition_rate = min(1.0, ignitions / max(1, cycle_count))
+                    dynamics_quality = sustain_rate * 0.7 + (1.0 - decay_rate) * 0.3
+                    score = 0.5 * ignition_rate + 0.5 * dynamics_quality
                 confidence = 0.6 if ignitions > 3 else 0.4
                 evidence = {
                     "ignitions": ignitions,
@@ -1418,6 +1449,8 @@ class ConsciousnessAssessment:
             noise_ai = _NoiseActiveInference()
             noise_bl = _NoiseBeautifulLoop()
             noise_rpt = _NoiseRPTMeasurement()
+            noise_pad = _NoisePADAffectModel()
+            noise_ce = _NoiseCausalEmergenceAnalyzer()
 
             # Random neural states (small system, random values)
             noise_neural = {
@@ -1439,6 +1472,9 @@ class ConsciousnessAssessment:
                         ablation_config=None,
                         beautiful_loop=noise_bl,
                         rpt_measurement=noise_rpt,
+                        pad_affect_model=noise_pad,
+                        causal_emergence_analyzer=noise_ce,
+                        warmup_cycles=25,
                     )
                 except Exception:
                     score = 0.0
@@ -2152,6 +2188,27 @@ class _NoiseRPTMeasurement:
             "average_global": random.random() * 0.2,
             "measurement_count": random.randint(0, 3),
         }
+
+
+class _NoisePADAffectModel:
+    """Noise stub for PADAffectModel."""
+
+    def compute_coherence(self) -> float:
+        return random.random() * 0.3
+
+    def get_latest(self):
+        return None
+
+    @property
+    def _history(self):
+        return []
+
+
+class _NoiseCausalEmergenceAnalyzer:
+    """Noise stub for CausalEmergenceAnalyzer."""
+
+    def get_latest_ce(self):
+        return random.uniform(-0.5, 0.5)
 
 
 # ============================================================================

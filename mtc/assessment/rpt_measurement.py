@@ -542,6 +542,26 @@ class RPTMeasurement:
             ),
         }
 
+    def get_oscillatory_binding_stats(self) -> Dict[str, Any]:
+        """Get oscillatory binding statistics from wired OscillatoryBinding module.
+
+        The assessment's oscillatory_binding_coherence indicator reads:
+          - global_order_parameter: Kuramoto order parameter (0-1)
+          - cross_coherence: Dict of inter-group coherence values
+          - binding_count: number of binding cycles run
+        """
+        osc = getattr(self, "_oscillatory", None)
+        if osc is None:
+            return {}
+        history = getattr(osc, "_order_history", [])
+        if not history:
+            return {}
+        return {
+            "global_order_parameter": float(np.mean(list(history))),
+            "cross_coherence": getattr(osc, "_last_cross_coherence", {}),
+            "binding_count": getattr(osc, "_binding_count", 0),
+        }
+
     def generate_report(self) -> str:
         """Generate a human-readable RPT report."""
         stats = self.get_statistics()
