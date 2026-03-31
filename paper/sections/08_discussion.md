@@ -22,9 +22,11 @@ This partition is an architectural observation, not a theoretical claim. It subs
 
 ## 8.3 The Value of Honest Assessment
 
-The noise normalization methodology (Section 5.3) and the failing indicators (Section 6.3) are as informative as the passing ones. Six indicators fail at warm start, and they fail for specific, identifiable reasons: insufficient tracking history, missing neural connectivity data, or incomplete recursive loop establishment. Each failure points to a concrete capability the framework needs — either internally (better RPT measurement) or from an embedding system (persistent state for extended operational history).
+The noise normalization methodology (Section 5.3) and the failing indicators (Section 6.3) are as informative as the passing ones. Eleven indicators fail at warm start, and they fail for specific, identifiable reasons: insufficient tracking history, missing neural connectivity data, incomplete recursive loop establishment, absence of structured temporal input, or lack of bidirectional environment interaction. Each failure points to a concrete capability the framework needs — either internally (better RPT measurement, active neural substrates) or from an embedding system (persistent state, real-world interaction, structured sensory input).
 
-This is the value of honest measurement. A framework that reports 20/20 passing on cold start would be measuring structural properties of its scoring functions, not dynamic function of its modules. The six failures — and the specific reasons they fail — are more useful to future researchers than a perfect score would be.
+More importantly, the noise baseline validates the entire methodology: random synthetic data scores 0.038 overall with 2/25 passing. This is a striking contrast to the pre-v0.3.1 assessment, which produced inflated scores on random data because scoring functions rewarded module existence rather than theoretical function. The honest baseline demonstrates that the framework can distinguish signal from noise — the most fundamental requirement of any measurement instrument.
+
+This is the value of honest measurement. A framework that reports 25/25 passing on cold start would be measuring structural properties of its scoring functions, not dynamic function of its modules. The eleven failures — and the specific reasons they fail — are more useful to future researchers than a perfect score would be. The meaningful test occurs when the framework is connected to a system processing structured input, where genuine consciousness-relevant dynamics can emerge and be measured against the honest baseline.
 
 ## 8.4 Embedding as the Next Step
 

@@ -6,7 +6,7 @@ We devote a full section to limitations because they are at least as important a
 
 This limitation supersedes all others.
 
-The 20-indicator assessment measures whether architectural features associated with consciousness theories are operating as designed. A system that scores 20/20 has all the structural features that seven major theories associate with consciousness. Whether those features are *sufficient* for phenomenal consciousness is an open question that this framework does not and cannot answer.
+The 25-indicator assessment measures whether architectural features associated with consciousness theories are operating as designed. A system that scores 25/25 has all the structural features that seven major theories associate with consciousness. Whether those features are *sufficient* for phenomenal consciousness is an open question that this framework does not and cannot answer.
 
 No computational framework can. The "hard problem" of consciousness (Chalmers, 1995) — explaining why and how physical processes give rise to subjective experience — remains unsolved. Our assessment measures correlates, not consciousness. This distinction is fundamental and non-negotiable.
 
@@ -24,7 +24,7 @@ When the framework is connected to a language model for response generation, the
 
 This means apparent intelligence in conversation is not evidence of consciousness. It is evidence of a large language model doing what large language models do. A system that generates articulate reports about its own mental states may simply be fluent, not aware.
 
-The framework addresses this confound by separating the assessment from the LLM. The 20 indicators measure architectural dynamics — workspace competition, prediction error reduction, binding quality — not language output. This separation is essential: if the assessment could be gamed by connecting a more articulate language model, it would measure fluency rather than function.
+The framework addresses this confound by separating the assessment from the LLM. The 25 indicators measure architectural dynamics — workspace competition, prediction error reduction, binding quality — not language output. This separation is essential: if the assessment could be gamed by connecting a more articulate language model, it would measure fluency rather than function.
 
 ## 7.4 The Labeling Problem
 
