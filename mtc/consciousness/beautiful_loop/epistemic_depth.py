@@ -182,7 +182,9 @@ class EpistemicDepthTracker:
             self_referential_hots = 0
             for hot in higher_order_thoughts:
                 content = ""
-                if hasattr(hot, "content"):
+                if hasattr(hot, "meta_content") and hot.meta_content:
+                    content = str(hot.meta_content).lower()
+                elif hasattr(hot, "content") and hot.content:
                     content = str(hot.content).lower()
                 elif hasattr(hot, "description"):
                     content = str(hot.description).lower()

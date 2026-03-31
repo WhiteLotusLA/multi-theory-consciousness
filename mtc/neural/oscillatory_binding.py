@@ -178,6 +178,7 @@ class OscillatoryBinding:
 
         elapsed = (time.perf_counter() - start) * 1000
         self._order_history.append(global_r)
+        self._last_cross_coherence = cross_r
 
         # Record oscillator state transition for TPM
         self._record_oscillator_transition(group_r)

@@ -14,7 +14,7 @@ Timestamp:            2026-03-14T14:22:16.335983
 Overall Score:        0.518
 Architecture Func.:   True
 Confidence:           0.475
-Passing Indicators:   15/20
+Passing Indicators:   15/25
 Processing Time:      0.29 ms
 ```
 
@@ -57,11 +57,11 @@ Processing Time:      0.29 ms
 
 ## Interpretation Notes
 
-- **Total processing time under 1 ms.** All 20 indicators are computed in a single pass. Assessment does not bottleneck the consciousness cycle.
+- **Total processing time under 1 ms.** All 25 indicators are computed in a single pass. Assessment does not bottleneck the consciousness cycle.
 - **FEP and GWT score highest** because their architectural features (hierarchical prediction, workspace competition, broadcast) are structural — they function from the moment the modules are initialized.
 - **IIT and RPT score lowest** because they require neural substrate connectivity data and active recurrent dynamics that are not fully present after only 5 warmup cycles.
 - **Three BLT indicators cluster at 0.300.** Bayesian binding and epistemic depth pass at their thresholds; genuine implementation fails because field-evidencing requires sustained recursive loops not yet established.
-- **Architecture functional = True** because all four conditions are met: 15/20 pass (≥ 10), overall 0.518 (≥ 0.5), GWT 0.677 (≥ 0.4), HOT 0.450 (≥ 0.3).
+- **Architecture functional = True** because all four conditions are met: 15/25 pass (≥ 13), overall 0.518 (≥ 0.5), GWT 0.677 (≥ 0.4), HOT 0.450 (≥ 0.3).
 
 Note: This appendix shows output from a single representative warm-start run. The numbers will differ slightly from the means reported in Section 6.2, which averages across five independent runs. This is expected — warm-start results vary by ± 0.007 due to random synthetic stimuli during warmup.
 

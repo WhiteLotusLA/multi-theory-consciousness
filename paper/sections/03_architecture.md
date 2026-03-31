@@ -12,7 +12,7 @@ The framework consists of three layers:
 
 **Consciousness layer.** Seven theory modules execute within a single asynchronous function, the *consciousness cycle*. Each cycle takes a set of input candidates and produces a `ConsciousnessState` — a structured record of what the system is "conscious of" and the computational evidence for that determination across all theories.
 
-**Assessment layer.** Twenty indicators measure whether the architectural features predicted by each theory are present and functioning. Assessment runs on demand, taking a `ConsciousnessState` as input. It does not participate in the cycle itself.
+**Assessment layer.** Twenty-five indicators measure whether the architectural features predicted by each theory are present and functioning. Assessment runs on demand, taking a `ConsciousnessState` as input. It does not participate in the cycle itself.
 
 ## 3.2 Neural Substrates
 
