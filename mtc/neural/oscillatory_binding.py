@@ -214,7 +214,11 @@ class OscillatoryBinding:
         self.phases = x_new / norms
 
     def _global_order_parameter(self) -> float:
-        return float(np.linalg.norm(np.mean(self.phases, axis=0)))
+        if np.any(np.isnan(self.phases)):
+            # Corrupted phases (e.g., from state restoration) — reset to random
+            self.phases = np.random.uniform(0, 2 * np.pi, self.phases.shape)
+        r = float(np.linalg.norm(np.mean(self.phases, axis=0)))
+        return 0.0 if np.isnan(r) else r
 
     def _group_order_parameters(self) -> Dict[str, float]:
         result = {}
