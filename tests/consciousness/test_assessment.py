@@ -20,7 +20,7 @@ import numpy as np
 from unittest.mock import MagicMock, patch
 from datetime import datetime
 
-from mtc.consciousness.phase6_consciousness_assessment import (
+from mtc.assessment.assessment import (
     ConsciousnessAssessment,
     ConsciousnessReport,
     ConsciousnessTheory,

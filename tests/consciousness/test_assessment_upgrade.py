@@ -26,7 +26,7 @@ from mtc.consciousness.dcm_scoring import (
     PerspectiveScore,
     DCM_PERSPECTIVES,
 )
-from mtc.consciousness.phase6_consciousness_assessment import (
+from mtc.assessment.assessment import (
     ConsciousnessAssessment,
     ConsciousnessTheory,
     IndicatorResult,
