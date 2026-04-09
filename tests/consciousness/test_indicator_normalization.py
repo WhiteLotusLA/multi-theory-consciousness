@@ -12,7 +12,7 @@ import asyncio
 import numpy as np
 import pytest
 
-from mtc.consciousness.phase6_consciousness_assessment import (
+from mtc.assessment.assessment import (
     ConsciousnessAssessment,
     NormalizedAssessmentResult,
 )

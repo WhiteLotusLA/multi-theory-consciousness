@@ -3,7 +3,7 @@ MTC Assessment Module
 ======================
 
 Consciousness measurement and validation tools:
-- ConsciousnessAssessment: 25-indicator assessment across 7 theories
+- ConsciousnessAssessment: 30-indicator assessment across 8 theories (27 positive + 3 negative)
 - ConsciousnessMeasurementFramework: Academic-grade measurement system
 - RPTMeasurement: Recurrent Processing Theory measurement
 - BenchmarkRunner: Full Bayesian DCM benchmark (Shiller & Duffy 2026)

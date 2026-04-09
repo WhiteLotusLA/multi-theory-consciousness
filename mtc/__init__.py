@@ -18,7 +18,7 @@ Based on Butlin et al. (2023, 2025): "Consciousness in Artificial
 Intelligence: Insights from the Science of Consciousness"
 """
 
-__version__ = "0.2.0"
+__version__ = "0.4.0"
 __project__ = "Multi-Theory Consciousness Framework"
 
 from mtc.assessment.assessment import (

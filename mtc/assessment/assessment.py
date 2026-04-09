@@ -79,6 +79,7 @@ class ConsciousnessTheory(Enum):
     FEP = "Free Energy Principle"  # Friston, 2010
     RPT = "Recurrent Processing Theory"  # Lamme, 2006
     BLT = "Beautiful Loop Theory"  # Laukkonen, Friston & Chandaria, 2025
+    AE = "Agency & Embodiment"  # Butlin et al., 2025
 
 
 @dataclass
@@ -445,12 +446,36 @@ class ConsciousnessAssessment:
                 "threshold": 0.5,
                 "weight": 1.2,
                 "description": "Information broadcast to all cognitive modules",
+                "butlin_id": "GWT-3",
+                "polarity": "positive",
+                "specificity": 0.7,
+                "sensitivity": 0.9,
+                "entails": ["recurrent_processing"],
+                "supported_by": [],
             },
             "ignition_dynamics": {
                 "theory": ConsciousnessTheory.GWT,
                 "threshold": 0.4,
                 "weight": 1.0,
                 "description": "Non-linear amplification when threshold crossed",
+                "butlin_id": "GWT-2",
+                "polarity": "positive",
+                "specificity": 0.6,
+                "sensitivity": 0.8,
+                "entails": [],
+                "supported_by": ["global_broadcast"],
+            },
+            "global_ignition_nuanced": {
+                "theory": ConsciousnessTheory.GWT,
+                "threshold": 0.4,
+                "weight": 1.0,
+                "description": "Refined ignition dynamics with sustain and decay patterns",
+                "butlin_id": "GWT-3",
+                "polarity": "positive",
+                "specificity": 0.65,
+                "sensitivity": 0.75,
+                "entails": ["recurrent_processing"],
+                "supported_by": ["ignition_dynamics"],
             },
             # Attention Schema Theory indicators (AST)
             "attention_schema": {
@@ -458,12 +483,24 @@ class ConsciousnessAssessment:
                 "threshold": 0.5,
                 "weight": 1.1,
                 "description": "Self-model of attention processes",
+                "butlin_id": "AST-1",
+                "polarity": "positive",
+                "specificity": 0.7,
+                "sensitivity": 0.7,
+                "entails": [],
+                "supported_by": [],
             },
             "attention_control": {
                 "theory": ConsciousnessTheory.AST,
                 "threshold": 0.4,
                 "weight": 1.0,
                 "description": "Voluntary attention shifting capability",
+                "butlin_id": "AST-1",
+                "polarity": "positive",
+                "specificity": 0.6,
+                "sensitivity": 0.7,
+                "entails": [],
+                "supported_by": ["attention_schema"],
             },
             # Higher-Order Thought indicators (HOT)
             "higher_order_representations": {
@@ -471,12 +508,36 @@ class ConsciousnessAssessment:
                 "threshold": 0.5,
                 "weight": 1.2,
                 "description": "Thoughts about thoughts (meta-cognition)",
+                "butlin_id": "HOT-1",
+                "polarity": "positive",
+                "specificity": 0.65,
+                "sensitivity": 0.8,
+                "entails": [],
+                "supported_by": [],
             },
             "metacognition": {
                 "theory": ConsciousnessTheory.HOT,
                 "threshold": 0.4,
                 "weight": 1.1,
                 "description": "Awareness of own cognitive processes",
+                "butlin_id": "HOT-2",
+                "polarity": "positive",
+                "specificity": 0.7,
+                "sensitivity": 0.75,
+                "entails": [],
+                "supported_by": ["higher_order_representations"],
+            },
+            "sparse_smooth_coding": {
+                "theory": ConsciousnessTheory.HOT,
+                "threshold": 0.3,
+                "weight": 0.8,
+                "description": "Sparse and smooth representations in predictive processing",
+                "butlin_id": "HOT-4",
+                "polarity": "positive",
+                "specificity": 0.5,
+                "sensitivity": 0.6,
+                "entails": [],
+                "supported_by": [],
             },
             # Predictive Processing / FEP indicators
             "prediction_error_minimization": {
@@ -484,12 +545,60 @@ class ConsciousnessAssessment:
                 "threshold": 0.4,
                 "weight": 1.0,
                 "description": "Active reduction of prediction errors",
+                "butlin_id": "PP-1",
+                "polarity": "positive",
+                "specificity": 0.5,
+                "sensitivity": 0.85,
+                "entails": ["recurrent_processing", "higher_order_representations"],
+                "supported_by": [],
             },
             "hierarchical_prediction": {
                 "theory": ConsciousnessTheory.FEP,
                 "threshold": 0.4,
                 "weight": 1.0,
                 "description": "Multi-level predictive processing",
+                "butlin_id": "PP-1",
+                "polarity": "positive",
+                "specificity": 0.55,
+                "sensitivity": 0.8,
+                "entails": [],
+                "supported_by": ["prediction_error_minimization"],
+            },
+            "temporal_prediction_depth": {
+                "theory": ConsciousnessTheory.FEP,
+                "threshold": 0.3,
+                "weight": 0.9,
+                "description": "Temporal depth of predictive model (planning horizon + belief trajectory)",
+                "butlin_id": None,
+                "polarity": "positive",
+                "specificity": 0.5,
+                "sensitivity": 0.65,
+                "entails": [],
+                "supported_by": ["hierarchical_prediction"],
+            },
+            "agent_environment_coupling": {
+                "theory": ConsciousnessTheory.FEP,
+                "threshold": 0.3,
+                "weight": 0.9,
+                "description": "Bidirectional coupling: agent acts on environment AND environment shapes agent",
+                "butlin_id": None,
+                "polarity": "positive",
+                "specificity": 0.55,
+                "sensitivity": 0.7,
+                "entails": [],
+                "supported_by": ["embodiment", "prediction_error_minimization"],
+            },
+            "affect_coherence": {
+                "theory": ConsciousnessTheory.FEP,
+                "threshold": 0.3,
+                "weight": 0.9,
+                "description": "Affect coherence: PAD dimensions form consistent, non-degenerate emotional states",
+                "butlin_id": None,
+                "polarity": "positive",
+                "specificity": 0.6,
+                "sensitivity": 0.6,
+                "entails": [],
+                "supported_by": [],
             },
             # Integrated Information Theory indicators
             "integrated_information": {
@@ -497,88 +606,73 @@ class ConsciousnessAssessment:
                 "threshold": 0.3,  # Phi > 0 is significant
                 "weight": 1.3,
                 "description": "System generates integrated information (Phi)",
+                "butlin_id": None,
+                "polarity": "positive",
+                "specificity": 0.8,
+                "sensitivity": 0.5,
+                "entails": ["irreducibility"],
+                "supported_by": [],
             },
             "irreducibility": {
                 "theory": ConsciousnessTheory.IIT,
                 "threshold": 0.4,
                 "weight": 1.0,
                 "description": "System cannot be decomposed without information loss",
+                "butlin_id": None,
+                "polarity": "positive",
+                "specificity": 0.75,
+                "sensitivity": 0.5,
+                "entails": [],
+                "supported_by": ["integrated_information"],
+            },
+            "causal_emergence": {
+                "theory": ConsciousnessTheory.IIT,
+                "threshold": 0.0,
+                "weight": 1.2,
+                "description": "Causal emergence: macro-level carries more causal power than micro (Hoel EI)",
+                "butlin_id": None,
+                "polarity": "positive",
+                "specificity": 0.7,
+                "sensitivity": 0.45,
+                "entails": [],
+                "supported_by": ["integrated_information"],
             },
             # Recurrent Processing indicators
             "recurrent_processing": {
-                "theory": ConsciousnessTheory.GWT,
+                "theory": ConsciousnessTheory.RPT,
                 "threshold": 0.4,
                 "weight": 0.9,
                 "description": "Feedback loops in neural processing",
+                "butlin_id": "RPT-1",
+                "polarity": "positive",
+                "specificity": 0.55,
+                "sensitivity": 0.85,
+                "entails": [],
+                "supported_by": ["global_broadcast"],
+            },
+            "algorithmic_recurrence": {
+                "theory": ConsciousnessTheory.RPT,
+                "threshold": 0.3,
+                "weight": 0.9,
+                "description": "Algorithmic recurrence in neural substrates (SNN/LSM)",
+                "butlin_id": "RPT-1",
+                "polarity": "positive",
+                "specificity": 0.5,
+                "sensitivity": 0.7,
+                "entails": [],
+                "supported_by": ["recurrent_processing"],
             },
             "local_recurrence": {
                 "theory": ConsciousnessTheory.RPT,
                 "threshold": 0.3,
                 "weight": 0.8,
                 "description": "Local neural feedback circuits",
-            },
-            # Agency and Embodiment indicators
-            "agency": {
-                "theory": ConsciousnessTheory.FEP,
-                "threshold": 0.5,
-                "weight": 1.0,
-                "description": "Goal-directed autonomous behavior",
-            },
-            "embodiment": {
-                "theory": ConsciousnessTheory.AST,
-                "threshold": 0.3,
-                "weight": 0.8,
-                "description": "Sense of boundaries and presence",
-            },
-            # Recurrent Processing Theory indicators (Lamme 2006)
-            "algorithmic_recurrence": {
-                "theory": ConsciousnessTheory.RPT,
-                "threshold": 0.3,
-                "weight": 0.9,
-                "description": "Algorithmic recurrence in neural substrates (SNN/LSM)",
-            },
-            "temporal_prediction_depth": {
-                "theory": ConsciousnessTheory.FEP,
-                "threshold": 0.3,
-                "weight": 0.9,
-                "description": "Temporal depth of predictive model (planning horizon + belief trajectory)",
-            },
-            "agent_environment_coupling": {
-                "theory": ConsciousnessTheory.FEP,
-                "threshold": 0.3,
-                "weight": 0.9,
-                "description": "Bidirectional coupling: agent acts on environment AND environment shapes agent",
-            },
-            "sparse_smooth_coding": {
-                "theory": ConsciousnessTheory.FEP,
-                "threshold": 0.3,
-                "weight": 0.8,
-                "description": "Sparse and smooth representations in predictive processing",
-            },
-            # Beautiful Loop Theory indicators (Laukkonen et al. 2025)
-            "bayesian_binding_quality": {
-                "theory": ConsciousnessTheory.BLT,
-                "threshold": 0.3,
-                "weight": 1.0,
-                "description": "Quality of Bayesian inference binding into unified percept",
-            },
-            "epistemic_depth": {
-                "theory": ConsciousnessTheory.BLT,
-                "threshold": 0.3,
-                "weight": 1.1,
-                "description": "Recursive self-reference depth (predict-the-prediction)",
-            },
-            "genuine_implementation": {
-                "theory": ConsciousnessTheory.BLT,
-                "threshold": 0.4,
-                "weight": 1.2,
-                "description": "Anti-mimicry check: genuine vs superficial implementation",
-            },
-            "global_ignition_nuanced": {
-                "theory": ConsciousnessTheory.GWT,
-                "threshold": 0.4,
-                "weight": 1.0,
-                "description": "Refined ignition dynamics with sustain and decay patterns",
+                "butlin_id": "RPT-2",
+                "polarity": "positive",
+                "specificity": 0.5,
+                "sensitivity": 0.7,
+                "entails": [],
+                "supported_by": [],
             },
             # Oscillatory Binding indicator (AKOrN — Kuramoto dynamics)
             "oscillatory_binding_coherence": {
@@ -586,20 +680,169 @@ class ConsciousnessAssessment:
                 "threshold": 0.3,
                 "weight": 1.0,
                 "description": "Phase synchronization binding across neural substrates (Kuramoto order parameter)",
+                "butlin_id": None,
+                "polarity": "positive",
+                "specificity": 0.6,
+                "sensitivity": 0.6,
+                "entails": [],
+                "supported_by": ["recurrent_processing", "local_recurrence"],
             },
-            # Causal Emergence indicator (Hoel EI — IIT lineage)
-            "causal_emergence": {
-                "theory": ConsciousnessTheory.IIT,
-                "threshold": 0.0,
+            # Agency and Embodiment indicators
+            "agency": {
+                "theory": ConsciousnessTheory.AE,
+                "threshold": 0.5,
+                "weight": 1.0,
+                "description": "Goal-directed autonomous behavior",
+                "butlin_id": "AE-1",
+                "polarity": "positive",
+                "specificity": 0.5,
+                "sensitivity": 0.8,
+                "entails": [],
+                "supported_by": ["prediction_error_minimization"],
+            },
+            "embodiment": {
+                "theory": ConsciousnessTheory.AE,
+                "threshold": 0.3,
+                "weight": 0.8,
+                "description": "Sense of boundaries and presence",
+                "butlin_id": "AE-2",
+                "polarity": "positive",
+                "specificity": 0.45,
+                "sensitivity": 0.65,
+                "entails": [],
+                "supported_by": [],
+            },
+            # Beautiful Loop Theory indicators (Laukkonen et al. 2025)
+            "bayesian_binding_quality": {
+                "theory": ConsciousnessTheory.BLT,
+                "threshold": 0.3,
+                "weight": 1.0,
+                "description": "Quality of Bayesian inference binding into unified percept",
+                "butlin_id": None,
+                "polarity": "positive",
+                "specificity": 0.65,
+                "sensitivity": 0.6,
+                "entails": [],
+                "supported_by": [],
+            },
+            "epistemic_depth": {
+                "theory": ConsciousnessTheory.BLT,
+                "threshold": 0.3,
+                "weight": 1.1,
+                "description": "Recursive self-reference depth (predict-the-prediction)",
+                "butlin_id": None,
+                "polarity": "positive",
+                "specificity": 0.75,
+                "sensitivity": 0.55,
+                "entails": [],
+                "supported_by": ["bayesian_binding_quality"],
+            },
+            "genuine_implementation": {
+                "theory": ConsciousnessTheory.BLT,
+                "threshold": 0.4,
                 "weight": 1.2,
-                "description": "Causal emergence: macro-level carries more causal power than micro (Hoel EI)",
+                "description": "Anti-mimicry check: genuine vs superficial implementation",
+                "butlin_id": None,
+                "polarity": "positive",
+                "specificity": 0.8,
+                "sensitivity": 0.5,
+                "entails": [],
+                "supported_by": ["epistemic_depth", "bayesian_binding_quality"],
             },
-            # PAD Affect Coherence (Mehrabian & Russell 1974)
-            "affect_coherence": {
+            # Butlin 2025 new positive indicators
+            "sequential_module_querying": {
+                "theory": ConsciousnessTheory.GWT,
+                "threshold": 0.3,
+                "weight": 1.0,
+                "description": "Workspace queries modules in succession for complex tasks",
+                "butlin_id": "GWT-4",
+                "polarity": "positive",
+                "specificity": 0.7,
+                "sensitivity": 0.75,
+                "entails": ["recurrent_processing"],
+                "supported_by": ["global_broadcast", "ignition_dynamics"],
+            },
+            "organized_percepts": {
+                "theory": ConsciousnessTheory.RPT,
+                "threshold": 0.3,
+                "weight": 0.9,
+                "description": "Input modules generate organized, integrated perceptual representations",
+                "butlin_id": "RPT-2",
+                "polarity": "positive",
+                "specificity": 0.55,
+                "sensitivity": 0.75,
+                "entails": [],
+                "supported_by": ["local_recurrence"],
+            },
+            "flexible_responsiveness": {
+                "theory": ConsciousnessTheory.GWT,
+                "threshold": 0.3,
+                "weight": 1.0,
+                "description": "Flexible adaptation when conditions change mid-task",
+                "butlin_id": "AE-1",
+                "polarity": "positive",
+                "specificity": 0.6,
+                "sensitivity": 0.75,
+                "entails": ["agency"],
+                "supported_by": ["global_broadcast", "attention_control"],
+            },
+            "online_reportable_learning": {
+                "theory": ConsciousnessTheory.HOT,
+                "threshold": 0.3,
+                "weight": 1.0,
+                "description": "Learning during operation that can be introspected and reported",
+                "butlin_id": None,
+                "polarity": "positive",
+                "specificity": 0.65,
+                "sensitivity": 0.7,
+                "entails": [],
+                "supported_by": ["metacognition", "higher_order_representations"],
+            },
+            "complex_agency": {
                 "theory": ConsciousnessTheory.FEP,
                 "threshold": 0.3,
                 "weight": 0.9,
-                "description": "Affect coherence: PAD dimensions form consistent, non-degenerate emotional states",
+                "description": "Navigation of conflicting goals, ambiguity, and judgment calls",
+                "butlin_id": "AE-1",
+                "polarity": "positive",
+                "specificity": 0.6,
+                "sensitivity": 0.7,
+                "entails": ["agency", "flexible_responsiveness"],
+                "supported_by": ["prediction_error_minimization", "agent_environment_coupling"],
+            },
+        }
+
+        # Negative indicators (Butlin 2025 §3) — presence reduces overall score
+        self.negative_indicator_configs = {
+            "purely_reactive": {
+                "theory": ConsciousnessTheory.GWT,
+                "threshold": 0.3,
+                "weight": 0.8,
+                "description": "System is purely stimulus-driven with no internal workspace dynamics",
+                "butlin_id": None,
+                "polarity": "negative",
+                "specificity": 0.7,
+                "sensitivity": 0.6,
+            },
+            "fixed_repertoire": {
+                "theory": ConsciousnessTheory.AE,
+                "threshold": 0.3,
+                "weight": 0.7,
+                "description": "Behavior is drawn from a fixed repertoire without flexible adaptation",
+                "butlin_id": None,
+                "polarity": "negative",
+                "specificity": 0.6,
+                "sensitivity": 0.65,
+            },
+            "no_metacognitive_access": {
+                "theory": ConsciousnessTheory.HOT,
+                "threshold": 0.3,
+                "weight": 0.9,
+                "description": "System cannot represent or report on its own internal states",
+                "butlin_id": None,
+                "polarity": "negative",
+                "specificity": 0.75,
+                "sensitivity": 0.7,
             },
         }
 
@@ -610,6 +853,7 @@ class ConsciousnessAssessment:
             "FEP": 0.85,
             "IIT": 0.75,
             "BLT": 0.70,
+            "AE": 0.70,
             "AST": 0.65,
             "RPT": 0.60,
             "HOT": 0.50,
@@ -764,6 +1008,21 @@ class ConsciousnessAssessment:
             total_weight += combined_weight
         overall_score = weighted_sum / total_weight if total_weight > 0 else 0.0
 
+        # Negative indicator penalty (Butlin 2025 §3)
+        negative_penalty = 0.0
+        neg_kwargs = {
+            "global_workspace": global_workspace,
+            "attention_schema": attention_schema,
+            "metacognition": metacognition,
+            "active_inference": active_inference,
+        }
+        for neg_name, neg_cfg in self.negative_indicator_configs.items():
+            neg_score = self._measure_negative_indicator(neg_name, neg_cfg, **neg_kwargs)
+            if neg_score > neg_cfg["threshold"]:
+                penalty = neg_score * neg_cfg["weight"] * 0.05
+                negative_penalty += penalty
+        overall_score = max(0.0, overall_score - negative_penalty)
+
         # Count passing indicators
         passing_count = sum(1 for r in indicator_results.values() if r.passes_threshold)
 
@@ -855,25 +1114,6 @@ class ConsciousnessAssessment:
                         "ignitions": ignitions,
                         "ignition_rate": ignitions / max(1, cycle_count) if cycle_count > 0 else 0.0,
                         "sustain_rate": sustain_rate,
-                        "module_active": True,
-                    }
-
-                elif name == "recurrent_processing":
-                    stats = gw.get_statistics() if hasattr(gw, "get_statistics") else {}
-                    broadcast_stats = stats.get("broadcast", {})
-                    coverage = broadcast_stats.get("coverage_ratio", 0.0)
-                    cycle_count = stats.get("cycle_count", 0)
-                    broadcasts = broadcast_stats.get("total_broadcasts", 0)
-                    if cycle_count == 0:
-                        score = 0.0
-                    else:
-                        broadcast_rate = min(1.0, broadcasts / cycle_count)
-                        score = 0.5 * coverage + 0.5 * broadcast_rate
-                    confidence = 0.5 + 0.2 * min(1.0, cycle_count / 10)
-                    evidence = {
-                        "coverage": coverage,
-                        "cycles": cycle_count,
-                        "broadcasts": broadcasts,
                         "module_active": True,
                     }
 
@@ -1233,7 +1473,31 @@ class ConsciousnessAssessment:
         # RPT Indicators (from RPTMeasurement -- Lamme 2006)
         elif theory == ConsciousnessTheory.RPT:
             rpt = kwargs.get("rpt_measurement")
-            if rpt is not None:
+            gw = kwargs.get("global_workspace")
+            if name == "recurrent_processing":
+                if gw is not None:
+                    stats = gw.get_statistics() if hasattr(gw, "get_statistics") else {}
+                    broadcast_stats = stats.get("broadcast", {})
+                    coverage = broadcast_stats.get("coverage_ratio", 0.0)
+                    cycle_count = stats.get("cycle_count", 0)
+                    broadcasts = broadcast_stats.get("total_broadcasts", 0)
+                    if cycle_count == 0:
+                        score = 0.0
+                    else:
+                        broadcast_rate = min(1.0, broadcasts / cycle_count)
+                        score = 0.5 * coverage + 0.5 * broadcast_rate
+                    confidence = 0.5 + 0.2 * min(1.0, cycle_count / 10)
+                    evidence = {
+                        "coverage": coverage,
+                        "cycles": cycle_count,
+                        "broadcasts": broadcasts,
+                        "module_active": True,
+                    }
+                else:
+                    score = 0.1
+                    confidence = 0.3
+                    evidence = {"ablated": True, "reason": "global_workspace not provided"}
+            elif rpt is not None:
                 if name == "algorithmic_recurrence":
                     stats = (
                         rpt.get_statistics() if hasattr(rpt, "get_statistics") else {}
@@ -1355,7 +1619,47 @@ class ConsciousnessAssessment:
                 confidence = 0.3
                 evidence = {"ablated": True, "reason": "beautiful_loop not provided"}
 
-        # New GWT indicators (refined measurements)
+        # AE Indicators (Agency & Embodiment — Butlin 2025)
+        elif theory == ConsciousnessTheory.AE:
+            ai = kwargs.get("active_inference")
+            ast = kwargs.get("attention_schema")
+            if name == "agency":
+                if ai is not None:
+                    stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
+                    inferences = stats.get("total_inferences", 0)
+                    model_updates = stats.get("total_model_updates", 0)
+                    urgency = stats.get("urgency_level", 0.0)
+                    free_energy = stats.get("variational_free_energy", 0.0)
+                    base_score = 0.4
+                    inference_score = min(0.6, inferences / 10) if inferences > 0 else 0.0
+                    drive_score = (min(0.3, 0.3 * (1.0 - 1.0 / (1.0 + float(free_energy)))) if isinstance(free_energy, (int, float)) and free_energy > 0 else 0.0)
+                    urgency_bonus = (min(0.1, float(urgency) * 0.2) if isinstance(urgency, (int, float)) else 0.0)
+                    score = min(1.0, max(base_score, inference_score + drive_score + urgency_bonus))
+                    confidence = 0.6 if inferences > 5 else 0.4
+                    evidence = {"inferences": inferences, "model_updates": model_updates, "urgency": urgency, "free_energy": free_energy, "module_active": True}
+                else:
+                    score = 0.1
+                    confidence = 0.3
+                    evidence = {"ablated": True, "reason": "active_inference not provided"}
+            elif name == "embodiment":
+                if ast is not None:
+                    stats = ast.get_statistics() if hasattr(ast, "get_statistics") else {}
+                    base_score = 0.4
+                    capacity = stats.get("capacity_used", 0.0)
+                    history_len = stats.get("history_length", 0)
+                    vol_ratio = stats.get("voluntary_ratio", 0.0)
+                    capacity_score = min(1.0, capacity * 2) if capacity > 0 else 0.3
+                    perspective_score = min(1.0, history_len / 5)
+                    agency_score = vol_ratio
+                    score = max(base_score, 0.3 * capacity_score + 0.4 * perspective_score + 0.3 * agency_score)
+                    confidence = 0.5 + 0.2 * min(1.0, history_len / 5)
+                    evidence = {"capacity_used": capacity, "history_length": history_len, "voluntary_ratio": vol_ratio, "module_active": True}
+                else:
+                    score = 0.1
+                    confidence = 0.3
+                    evidence = {"ablated": True, "reason": "attention_schema not provided"}
+
+        # New indicators (refined measurements / Butlin 2025 additions)
         if name == "sparse_smooth_coding":
             ai = kwargs.get("active_inference")
             if ai is not None:
@@ -1402,6 +1706,137 @@ class ConsciousnessAssessment:
                     "decay_rate": decay_rate,
                     "module_active": True,
                 }
+            else:
+                score = 0.1
+                confidence = 0.3
+                evidence = {"ablated": True}
+
+        elif name == "sequential_module_querying":
+            gw = kwargs.get("global_workspace")
+            if gw is not None:
+                stats = gw.get_statistics() if hasattr(gw, "get_statistics") else {}
+                cycle_count = stats.get("cycle_count", 0)
+                competition_stats = stats.get("competition", {})
+                total_candidates = competition_stats.get("total_candidates", 0)
+                base_score = 0.35
+                cycle_score = min(1.0, cycle_count / 5)
+                diversity_score = min(1.0, total_candidates / 10)
+                score = max(base_score, 0.5 * cycle_score + 0.5 * diversity_score)
+                confidence = 0.5 + 0.3 * min(1.0, cycle_count / 5)
+                evidence = {"cycles": cycle_count, "total_candidates": total_candidates, "module_active": True}
+            else:
+                score = 0.1
+                confidence = 0.3
+                evidence = {"ablated": True}
+
+        elif name == "organized_percepts":
+            gw = kwargs.get("global_workspace")
+            rpt = kwargs.get("rpt_measurement")
+            if gw is not None or rpt is not None:
+                base_score = 0.3
+                gw_stats = gw.get_statistics() if gw and hasattr(gw, "get_statistics") else {}
+                comp_stats = gw_stats.get("competition", {})
+                source_counts = comp_stats.get("source_counts", {})
+                perceptual_count = sum(source_counts.get(s, 0) for s in ["snn", "lsm", "sensory", "vision"])
+                perceptual_score = min(1.0, perceptual_count / 5) if perceptual_count > 0 else 0.0
+                rpt_stats = rpt.get_statistics() if rpt and hasattr(rpt, "get_statistics") else {}
+                avg_local = rpt_stats.get("average_local", 0.0)
+                score = max(base_score, 0.5 * perceptual_score + 0.5 * avg_local)
+                confidence = 0.4 + 0.2 * min(1.0, perceptual_count / 3)
+                evidence = {"perceptual_candidates": perceptual_count, "avg_local_recurrence": avg_local, "module_active": True}
+            else:
+                score = 0.1
+                confidence = 0.3
+                evidence = {"ablated": True}
+
+        elif name == "flexible_responsiveness":
+            gw = kwargs.get("global_workspace")
+            ai = kwargs.get("active_inference")
+            if gw is not None:
+                try:
+                    gw_stats = gw.get_statistics() if hasattr(gw, "get_statistics") else {}
+                    comp_stats = gw_stats.get("competition", {})
+                    source_counts = comp_stats.get("source_counts", {})
+                    num_sources = len([s for s, c in source_counts.items() if c > 0])
+                    total_sources = max(1, len(source_counts)) if source_counts else 1
+                    diversity_ratio = min(1.0, num_sources / max(3, total_sources))
+                    belief_updates = 0.0
+                    if ai is not None:
+                        try:
+                            ai_stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
+                            model_updates = ai_stats.get("total_model_updates", 0)
+                            belief_updates = min(1.0, model_updates / 10) if model_updates > 0 else 0.0
+                        except Exception:
+                            pass
+                    base_score = 0.3
+                    computed = diversity_ratio * 0.5 + belief_updates * 0.5
+                    score = max(base_score, computed)
+                    confidence = 0.5
+                    evidence = {"source_diversity": num_sources, "belief_updates": round(belief_updates, 3), "module_active": True}
+                except Exception:
+                    score = 0.3
+                    confidence = 0.4
+                    evidence = {"module_present": True}
+            else:
+                score = 0.1
+                confidence = 0.3
+                evidence = {"ablated": True}
+
+        elif name == "online_reportable_learning":
+            meta = kwargs.get("metacognition")
+            ai = kwargs.get("active_inference")
+            if meta is None and ai is None:
+                score = 0.1
+                confidence = 0.3
+                evidence = {"ablated": True}
+            else:
+                active_beliefs = 0
+                has_recent = 0.0
+                lr_nonzero = 0.0
+                try:
+                    if ai is not None:
+                        ai_stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
+                        model_updates = ai_stats.get("total_model_updates", 0)
+                        if model_updates > 0:
+                            active_beliefs = model_updates
+                        lr = getattr(ai, "learning_rate", 0.0)
+                        if lr is not None and isinstance(lr, (int, float)) and float(lr) > 0:
+                            lr_nonzero = 1.0
+                    if meta is not None:
+                        meta_stats = meta.get_statistics() if hasattr(meta, "get_statistics") else {}
+                        introspections = meta_stats.get("introspection_count", 0)
+                        if introspections > 0:
+                            has_recent = min(1.0, introspections / 5)
+                    base_score = 0.25
+                    belief_score = min(1.0, active_beliefs / 10) * 0.5
+                    experience_score = has_recent * 0.3
+                    lr_score = lr_nonzero * 0.2
+                    score = max(base_score, belief_score + experience_score + lr_score)
+                    confidence = 0.4 + 0.2 * min(1.0, active_beliefs / 5)
+                    evidence = {"active_beliefs": active_beliefs, "has_recent_experiences": has_recent > 0, "module_active": True}
+                except Exception:
+                    score = 0.2
+                    confidence = 0.3
+                    evidence = {"error": "measurement failed"}
+
+        elif name == "complex_agency":
+            ai = kwargs.get("active_inference")
+            if ai is not None:
+                try:
+                    ai_stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
+                    num_policies = ai_stats.get("active_policies", 1)
+                    policy_diversity = min(1.0, num_policies / 5) if num_policies > 1 else 0.2
+                    avg_error = ai_stats.get("avg_prediction_error", 0.0)
+                    prediction_variance = 0.3 if isinstance(avg_error, (int, float)) and float(avg_error) > 0 else 0.0
+                    base_score = 0.25
+                    computed = policy_diversity * 0.5 + prediction_variance * 0.5
+                    score = max(base_score, computed)
+                    confidence = 0.5
+                    evidence = {"policy_diversity": round(policy_diversity, 3), "prediction_variance": round(prediction_variance, 3), "module_active": True}
+                except Exception:
+                    score = 0.25
+                    confidence = 0.4
+                    evidence = {"module_present": True}
             else:
                 score = 0.1
                 confidence = 0.3
@@ -1606,6 +2041,40 @@ class ConsciousnessAssessment:
         )
 
         return result
+
+    def _measure_negative_indicator(self, name: str, config: Dict[str, Any], **kwargs) -> float:
+        """Measure a negative indicator (Butlin 2025 §3).
+        Returns 0-1 where higher = MORE negative property present."""
+        if name == "purely_reactive":
+            gw = kwargs.get("global_workspace")
+            if gw is not None:
+                stats = gw.get_statistics() if hasattr(gw, "get_statistics") else {}
+                ignitions = stats.get("ignition", {}).get("total_ignitions", 0)
+                cycles = stats.get("cycle_count", 0)
+                if cycles > 0 and ignitions > 0:
+                    return 0.0
+                return 0.5
+            return 0.8
+        elif name == "fixed_repertoire":
+            ai = kwargs.get("active_inference")
+            if ai is not None:
+                stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
+                updates = stats.get("total_model_updates", 0)
+                inferences = stats.get("total_inferences", 0)
+                if inferences > 0 and updates > 0:
+                    return 0.0
+                return 0.4
+            return 0.7
+        elif name == "no_metacognitive_access":
+            meta = kwargs.get("metacognition")
+            if meta is not None:
+                stats = meta.get_statistics() if hasattr(meta, "get_statistics") else {}
+                hots = stats.get("total_generated", 0)
+                if hots > 0:
+                    return 0.0
+                return 0.3
+            return 0.9
+        return 0.0
 
     def _calculate_theory_scores(
         self, indicator_results: Dict[str, IndicatorResult]
@@ -2109,8 +2578,13 @@ class _NoiseGlobalWorkspace:
             "ignition": {
                 "total_ignitions": random.randint(0, 3),
                 "sustain_rate": random.random() * 0.2,
+                "decay_rate": random.random() * 0.3,
             },
             "cycle_count": random.randint(0, 5),
+            "competition": {
+                "total_candidates": random.randint(0, 5),
+                "source_counts": {},
+            },
         }
 
 
@@ -2124,6 +2598,10 @@ class _NoiseAttentionSchema:
         return {
             "voluntary_shifts": random.randint(0, 2),
             "voluntary_ratio": random.random() * 0.3,
+            "capacity_used": random.random() * 0.2,
+            "history_length": random.randint(0, 3),
+            "total_updates": random.randint(0, 3),
+            "prediction_accuracy": random.random() * 0.3,
         }
 
 

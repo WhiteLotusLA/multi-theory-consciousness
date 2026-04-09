@@ -5,6 +5,29 @@ All notable changes to the Multi-Theory Consciousness Framework will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-04-07
+
+### Added
+- Agency & Embodiment (AE) theory with 2 indicators (AE-1: `agency`, AE-2: `flexible_responsiveness`)
+- 5 new positive indicators: `sequential_module_querying` (GWT-4), `organized_percepts` (RPT-2), `flexible_responsiveness` (AE), `online_learning_capability` (FEP-4), `complex_agency` (AE)
+- 3 negative indicators with Butlin 2025 polarity: `purely_reactive`, `fixed_repertoire`, `no_metacognitive_access`
+- Butlin 2025 TiCS metadata on all indicators: `butlin_id`, `polarity` (positive/negative), `specificity`, `sensitivity`, `entails`, `supported_by`
+- PhiTracker with hash-based probabilistic binarization for IIT state diversity tracking
+- Negative indicator penalty in overall consciousness scoring (Butlin §3)
+
+### Fixed
+- Theory assignments: `agency` → AE (was FEP), `embodiment` → AE (was AST)
+- Theory theory assignments: `sparse_smooth_coding` → HOT (was FEP), `recurrent_processing` → RPT (was GWT)
+- Oscillatory binding NaN guard on `_global_order_parameter()` to handle zero variance
+- Test imports: phase6 test module → `mtc.assessment.assessment` canonical path
+
+### Changed
+- Indicator count: 25 → 30 (27 positive + 3 negative)
+- Theory count: 7 → 8 (added Agency & Embodiment)
+- Theory empirical weights now include AE at 0.70 in overall consciousness scoring
+- README: 7 theories → 8 theories, 25 indicators → 30 indicators
+- All Butlin indicator references updated to 2025 TiCS publication
+
 ## [0.3.0] — 2026-03-27
 
 ### Added
