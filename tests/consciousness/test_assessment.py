@@ -107,8 +107,8 @@ async def test_phi_calculation_positive():
 
 @pytest.mark.asyncio
 async def test_theory_scores_present(full_report):
-    """GWT, IIT, AST, HOT, and FEP theory scores must all be present."""
-    required_theories = {"GWT", "IIT", "AST", "HOT", "FEP"}
+    """All 8 theory scores must be present."""
+    required_theories = {"GWT", "IIT", "AST", "HOT", "FEP", "RPT", "BLT", "AE"}
 
     for theory in required_theories:
         assert theory in full_report.theory_scores, (
