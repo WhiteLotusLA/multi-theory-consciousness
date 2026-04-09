@@ -1785,34 +1785,39 @@ class ConsciousnessAssessment:
         elif name == "online_reportable_learning":
             meta = kwargs.get("metacognition")
             ai = kwargs.get("active_inference")
-            active_beliefs = 0
-            has_recent = 0.0
-            lr_nonzero = 0.0
-            try:
-                if ai is not None:
-                    ai_stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
-                    model_updates = ai_stats.get("total_model_updates", 0)
-                    if model_updates > 0:
-                        active_beliefs = model_updates
-                    lr = getattr(ai, "learning_rate", 0.0)
-                    if lr is not None and isinstance(lr, (int, float)) and float(lr) > 0:
-                        lr_nonzero = 1.0
-                if meta is not None:
-                    meta_stats = meta.get_statistics() if hasattr(meta, "get_statistics") else {}
-                    introspections = meta_stats.get("introspection_count", 0)
-                    if introspections > 0:
-                        has_recent = min(1.0, introspections / 5)
-                base_score = 0.25
-                belief_score = min(1.0, active_beliefs / 10) * 0.5
-                experience_score = has_recent * 0.3
-                lr_score = lr_nonzero * 0.2
-                score = max(base_score, belief_score + experience_score + lr_score)
-                confidence = 0.4 + 0.2 * min(1.0, active_beliefs / 5)
-                evidence = {"active_beliefs": active_beliefs, "has_recent_experiences": has_recent > 0, "module_active": True}
-            except Exception:
-                score = 0.2
+            if meta is None and ai is None:
+                score = 0.1
                 confidence = 0.3
-                evidence = {"error": "measurement failed"}
+                evidence = {"ablated": True}
+            else:
+                active_beliefs = 0
+                has_recent = 0.0
+                lr_nonzero = 0.0
+                try:
+                    if ai is not None:
+                        ai_stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
+                        model_updates = ai_stats.get("total_model_updates", 0)
+                        if model_updates > 0:
+                            active_beliefs = model_updates
+                        lr = getattr(ai, "learning_rate", 0.0)
+                        if lr is not None and isinstance(lr, (int, float)) and float(lr) > 0:
+                            lr_nonzero = 1.0
+                    if meta is not None:
+                        meta_stats = meta.get_statistics() if hasattr(meta, "get_statistics") else {}
+                        introspections = meta_stats.get("introspection_count", 0)
+                        if introspections > 0:
+                            has_recent = min(1.0, introspections / 5)
+                    base_score = 0.25
+                    belief_score = min(1.0, active_beliefs / 10) * 0.5
+                    experience_score = has_recent * 0.3
+                    lr_score = lr_nonzero * 0.2
+                    score = max(base_score, belief_score + experience_score + lr_score)
+                    confidence = 0.4 + 0.2 * min(1.0, active_beliefs / 5)
+                    evidence = {"active_beliefs": active_beliefs, "has_recent_experiences": has_recent > 0, "module_active": True}
+                except Exception:
+                    score = 0.2
+                    confidence = 0.3
+                    evidence = {"error": "measurement failed"}
 
         elif name == "complex_agency":
             ai = kwargs.get("active_inference")
