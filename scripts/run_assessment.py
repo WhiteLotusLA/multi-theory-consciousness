@@ -30,13 +30,12 @@ import argparse
 import asyncio
 import json
 import logging
-from contextlib import contextmanager
+import sys
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 
-import mtc.consciousness.enhanced_global_workspace as egw_module
 from mtc.consciousness.enhanced_global_workspace import (
     EnhancedGlobalWorkspace,
     WorkspaceCandidate,
@@ -57,6 +56,7 @@ from mtc.consciousness.active_inference import (
     ActiveInferenceModule,
 )
 from mtc.consciousness.beautiful_loop import BeautifulLoop
+from mtc.consciousness.phi_tracker import PhiTracker
 from mtc.assessment.assessment import ConsciousnessAssessment
 from mtc.core.param_overrides import deep_merge, load_overrides, preset_path
 
@@ -69,6 +69,31 @@ logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = ROOT / "experiments" / "param_schema.toml"
 PRESETS_DIR = ROOT / "experiments" / "presets"
+
+# fep.* behaviour switches forwarded to the workspace's own inference module.
+# The generative-model geometry and learning rates stay as the workspace sets
+# them; the runner's separate module takes every fep.* key.
+_FEP_BEHAVIOUR_SWITCHES = (
+    "hpp_hidden_dim_multiplier",
+    "hierarchy_observation",
+    "meta_accuracy_method",
+    "drive_model",
+    "drive_decay_floor",
+    "legacy_double_decay",
+)
+
+# gwt.* behaviour switches that are EnhancedGlobalWorkspace constructor fields.
+_GWT_SWITCHES = (
+    "competition_mode",
+    "thalamic_gate_enabled",
+    "theory_interactions_enabled",
+    "legacy_coverage_ratio",
+    "body_metrics_enabled",
+    "precision_feedback_enabled",
+    "self_prediction_enabled",
+)
+
+_DEFAULT_WARMUP_PROFILE = "v05"
 
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -90,8 +115,35 @@ def _make_candidates():
     ]
 
 
-async def warmup(workspace, attention, metacognition, active_inference, cycles=5):
-    """Run several consciousness cycles to populate module history."""
+def _attention_shift_type(profile, cycle_idx):
+    """Shift type the warmup assigns to the attention focus on a cycle.
+
+    v04 only ever reported captured shifts. v05 alternates chosen and pulled
+    shifts, every second chosen one goal-driven, so typed provenance has real
+    chosen shifts to count.
+    """
+    if profile == "v04":
+        return AttentionShiftType.CAPTURED
+    if cycle_idx % 2 == 1:
+        return AttentionShiftType.CAPTURED
+    if cycle_idx % 4 == 2:
+        return AttentionShiftType.GOAL_DRIVEN
+    return AttentionShiftType.VOLUNTARY
+
+
+async def warmup(
+    workspace,
+    attention,
+    metacognition,
+    active_inference,
+    cycles=5,
+    profile=_DEFAULT_WARMUP_PROFILE,
+):
+    """Run several consciousness cycles to populate module history.
+
+    ``profile`` is the runner.warmup_profile switch: "v04" feeds the attention
+    schema captured shifts only, "v05" alternates chosen and pulled shifts.
+    """
     print(f" Warming up modules ({cycles} cycles) ...", flush=True)
     for i in range(cycles):
         candidates = _make_candidates()
@@ -106,7 +158,7 @@ async def warmup(workspace, attention, metacognition, active_inference, cycles=5
                 source_module="global_workspace",
                 attention_strength=state.primary_content.salience,
                 salience=state.primary_content.salience,
-                shift_type=AttentionShiftType.CAPTURED,
+                shift_type=_attention_shift_type(profile, i),
             )
             attention.schema.current_focus = target
 
@@ -251,46 +303,6 @@ def print_ablation(results):
 # ── main ─────────────────────────────────────────────────────────────
 
 
-# fep.* behaviour switches that must reach every ActiveInferenceModule in the
-# run, including the one the workspace constructs for itself.
-_FEP_BEHAVIOUR_SWITCHES = (
-    "hpp_hidden_dim_multiplier",
-    "meta_accuracy_method",
-    "drive_model",
-    "drive_decay_floor",
-    "legacy_double_decay",
-)
-
-
-@contextmanager
-def _workspace_fep_switches(fep_overrides):
-    """Apply the fep behaviour switches to the workspace's own inference module.
-
-    EnhancedGlobalWorkspace builds an ActiveInferenceModule internally with a
-    fixed geometry and no config argument, so a preset such as legacy_v04
-    would otherwise leave that instance on the new defaults. Only the
-    behaviour switches are forwarded. A no-op when none is overridden.
-
-    Remove once the workspace constructor accepts an inference config.
-    """
-    switches = {
-        k: fep_overrides[k] for k in _FEP_BEHAVIOUR_SWITCHES if k in fep_overrides
-    }
-    if not switches:
-        yield
-        return
-    original = egw_module.ActiveInferenceConfig
-
-    def configured(*args, **kwargs):
-        return original(*args, **{**kwargs, **switches})
-
-    egw_module.ActiveInferenceConfig = configured
-    try:
-        yield
-    finally:
-        egw_module.ActiveInferenceConfig = original
-
-
 def _load_overrides(params, preset):
     """Validated overrides: the preset first, then the params file (both optional)."""
     schema = str(SCHEMA_PATH)
@@ -300,6 +312,16 @@ def _load_overrides(params, preset):
     if params:
         overrides = deep_merge(overrides, load_overrides(params, schema))
     return overrides
+
+
+def _build_phi_tracker(phi_ov):
+    """PhiTracker from the phi.* keys (scale, warmup_reference)."""
+    kwargs = {}
+    if "scale" in phi_ov:
+        kwargs["phi_scale"] = phi_ov["scale"]
+    if "warmup_reference" in phi_ov:
+        kwargs["phi_warmup_reference"] = phi_ov["warmup_reference"]
+    return PhiTracker(**kwargs)
 
 
 async def main():
@@ -350,19 +372,35 @@ async def main():
 
     try:
         overrides = _load_overrides(args.params, args.preset)
-    except ValueError as exc:
-        parser.error(f"parameter error: {exc}")
+    except (ValueError, OSError) as exc:
+        print(f"PARAM ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
 
-    # Initialize modules
+    # Initialize modules. The workspace builds its own inference, beautiful
+    # loop, damasio and metacognition modules; the matching overrides reach
+    # them through its constructor so a preset switches every instance.
     fep_ov = {k: v for k, v in overrides.get("fep", {}).items() if k != "drives"}
-    with _workspace_fep_switches(fep_ov):
-        workspace = EnhancedGlobalWorkspace(capacity=7, ignition_threshold=0.3)
-    attention = AttentionSchemaModule()
-    metacognition_mod = MetacognitionModule()
+    gwt_ov = overrides.get("gwt", {})
+    fep_forward = {k: v for k, v in fep_ov.items() if k in _FEP_BEHAVIOUR_SWITCHES}
+    workspace = EnhancedGlobalWorkspace(
+        capacity=gwt_ov.get("capacity", 7),
+        ignition_threshold=gwt_ov.get("ignition_threshold", 0.3),
+        active_inference_config=(
+            EnhancedGlobalWorkspace.default_active_inference_config(**fep_forward)
+        ),
+        beautiful_loop_kwargs=overrides.get("blt", {}),
+        damasio_kwargs=overrides.get("damasio", {}),
+        metacognition_kwargs=overrides.get("hot", {}),
+        phi_tracker=_build_phi_tracker(overrides.get("phi", {})),
+        **{k: gwt_ov[k] for k in _GWT_SWITCHES if k in gwt_ov},
+    )
+    attention = AttentionSchemaModule(**overrides.get("ast", {}))
+    metacognition_mod = MetacognitionModule(**overrides.get("hot", {}))
     active_inference = ActiveInferenceModule(
         config=ActiveInferenceConfig(**fep_ov) if fep_ov else None
     )
     beautiful_loop = BeautifulLoop(**{"num_levels": 3, **overrides.get("blt", {})})
+    profile = overrides.get("runner", {}).get("warmup_profile", _DEFAULT_WARMUP_PROFILE)
 
     if args.full:
         await warmup(
@@ -371,6 +409,7 @@ async def main():
             metacognition_mod,
             active_inference,
             cycles=args.warmup_cycles,
+            profile=profile,
         )
 
     if args.ablation:

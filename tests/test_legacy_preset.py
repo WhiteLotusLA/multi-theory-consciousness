@@ -35,3 +35,31 @@ def test_legacy_v04_preset_reproduces_baseline():
         abs(_metric(out, "overall_score") - _metric(baseline, "overall_score")) <= 0.01
     )
     assert _metric(out, "passing_count") == _metric(baseline, "passing_count")
+
+
+def _run_script(*args: str) -> "subprocess.CompletedProcess[str]":
+    return subprocess.run(
+        [sys.executable, *args],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env={**os.environ, "PYPHI_WELCOME_OFF": "yes"},
+    )
+
+
+@pytest.mark.slow
+def test_run_assessment_rejects_unknown_preset():
+    result = _run_script("scripts/run_assessment.py", "--preset", "no_such_preset")
+    assert result.returncode != 0
+    assert "PARAM ERROR" in result.stderr
+    assert "no_such_preset" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.slow
+def test_run_experiment_reports_missing_params_file():
+    result = _run_script("scripts/run_experiment.py", "--params", "no_such_file.toml")
+    assert result.returncode != 0
+    assert "PARAM ERROR" in result.stderr
+    assert "Traceback" not in result.stderr

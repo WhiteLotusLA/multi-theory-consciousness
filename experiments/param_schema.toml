@@ -33,6 +33,42 @@ min = 1.0
 max = 10.0
 description = "Multiplier applied to winning coalition signals during broadcast"
 
+[gwt.competition_mode]
+type = "str"
+default = "hierarchical"
+choices = ["hierarchical", "flat"]
+description = "Workspace competition: per-level capacity with promotion (hierarchical), or one flat pool (flat, the v0.4.0 competition)"
+
+[gwt.thalamic_gate_enabled]
+type = "bool"
+default = true
+description = "Filter candidates through the thalamic gate before competition (false lets every candidate compete, as in v0.4.0)"
+
+[gwt.theory_interactions_enabled]
+type = "bool"
+default = true
+description = "Apply the cross-theory modulation (somatic and Phi signals) as the next cycle's salience bias (false is v0.4.0)"
+
+[gwt.legacy_coverage_ratio]
+type = "bool"
+default = false
+description = "Report a broadcast coverage ratio of 1.0 before any broadcast (v0.4.0); the default reports 0.0"
+
+[gwt.body_metrics_enabled]
+type = "bool"
+default = true
+description = "Feed real system metrics and the previous cycle duration to the protoself once per cycle (false is v0.4.0; machine dependent, so the experiment runner pins it off unless set)"
+
+[gwt.precision_feedback_enabled]
+type = "bool"
+default = true
+description = "Let workspace winners raise the active inference precision bias of their channels (false is v0.4.0)"
+
+[gwt.self_prediction_enabled]
+type = "bool"
+default = true
+description = "Have the self-model predict each cycle and score that prediction after the self-model update (false is v0.4.0)"
+
 # GWT: TemporalWorkspaceConfig
 
 [gwt.competition_duration_ms]
@@ -83,17 +119,30 @@ description = "Additive boost applied to voluntarily attended items"
 
 [ast.focus_threshold]
 type = "float"
-default = 0.6
-min = 0.0
-max = 1.0
-description = "Attention level above which an item is considered focused"
+default = 0.9
+min = 0.3
+max = 1.5
+description = "Attention level above which an item is considered focused (workspace salience scale, 0 to 1.5; v0.4.0 used 0.6 on a 0 to 1 scale)"
 
 [ast.hyperfocus_threshold]
 type = "float"
-default = 0.9
-min = 0.0
-max = 1.0
-description = "Attention level above which hyperfocus state is triggered"
+default = 1.35
+min = 0.5
+max = 1.5
+description = "Attention level above which hyperfocus state is triggered (workspace salience scale, 0 to 1.5; v0.4.0 used 0.9)"
+
+[ast.capture_salience_threshold]
+type = "float"
+default = 1.2
+min = 0.5
+max = 1.5
+description = "Salience at or above which an inferred attention shift counts as captured (workspace salience scale; v0.4.0 used 0.8)"
+
+[ast.provenance_mode]
+type = "str"
+default = "typed"
+choices = ["typed", "legacy_strength"]
+description = "How shifts count as chosen or pulled: by shift type (typed), or the v0.4.0 rule where strength at or above 0.6 counts as voluntary (legacy_strength)"
 
 [ast.prediction_window_seconds]
 type = "float"
@@ -176,7 +225,7 @@ type = "int"
 default = 5
 min = 1
 max = 10
-description = "Number of future steps considered during planning"
+description = "Number of future steps considered during planning (the fep.* defaults describe the compact world model; the default was 3 before v0.5.0)"
 
 [fep.learning_rate_A]
 type = "float"
@@ -235,6 +284,12 @@ default = 1
 min = 1
 max = 4
 description = "Hierarchical predictor hidden size as a multiple of the input size (v0.4.0 used 2, which made every update skip)"
+
+[fep.hierarchy_observation]
+type = "str"
+default = "content"
+choices = ["content", "hpp_top_level"]
+description = "Observation the workspace gives the discrete agent: the content-derived input (content), or the v0.4.0 route through the encoded top-level hierarchy beliefs (hpp_top_level)"
 
 [fep.meta_accuracy_method]
 type = "str"
@@ -491,6 +546,34 @@ type = "str"
 default = "sinusoid"
 choices = ["sinusoid", "v04_sawtooth", "wall_clock"]
 description = "Protoself circadian model (smooth sinusoid, the v0.4.0 sawtooth, or the wall clock in the configured timezone)"
+
+# -----------------------------------------------------------------------------
+# IIT: PhiTracker
+# -----------------------------------------------------------------------------
+
+[phi.scale]
+type = "float"
+default = 1.0
+min = 0.1
+max = 10.0
+description = "Multiplier on the PhiTracker integration proxy (raw bits at 1.0)"
+
+[phi.warmup_reference]
+type = "float"
+default = 5.0
+min = 0.1
+max = 50.0
+description = "Denominator for the PhiTracker's normalized readout before enough values are recorded for a percentile (a display calibration, not a measurement)"
+
+# -----------------------------------------------------------------------------
+# Runner: experiment and assessment warmup
+# -----------------------------------------------------------------------------
+
+[runner.warmup_profile]
+type = "str"
+default = "v05"
+choices = ["v05", "v04"]
+description = "Warmup attention feed: v05 alternates voluntary and captured shifts with goal-driven ones so typed provenance has chosen shifts to count; v04 feeds captured shifts only"
 
 # -----------------------------------------------------------------------------
 # PAD: PADAffectModel
