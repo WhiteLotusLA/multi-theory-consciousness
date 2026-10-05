@@ -35,6 +35,11 @@ ALLOWED_CREATOR_NAME_READERS: Tuple[Tuple[str, str], ...] = (
         "mtc/knowledge/graph_manager.py",
         "seeds the creator Person node through MERGE; never trust",
     ),
+    (
+        "mtc/brain/prompt.py",
+        "renders the persona and the authenticated creator's speaker block; "
+        "never trust",
+    ),
 )
 CONFIG_MODULE = PACKAGE / "core" / "config.py"
 

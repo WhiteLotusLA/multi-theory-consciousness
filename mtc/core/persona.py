@@ -7,9 +7,12 @@ Reads the operator's persona file, the YAML document at ``PERSONA_PATH``
 ``PROJECT_ROOT``). The persona is identity configuration: the system's name,
 pronouns, companion type, the creator's name and address form, a
 self-description, communication-style notes, core values, the Big Five
-personality seed and optional core-memory block text. ``PERSONA_KEYS`` lists
-the documented keys and their sub-keys; Phase 7's ``PersonaConfig`` schema
-keeps the same keys, so a persona written by the wizard loads identically.
+personality seed, optional core-memory block text, the prompt's style rules
+and the speaker block templates (``creator``, ``known`` and ``unverified``,
+chosen by the token-verified identity, never by a name). ``PERSONA_KEYS``
+lists the documented keys and their sub-keys; Phase 7's ``PersonaConfig``
+schema keeps the same keys, so a persona written by the wizard loads
+identically. A neutral example ships as ``config/persona.example.yaml``.
 
 - A missing file is not an error: ``load_persona`` returns None (the neutral
   core blocks apply) and logs one WARNING per path.
@@ -52,6 +55,10 @@ PERSONA_KEYS: Dict[str, Optional[Tuple[str, ...]]] = {
     "core_values": None,
     "personality": BIG_FIVE_KEYS,
     "core_memory": ("identity", "persona", "human"),
+    # Read by the prompt assembler: the style section's rules (a list of
+    # strings) and one speaker block template per verification outcome.
+    "style_rules": None,
+    "speaker_templates": ("creator", "known", "unverified"),
 }
 
 _WARNED_MISSING: Set[str] = set()

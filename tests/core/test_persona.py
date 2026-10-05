@@ -123,6 +123,8 @@ def test_persona_keys_cover_the_documented_schema():
         "core_values",
         "personality",
         "core_memory",
+        "style_rules",
+        "speaker_templates",
     }
     assert PERSONA_KEYS["creator"] == ("name", "address_form")
     assert PERSONA_KEYS["personality"] == (
@@ -133,6 +135,36 @@ def test_persona_keys_cover_the_documented_schema():
         "neuroticism",
     )
     assert PERSONA_KEYS["core_memory"] == ("identity", "persona", "human")
+
+
+def test_phase6_persona_keys_known(tmp_path, caplog):
+    """The prompt assembler's keys load without an unknown-key warning."""
+    assert PERSONA_KEYS["style_rules"] is None
+    assert PERSONA_KEYS["speaker_templates"] == ("creator", "known", "unverified")
+    _write(
+        tmp_path / "config" / "persona.yaml",
+        """
+        name: Testagent
+        style_rules:
+          - Answer directly.
+          - Say so when something is not remembered.
+        speaker_templates:
+          creator: Talking with {creator_name}.
+          known: Talking with {speaker}, verified.
+          unverified: Talking with someone called {speaker}, unverified.
+          stranger: not a documented template
+        """,
+    )
+    with caplog.at_level(logging.WARNING, logger="mtc.core.persona"):
+        loaded = load_persona(settings=_settings(tmp_path))
+    assert loaded["style_rules"] == [
+        "Answer directly.",
+        "Say so when something is not remembered.",
+    ]
+    assert unknown_persona_keys(loaded) == ["speaker_templates.stranger"]
+    assert "speaker_templates.stranger" in " ".join(
+        r.getMessage() for r in caplog.records
+    )
 
 
 def test_yaml_imported_lazily():
