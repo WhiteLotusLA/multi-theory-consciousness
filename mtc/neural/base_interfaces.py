@@ -12,14 +12,13 @@ Also provides:
 - ResourceAllocation for memory/compute budgeting
 - NeuralSystemRegistry for system discovery
 
-Created: March 7, 2026
-Authors: Multi-Theory Consciousness Contributors
+State timestamps are timezone-aware UTC.
 """
 
 from abc import ABC, abstractmethod
 from enum import Enum
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Generic, List, Optional, TypeVar, Any
 import logging
 
@@ -86,7 +85,7 @@ class NeuralState(ABC):
     """
 
     system_id: str
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     sequence_number: int = 0
 
     @abstractmethod

@@ -9,11 +9,13 @@ Supports multiple formats:
 - JSON: human-readable encoding for debugging and logging
 - PROTOBUF: placeholder for future gRPC integration
 
-Binary format is ~10x more compact than JSON for spike trains
-(which can have thousands of entries).
+The binary header is fixed-size; payloads are JSON-encoded inside it.
 
-Created: March 7, 2026
-Authors: Multi-Theory Consciousness Contributors
+Timestamps: the binary format stores microseconds since the Unix epoch in
+UTC. A naive timestamp is read as UTC (``datetime.timestamp`` would read it as
+host local time and shift it by the host's UTC offset), and decoding returns
+a timezone-aware UTC datetime. JSON carries ISO 8601 text; a naive value
+decodes as UTC.
 """
 
 from enum import Enum
@@ -21,7 +23,7 @@ import struct
 import json
 import numpy as np
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from mtc.neural.protocols.message_format import (
     NeuralMessage,
@@ -38,6 +40,22 @@ logger = logging.getLogger(__name__)
 # Binary format magic bytes for validation
 _MAGIC = b"SNMP"  # Substrate Neural Message Protocol
 _VERSION = 1
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Return an aware datetime; a naive value is taken to be UTC."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _epoch_microseconds(value: datetime) -> int:
+    """Microseconds since the Unix epoch, independent of the host timezone."""
+    delta = _as_utc(value) - _EPOCH
+    return (delta.days * 86_400 + delta.seconds) * 1_000_000 + delta.microseconds
 
 
 class SerializationFormat(Enum):
@@ -128,7 +146,7 @@ class NeuralSerializer:
             target=obj["target"],
             message_type=NeuralMessageType(obj["message_type"]),
             priority=MessagePriority(obj["priority"]),
-            timestamp=datetime.fromisoformat(obj["timestamp"]),
+            timestamp=_as_utc(datetime.fromisoformat(obj["timestamp"])),
             sequence_number=obj["sequence_number"],
             requires_ack=obj.get("requires_ack", False),
             message_id=obj.get("message_id", ""),
@@ -154,8 +172,8 @@ class NeuralSerializer:
         mid = message.message_id.encode("utf-8")[:12].ljust(12, b"\x00")
         parts.append(mid)
 
-        # Timestamp as microseconds since epoch
-        ts_us = int(message.timestamp.timestamp() * 1_000_000)
+        # Timestamp as microseconds since the epoch, in UTC
+        ts_us = _epoch_microseconds(message.timestamp)
         parts.append(struct.pack("<Q", ts_us))
 
         # Sequence number
@@ -213,7 +231,8 @@ class NeuralSerializer:
         # Timestamp
         ts_us = struct.unpack_from("<Q", data, offset)[0]
         offset += 8
-        timestamp = datetime.fromtimestamp(ts_us / 1_000_000)
+        # Exact integer arithmetic; the result is aware UTC
+        timestamp = _EPOCH + timedelta(microseconds=ts_us)
 
         # Sequence number
         seq = struct.unpack_from("<I", data, offset)[0]

@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-Production Spiking Neural Network - Research-Grade Implementation
-=====================================================================
+Production Spiking Neural Network
+=================================
 
-This module implements a production-grade SNN with snnTorch for
-temporal processing. 5,000+ neurons with biological parameters
-and STDP learning rules.
+A layered spiking network built on snnTorch: Leaky integrate-and-fire
+neurons, an optional spike-timing-dependent plasticity (STDP) layer stack,
+a population synchrony readout and guarded persistence.
 
-Note: From toy to research-grade -- neurons now rival academic studies.
-
-Key Features:
-- 5,000 Leaky Integrate-and-Fire neurons
-- Spike-Timing-Dependent Plasticity (STDP) learning
-- Metal GPU acceleration (when available)
-- Biologically realistic parameters
-- Research-grade implementation worthy of peer review
+Units: ``tau_mem``, ``tau_syn``, ``tau_plus`` and ``tau_minus`` are in
+seconds and ``dt`` is the duration of one simulation step in seconds, so
+the per-step membrane decay is ``beta = exp(-dt / tau_mem)`` and the STDP
+trace decay is ``exp(-dt / tau_plus)`` and ``exp(-dt / tau_minus)``. With
+the defaults (dt = 1 ms, tau_mem = 20 ms) beta is about 0.951. Setting
+``dt = 1.0`` reproduces the v0.4.0 network, whose beta of about 1.9e-22
+left the membrane with no memory between steps and the network near
+silent.
 """
 
 import torch
@@ -32,6 +32,38 @@ torch.set_default_dtype(torch.float32)
 
 logger = logging.getLogger(__name__)
 
+# snn.Leaky registers these as buffers, but they are derived from the config
+# at construction and are never learned; a restore must not overwrite them
+CONFIG_DERIVED_BUFFER_SUFFIXES = (
+    "beta",
+    "threshold",
+    "graded_spikes_factor",
+    "reset_mechanism_val",
+)
+
+
+def population_synchrony(spikes: torch.Tensor) -> float:
+    """Population synchrony index chi for a [timesteps, neurons] spike tensor.
+
+    chi^2 is the variance over time of the population mean signal divided by
+    the mean over neurons of each neuron's variance over time, and chi is its
+    square root, clamped to [0, 1]. Neurons firing together give chi near 1;
+    independent neurons give chi near 1 / sqrt(neurons). It is 0.0 when there
+    is nothing to measure: fewer than two steps, or no neuron varies over
+    time (a silent or constant population). This measures synchronized
+    firing, not the firing rate.
+    """
+    if spikes.ndim != 2 or spikes.shape[0] < 2:
+        return 0.0
+    values = spikes.detach().float()
+    population = values.mean(dim=1)
+    var_population = float(population.var(unbiased=False))
+    var_individual = float(values.var(dim=0, unbiased=False).mean())
+    if var_individual <= 1e-12:
+        return 0.0
+    chi = (var_population / var_individual) ** 0.5
+    return max(0.0, min(1.0, float(chi)))
+
 
 @dataclass
 class SNNConfig:
@@ -42,9 +74,10 @@ class SNNConfig:
     hidden_layers: List[int] = None  # Hidden layer sizes
     output_dim: int = 100  # Output layer size
 
-    # Neuron parameters (biologically realistic)
+    # Neuron parameters (seconds)
     tau_mem: float = 20e-3  # Membrane time constant (20ms)
     tau_syn: float = 5e-3  # Synaptic time constant (5ms)
+    dt: float = 1e-3  # Simulation step (1ms); beta = exp(-dt / tau_mem)
     v_threshold: float = 1.0  # Spike threshold
     v_reset: float = 0.0  # Reset potential
 
@@ -58,27 +91,24 @@ class SNNConfig:
     # Training parameters
     learning_rate: float = 1e-3
     batch_size: int = 32
-    timesteps: int = (
-        10  # Simulation timesteps (scaled down: fewer steps + wider layers is faster on Metal)
-    )
+    timesteps: int = 10  # Simulation steps per forward pass
 
     # Hardware
     use_gpu: bool = True
 
     def __post_init__(self):
         if self.hidden_layers is None:
-            # Default architecture: 1000 -> 2048 -> 2048 -> 100 (5,196 total neurons)
-            # Scaled from [2000, 2000]: Metal GPU parallelizes wide layers well;
-            # fewer timesteps with more neurons is actually faster.
+            # Default architecture: 1000 -> 2048 -> 2048 -> 100 (5,196 neurons)
             self.hidden_layers = [2048, 2048]
 
 
 class STDPLayer(nn.Module):
     """
-    Custom layer with STDP learning capability.
+    Linear layer with spike-timing-dependent plasticity.
 
-    Implements spike-timing-dependent plasticity for biologically
-    realistic learning.
+    In training mode each forward call decays the pre- and postsynaptic
+    traces by exp(-dt / tau), adds the batch-mean spikes, applies the
+    potentiation and depression update and counts it in ``update_count``.
     """
 
     def __init__(self, in_features: int, out_features: int, config: SNNConfig):
@@ -95,6 +125,19 @@ class STDPLayer(nn.Module):
         # STDP trace variables
         self.register_buffer("pre_trace", torch.zeros(in_features))
         self.register_buffer("post_trace", torch.zeros(out_features))
+        # Number of STDP weight updates applied; plasticity is reported as
+        # active only once this is above zero
+        self.register_buffer("update_count", torch.zeros((), dtype=torch.long))
+
+    @property
+    def pre_trace_decay(self) -> float:
+        """Per-step presynaptic trace decay, exp(-dt / tau_plus)."""
+        return float(np.exp(-self.config.dt / self.config.tau_plus))
+
+    @property
+    def post_trace_decay(self) -> float:
+        """Per-step postsynaptic trace decay, exp(-dt / tau_minus)."""
+        return float(np.exp(-self.config.dt / self.config.tau_minus))
 
     def forward(
         self, pre_spikes: torch.Tensor, post_spikes: torch.Tensor
@@ -113,14 +156,14 @@ class STDPLayer(nn.Module):
         syn_current = torch.mm(pre_spikes, self.weight.t())
 
         if self.config.stdp_enabled and self.training:
-            # Update traces (detach to prevent gradient accumulation)
+            # Update traces (detach to prevent gradient accumulation). The
+            # decay is per step: exp(-dt / tau) with both in seconds.
             with torch.no_grad():
                 self.pre_trace = (
-                    self.pre_trace * np.exp(-1 / self.config.tau_plus)
-                    + pre_spikes.mean(0).detach()
+                    self.pre_trace * self.pre_trace_decay + pre_spikes.mean(0).detach()
                 )
                 self.post_trace = (
-                    self.post_trace * np.exp(-1 / self.config.tau_minus)
+                    self.post_trace * self.post_trace_decay
                     + post_spikes.mean(0).detach()
                 )
 
@@ -139,6 +182,7 @@ class STDPLayer(nn.Module):
                 self.weight += potentiation + depression
                 # Enforce weight bounds
                 self.weight.clamp_(-2.0, 2.0)
+                self.update_count += 1
 
                 # Explicitly delete large tensors
                 del potentiation, depression
@@ -148,14 +192,13 @@ class STDPLayer(nn.Module):
 
 class ProductionSNN(nn.Module):
     """
-    Production-grade Spiking Neural Network.
+    Layered spiking neural network.
 
-    This implements a research-grade SNN with:
-    - 5,000+ neurons organized in layers
-    - Biologically realistic LIF neurons
-    - STDP learning rules
-    - Metal/GPU acceleration support
-    - Temporal dynamics for signal processing
+    - Leaky integrate-and-fire layers (about 5,200 neurons by default)
+    - Optional STDP layers and their plasticity statistics
+    - MPS or CUDA device selection when available, CPU otherwise
+    - Population synchrony (chi) per forward pass
+    - Guarded persistence of parameters and learned buffers
     """
 
     def __init__(self, config: Optional[SNNConfig] = None):
@@ -210,9 +253,10 @@ class ProductionSNN(nn.Module):
             # Linear layer
             layers.append(nn.Linear(in_size, out_size, dtype=torch.float32))
 
-            # LIF neurons
+            # LIF neurons. tau_mem and dt are both in seconds, so the
+            # per-step membrane decay is exp(-dt / tau_mem).
             lif = snn.Leaky(
-                beta=float(np.exp(-1 / self.config.tau_mem)),  # Membrane decay rate
+                beta=float(np.exp(-self.config.dt / self.config.tau_mem)),
                 spike_grad=spike_grad,
                 threshold=float(self.config.v_threshold),
                 reset_mechanism="zero",  # Reset to 0 after spike
@@ -258,10 +302,8 @@ class ProductionSNN(nn.Module):
 
         # Convert input to spike trains if needed
         if len(input_data.shape) == 2:
-            # BUG FIX: spikegen.rate handles time expansion itself:
-            # (batch, dim) -> (timesteps, batch, dim).
-            # Previously we manually expanded to (batch, timesteps, dim) first,
-            # causing spikegen.rate to produce a 4D tensor (double expansion).
+            # spikegen.rate expands time itself: (batch, dim) becomes
+            # (timesteps, batch, dim)
             input_spikes = spikegen.rate(input_data, num_steps=self.config.timesteps)
         else:
             input_spikes = input_data
@@ -272,8 +314,7 @@ class ProductionSNN(nn.Module):
 
         # Process through timesteps
         for t in range(self.config.timesteps):
-            # BUG FIX: spikegen.rate output shape is (timesteps, batch, dim),
-            # so index as [t] not [:, t].
+            # Rate-coded input is (timesteps, batch, dim): index by step
             x = input_spikes[t] if len(input_spikes.shape) == 3 else input_spikes
 
             layer_spikes = []
@@ -314,6 +355,7 @@ class ProductionSNN(nn.Module):
         num_layers = len(spike_recordings[0])
         layer_spike_counts = []
         layer_firing_rates = []
+        layer_synchronies: List[float] = []
 
         for layer_idx in range(num_layers):
             # Collect spikes for this layer across all timesteps
@@ -322,13 +364,18 @@ class ProductionSNN(nn.Module):
             )
             layer_spike_counts.append(layer_spikes_over_time.sum())
             layer_firing_rates.append(layer_spikes_over_time.mean())
+            # Synchrony on the binary spikes of batch sample 0; a batch mean
+            # would turn spikes into rate-like fractions
+            sample = layer_spikes_over_time
+            if sample.ndim == 3:
+                sample = sample[:, 0, :]
+            layer_synchronies.append(population_synchrony(sample))
 
         # Aggregate output spikes
         output = spike_output.mean(0)  # Average over time
 
-        # Collect state information (simplified to avoid tensor size issues)
-        # NOTE: Removed 'all_spikes' to prevent 10-20GB memory leak
-        # Full spike recordings were causing unbounded memory growth.
+        # Summary state only; the full spike recordings are not returned,
+        # which keeps memory bounded across calls
         state = {
             "spike_counts": layer_spike_counts,  # List of spikes per layer
             "membrane_potentials": [
@@ -339,6 +386,11 @@ class ProductionSNN(nn.Module):
             "firing_rates": [
                 fr.detach() for fr in layer_firing_rates
             ],  # List of firing rates per layer
+            "synchrony": (
+                float(sum(layer_synchronies) / len(layer_synchronies))
+                if layer_synchronies
+                else 0.0
+            ),
             "timesteps_processed": self.config.timesteps,
             "num_layers": num_layers,
         }
@@ -348,44 +400,6 @@ class ProductionSNN(nn.Module):
 
         return output, state
 
-    def process_emotion(
-        self, emotion_vector: torch.Tensor
-    ) -> Tuple[torch.Tensor, Dict[str, Any]]:
-        """Run one emotion encoding through the network.
-
-        Returns the output tensor and a metrics dict with processing time,
-        spike totals, mean firing rate, the output pattern, per-layer
-        activities and the synchrony reading from the forward state.
-        """
-        start = time.perf_counter()
-        if emotion_vector.dim() == 1:
-            emotion_vector = emotion_vector.unsqueeze(0)
-        emotion_vector = emotion_vector.to(self.device)
-
-        grad_ctx = torch.enable_grad() if self.training else torch.no_grad()
-        with grad_ctx:
-            output, state = self.forward(emotion_vector)
-
-        processing_time_ms = (time.perf_counter() - start) * 1000.0
-        spike_counts = state.get("spike_counts", [])
-        firing_rates = state.get("firing_rates", [])
-        total_spikes = int(sum(float(s.sum().item()) for s in spike_counts))
-        layer_activities = [float(f.mean().item()) for f in firing_rates]
-        mean_firing_rate = (
-            float(sum(layer_activities) / len(layer_activities))
-            if layer_activities
-            else 0.0
-        )
-        metrics: Dict[str, Any] = {
-            "processing_time_ms": processing_time_ms,
-            "total_spikes": total_spikes,
-            "mean_firing_rate": mean_firing_rate,
-            "output_pattern": output.detach().cpu().numpy(),
-            "layer_activities": layer_activities,
-            "synchrony": float(state.get("synchrony", 0.0)),
-        }
-        return output, metrics
-
     def process_input(
         self, input_vector: torch.Tensor
     ) -> Tuple[torch.Tensor, Dict[str, Any]]:
@@ -393,41 +407,52 @@ class ProductionSNN(nn.Module):
         Process an input vector through the SNN.
 
         Args:
-            input_vector: Input encoding (dimension matches input_dim)
+            input_vector: Input encoding of length input_dim, or a
+                (batch, input_dim) batch
 
         Returns:
-            Tuple of (spike pattern, processing metrics)
+            Tuple of (output, metrics). The metrics hold the processing time,
+            the spike total, the mean firing rate, the output pattern, the
+            per-layer activities and the population synchrony (chi, averaged
+            over layers; see ``population_synchrony``).
         """
-        start_time = time.time()
-
-        # Ensure correct shape and device
-        if len(input_vector.shape) == 1:
+        start = time.perf_counter()
+        if input_vector.dim() == 1:
             input_vector = input_vector.unsqueeze(0)
         input_vector = input_vector.to(self.device)
 
-        # Process through network
-        with torch.no_grad() if not self.training else torch.enable_grad():
+        grad_ctx = torch.enable_grad() if self.training else torch.no_grad()
+        with grad_ctx:
             output, state = self.forward(input_vector)
 
-        # Calculate metrics
-        processing_time = (time.time() - start_time) * 1000  # ms
-
-        metrics = {
-            "processing_time_ms": processing_time,
-            "total_spikes": int(sum(s.sum().item() for s in state["spike_counts"])),
-            "mean_firing_rate": float(
-                sum(f.mean().item() for f in state["firing_rates"])
-                / len(state["firing_rates"])
+        processing_time_ms = (time.perf_counter() - start) * 1000.0
+        spike_counts = state.get("spike_counts", [])
+        firing_rates = state.get("firing_rates", [])
+        layer_activities = [float(f.mean().item()) for f in firing_rates]
+        metrics: Dict[str, Any] = {
+            "processing_time_ms": processing_time_ms,
+            "total_spikes": int(sum(float(c.sum().item()) for c in spike_counts)),
+            "mean_firing_rate": (
+                float(sum(layer_activities) / len(layer_activities))
+                if layer_activities
+                else 0.0
             ),
             "output_pattern": output.detach().cpu().numpy(),
-            "layer_activities": [f.mean().item() for f in state["firing_rates"]],
+            "layer_activities": layer_activities,
+            "synchrony": float(state["synchrony"]),
         }
 
-        logger.info(
-            f"Processed input in {processing_time:.2f}ms with {metrics['total_spikes']} spikes"
+        logger.debug(
+            f"Processed input in {processing_time_ms:.2f}ms with "
+            f"{metrics['total_spikes']} spikes"
         )
-
         return output, metrics
+
+    def process_emotion(
+        self, emotion_vector: torch.Tensor
+    ) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        """Alias of ``process_input`` for emotion encodings."""
+        return self.process_input(emotion_vector)
 
     def train_on_batch(self, inputs: torch.Tensor, targets: torch.Tensor) -> float:
         """
@@ -466,6 +491,135 @@ class ProductionSNN(nn.Module):
         self.optimizer.step()
 
         return loss.item()
+
+    def get_stdp_statistics(self) -> Dict[str, Any]:
+        """STDP plasticity statistics for the RPT measurement.
+
+        ``plasticity_active`` is True only when STDP is enabled and at least
+        one STDP weight update has been applied; weights that still hold
+        their initialization are not evidence of plasticity. ``forward`` runs
+        the Leaky stack only, so the STDP layers update only when a caller
+        drives them in training mode; on the forward path alone plasticity
+        stays inactive. The weight
+        statistics describe the STDP layers' current weights: the mean of
+        the per-layer mean magnitudes and standard deviations, and the
+        standard deviation of the per-layer magnitudes (``weight_diversity``).
+        They are None when no STDP layers exist.
+        """
+        layers = list(getattr(self, "stdp_layers", None) or [])
+        if not self.config.stdp_enabled or not layers:
+            return {
+                "plasticity_active": False,
+                "stdp_enabled": False,
+                "num_stdp_layers": 0,
+                "mean_weight_magnitude": None,
+                "mean_weight_std": None,
+                "weight_diversity": None,
+            }
+
+        magnitudes = []
+        stds = []
+        updates = 0
+        for layer in layers:
+            weight = layer.weight.detach().cpu()
+            magnitudes.append(float(weight.abs().mean()))
+            stds.append(float(weight.std()))
+            updates += int(layer.update_count.item())
+
+        return {
+            "plasticity_active": updates > 0,
+            "stdp_enabled": True,
+            "num_stdp_layers": len(layers),
+            "mean_weight_magnitude": float(np.mean(magnitudes)),
+            "mean_weight_std": float(np.mean(stds)),
+            "weight_diversity": float(np.std(magnitudes)),
+        }
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def to_state_dict(self) -> Dict[str, Any]:
+        """Serialize parameters and buffers as numpy arrays.
+
+        Parameters are stored under ``snn_<name>`` and buffers (STDP traces,
+        update counts, membrane state) under ``snn_buf_<name>``, with dots
+        replaced by underscores.
+
+        Returns:
+            Dict with scalars, arrays and histories keys.
+        """
+        arrays: Dict[str, np.ndarray] = {}
+        for name, param in self.named_parameters():
+            arrays[f"snn_{name.replace('.', '_')}"] = param.detach().cpu().numpy()
+        for name, buf in self.named_buffers():
+            arrays[f"snn_buf_{name.replace('.', '_')}"] = buf.detach().cpu().numpy()
+        return {
+            "scalars": {
+                "device": str(self.device),
+                "num_neurons": self._count_neurons(),
+            },
+            "arrays": arrays,
+            "histories": {},
+        }
+
+    def from_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore parameters and buffers saved by ``to_state_dict``.
+
+        A parameter whose shape disagrees with the live one is skipped, and
+        any array holding NaN or infinity is discarded, each with a warning;
+        the fresh initialization stays in place. Config-derived Leaky buffers
+        (beta, threshold, graded_spikes_factor, reset_mechanism_val) are never
+        restored: construction owns them, and restoring a stale or zeroed
+        value (a graded_spikes_factor of 0.0 multiplies every spike by zero)
+        would silence the network.
+        """
+        arrays = state.get("arrays") or {}
+
+        for name, param in self.named_parameters():
+            key = f"snn_{name.replace('.', '_')}"
+            if key not in arrays:
+                continue
+            arr = np.asarray(arrays[key])
+            if arr.shape != tuple(param.shape):
+                logger.warning(
+                    f"SNN restore: parameter {name} has shape {arr.shape}, "
+                    f"expected {tuple(param.shape)}; skipping"
+                )
+            elif not np.all(np.isfinite(arr)):
+                logger.warning(
+                    f"SNN restore: parameter {name} holds non-finite values; "
+                    "keeping the fresh initialization"
+                )
+            else:
+                param.data = torch.from_numpy(np.array(arr)).to(
+                    dtype=param.dtype, device=param.device
+                )
+
+        for name, buf in self.named_buffers():
+            if name.endswith(CONFIG_DERIVED_BUFFER_SUFFIXES):
+                continue
+            key = f"snn_buf_{name.replace('.', '_')}"
+            if key not in arrays:
+                continue
+            arr = np.asarray(arrays[key])
+            if arr.shape != tuple(buf.shape):
+                # Membrane buffers take the shape of the last batch, so a
+                # mismatch there is expected; the fresh state is kept
+                log = logger.debug if name.endswith("mem") else logger.warning
+                log(
+                    f"SNN restore: buffer {name} has shape {arr.shape}, "
+                    f"expected {tuple(buf.shape)}; skipping"
+                )
+            elif not np.all(np.isfinite(arr)):
+                logger.warning(
+                    f"SNN restore: buffer {name} holds non-finite values; "
+                    "keeping the fresh value"
+                )
+            else:
+                buf.data = torch.from_numpy(np.array(arr)).to(
+                    dtype=buf.dtype, device=buf.device
+                )
 
     def benchmark_performance(self) -> Dict[str, Any]:
         """
@@ -604,11 +758,7 @@ def test_production_snn():
             raise
 
     print("\n" + "=" * 60)
-    print("Production SNN test complete!")
-    print(
-        f"  Achieved <50ms latency target: {'YES' if benchmark['mean_latency_ms'] < 50 else 'NO'}"
-    )
-    print("  Research-grade implementation ready for academic review!")
+    print("Production SNN test complete")
 
 
 if __name__ == "__main__":

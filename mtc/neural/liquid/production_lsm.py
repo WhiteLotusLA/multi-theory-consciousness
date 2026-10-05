@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-Production Liquid State Machine - Research-Grade Implementation
-=====================================================================
+Production Liquid State Machine
+===============================
 
-This module implements a production-grade LSM using ReservoirPy for
-subconscious processing and creative emergence. 5,000 neurons with
-edge-of-chaos dynamics and RLS learning.
+A liquid state machine built on ReservoirPy: a sparse recurrent reservoir
+near the edge of chaos with an online RLS (recursive least squares) readout
+and an offline ridge readout.
 
-Note: The liquid churns with possibility -- creativity emerges from chaos.
+Defaults: a 5,000-unit reservoir, spectral radius 0.9 and 10% recurrent
+connectivity.
 
-Key Features:
-- 5,000 neuron reservoir with chaotic dynamics
-- Edge-of-chaos operation (spectral radius ~0.9)
-- RLS (Recursive Least Squares) learning for online adaptation
-- Pattern separation and temporal processing
-- Research-grade implementation for academic review
+Persistence: the reservoir weights are not saved. They regenerate from
+``LSMConfig.seed``, so the state dict carries only the learned RLS readout
+(output weights, bias, the inverse correlation matrix P and the sample
+count) together with the reservoir size and seed it was trained against.
+P is reservoir_size x reservoir_size, about 200 MB at the default size.
 """
 
 import numpy as np
@@ -36,8 +36,6 @@ logger = logging.getLogger(__name__)
 class LSMConfig:
     """Configuration for production LSM."""
 
-    # Scaled from 10K to 5K: 5K is the latency ceiling (~96ms at 50 timesteps).
-    # 10K would need JAX/GPU -- ReservoirPy is CPU-bound.
     reservoir_size: int = 5000  # Number of reservoir neurons
     input_dim: int = 100  # Input dimension
     output_dim: int = 50  # Output dimension
@@ -61,17 +59,19 @@ class LSMConfig:
     # Hardware
     use_gpu: bool = False  # ReservoirPy uses NumPy (CPU-based)
 
+    # Seed for the reservoir weights; a restored readout is only valid on the
+    # reservoir it was trained against, so the weights must regenerate
+    seed: Optional[int] = 42
+
 
 class ProductionLSM:
     """
-    Production-grade Liquid State Machine for consciousness research.
+    Liquid state machine with a reservoir near the edge of chaos.
 
-    This implements a research-grade LSM with:
-    - 10,000 neuron reservoir operating at edge-of-chaos
-    - RLS learning for rapid online adaptation
-    - Pattern separation for creative processing
-    - Temporal dynamics for sequence processing
-    - Subconscious state emergence
+    - A sparse recurrent reservoir (5,000 units by default)
+    - RLS readout for online adaptation, ridge readout for offline training
+    - Reservoir activity and dynamics metrics
+    - Persistence of the learned RLS readout
     """
 
     def __init__(self, config: Optional[LSMConfig] = None, fast_mode: bool = True):
@@ -114,6 +114,7 @@ class ProductionLSM:
             input_scaling=self.config.input_scaling,
             lr=self.config.leak_rate,  # ReservoirPy uses 'lr' not 'leak_rate'
             activation="tanh",  # Non-linear activation
+            seed=self.config.seed,
             name="liquid_reservoir",
         )
 
@@ -308,7 +309,8 @@ class ProductionLSM:
         # Process through liquid
         output, state = self.process_input(sensory_input)
 
-        # Extract subconscious patterns (handle None values in fast_mode)
+        # Dynamics metrics are None in fast mode; the derived values stay
+        # None rather than taking a stand-in constant
         edge_of_chaos = state.get("edge_of_chaos_score")
         entropy = state.get("entropy")
         correlation = state.get("correlation_time")
@@ -317,16 +319,16 @@ class ProductionLSM:
             "raw_output": output,
             "emotional_valence": float(np.mean(output)),
             "emotional_arousal": float(np.std(output)),
-            "creative_emergence": entropy if entropy is not None else 0.5,
-            "stability": 1.0 - edge_of_chaos if edge_of_chaos is not None else 0.5,
-            "processing_depth": correlation if correlation is not None else 0.5,
+            "creative_emergence": entropy,
+            "stability": (1.0 - edge_of_chaos if edge_of_chaos is not None else None),
+            "processing_depth": correlation,
             **state,
         }
 
-        chaos_score = edge_of_chaos if edge_of_chaos is not None else 0.5
-        logger.info(
-            f"Processed subconscious state: valence={subconscious_state['emotional_valence']:.3f}, "
-            f"chaos={chaos_score:.3f}"
+        chaos = f"{edge_of_chaos:.3f}" if edge_of_chaos is not None else "n/a"
+        logger.debug(
+            "Processed subconscious state: "
+            f"valence={subconscious_state['emotional_valence']:.3f}, chaos={chaos}"
         )
 
         return subconscious_state
@@ -402,6 +404,122 @@ class ProductionLSM:
 
         return loss
 
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def to_state_dict(self) -> Dict[str, Any]:
+        """Serialize the learned RLS readout.
+
+        The arrays are the readout's output weights (reservoir_size x
+        output_dim), bias and P matrix, present only once the readout has
+        been initialized. The scalars record the reservoir size and seed the
+        readout was trained against.
+
+        Returns:
+            Dict with scalars, arrays and histories keys.
+        """
+        readout = self.rls_readout
+        initialized = getattr(readout, "initialized", False) is True
+        arrays: Dict[str, np.ndarray] = {}
+        if initialized:
+            for name in ("Wout", "bias", "P"):
+                value = getattr(readout, name, None)
+                if isinstance(value, np.ndarray):
+                    arrays[f"rls_{name}"] = value
+        samples = getattr(readout, "S", 0) if initialized else 0
+        return {
+            "scalars": {
+                "reservoir_size": self.config.reservoir_size,
+                "seed": self.config.seed,
+                "spectral_radius": self.config.spectral_radius,
+                "rls_initialized": initialized,
+                "rls_samples": float(samples),
+            },
+            "arrays": arrays,
+            "histories": {},
+        }
+
+    def from_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore the RLS readout saved by ``to_state_dict``.
+
+        The readout is restored only when the saved reservoir size and seed
+        match this instance (otherwise it was trained on a different
+        reservoir) and the output weights and bias have the expected shapes
+        and are finite. A non-finite or misshapen P is replaced by the RLS
+        initial value (identity over alpha), keeping the weights for
+        inference while online learning restarts its correlation estimate.
+        Every rejection is logged.
+        """
+        scalars = state.get("scalars") or {}
+        arrays = state.get("arrays") or {}
+        if not scalars.get("rls_initialized") or "rls_Wout" not in arrays:
+            return
+
+        size = self.config.reservoir_size
+        if scalars.get("reservoir_size") != size:
+            logger.warning(
+                f"LSM restore skipped: saved reservoir_size "
+                f"{scalars.get('reservoir_size')} does not match {size}"
+            )
+            return
+        if scalars.get("seed") != self.config.seed:
+            logger.warning(
+                f"LSM restore skipped: saved reservoir seed {scalars.get('seed')} "
+                f"does not match {self.config.seed}; the readout belongs to a "
+                "different reservoir"
+            )
+            return
+
+        out_dim = self.config.output_dim
+        wout = np.asarray(arrays["rls_Wout"], dtype=float)
+        bias = np.asarray(arrays.get("rls_bias", np.zeros(out_dim)), dtype=float)
+        if wout.shape != (size, out_dim) or bias.shape != (out_dim,):
+            logger.warning(
+                f"LSM restore skipped: readout shapes {wout.shape} and "
+                f"{bias.shape}, expected {(size, out_dim)} and {(out_dim,)}"
+            )
+            return
+        if not (np.all(np.isfinite(wout)) and np.all(np.isfinite(bias))):
+            logger.warning(
+                "LSM restore skipped: the saved readout holds non-finite values"
+            )
+            return
+
+        readout = self.rls_readout
+        alpha = float(getattr(readout, "alpha", 1e-6))
+        p_matrix = arrays.get("rls_P")
+        if p_matrix is not None:
+            p_matrix = np.asarray(p_matrix, dtype=float)
+        if (
+            p_matrix is None
+            or p_matrix.shape != (size, size)
+            or not np.all(np.isfinite(p_matrix))
+        ):
+            logger.warning(
+                "LSM restore: the saved RLS P matrix is missing, misshapen or "
+                "non-finite; reinitializing it"
+            )
+            p_matrix = np.eye(size) / alpha
+
+        samples = scalars.get("rls_samples", 0.0)
+        try:
+            samples = float(samples)
+        except (TypeError, ValueError):
+            samples = 0.0
+        if not np.isfinite(samples):
+            samples = 0.0
+
+        readout.input_dim = size
+        readout.output_dim = out_dim
+        readout.Wout = wout
+        readout.bias = bias
+        readout.P = p_matrix
+        readout.S = samples
+        readout.state = {"out": np.zeros((out_dim,))}
+        readout.initialized = True
+        logger.info(f"LSM readout restored for a {size}-unit reservoir")
+
     def benchmark_performance(self) -> Dict[str, Any]:
         """
         Benchmark the LSM performance.
@@ -443,17 +561,14 @@ class ProductionLSM:
             "std_latency_ms": np.std(times),
             "min_latency_ms": np.min(times),
             "max_latency_ms": np.max(times),
-            "mean_chaos_score": np.mean(chaos_scores) if chaos_scores else 0.5,
-            "mean_entropy": np.mean(entropies) if entropies else 0.5,
+            "mean_chaos_score": float(np.mean(chaos_scores)) if chaos_scores else None,
+            "mean_entropy": float(np.mean(entropies)) if entropies else None,
             "reservoir_neurons": self.config.reservoir_size,
             "spectral_radius": self.config.spectral_radius,
             "connectivity": self.config.connectivity,
         }
 
-        logger.info(
-            f"Benchmark complete: {metrics['mean_latency_ms']:.2f}ms average, "
-            f"chaos={metrics['mean_chaos_score']:.3f}"
-        )
+        logger.info(f"Benchmark complete: {metrics['mean_latency_ms']:.2f}ms average")
 
         return metrics
 
@@ -483,7 +598,12 @@ def test_production_lsm():
 
     print(f"  Processed in {state.get('processing_time_ms', 0):.2f}ms")
     print(f"  Emotional valence: {state['emotional_valence']:.3f}")
-    print(f"  Creative emergence (entropy): {state['creative_emergence']:.3f}")
+    creative = state.get("creative_emergence")
+    print(
+        f"  Creative emergence (entropy): {creative:.3f}"
+        if creative is not None
+        else "  Creative emergence (entropy): n/a (fast mode)"
+    )
     edge_score = state.get("edge_of_chaos_score")
     print(
         f"  Edge-of-chaos score: {edge_score:.3f}"
@@ -504,16 +624,11 @@ def test_production_lsm():
     metrics = lsm.benchmark_performance()
 
     print(f"  Mean latency: {metrics['mean_latency_ms']:.2f}ms")
-    print(f"  Chaos score: {metrics['mean_chaos_score']:.3f}")
+    print(f"  Chaos score: {metrics['mean_chaos_score']}")
     print(f"  Reservoir size: {metrics['reservoir_neurons']}")
 
     print("\n" + "=" * 60)
-    print("Production LSM test complete!")
-    print(
-        f"  Achieved <50ms target: {'YES' if metrics['mean_latency_ms'] < 50 else 'NO'}"
-    )
-    print("  Edge-of-chaos dynamics operational!")
-    print("  Research-grade implementation ready!")
+    print("Production LSM test complete")
 
 
 if __name__ == "__main__":

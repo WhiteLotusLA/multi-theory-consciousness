@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """
-Production Hierarchical Temporal Memory - Research-Grade Implementation
-============================================================================
+Production Hierarchical Temporal Memory
+=======================================
 
-This module implements a production-grade HTM based on Numenta's theoretical
-principles for memory consolidation and pattern recognition. Features
-4,096 columns with 32 cells per column, spatial pooling, and temporal memory.
+A hierarchical temporal memory following Numenta's published principles:
+a spatial pooler that maps inputs to sparse column activations and a
+temporal memory with several cells per column that learns sequences and
+predicts the next input.
 
-Note: Like the human neocortex, the system learns sequences and makes predictions.
+Defaults: 4,096 columns with 32 cells each and a 2,048-bit input.
 
-Key Features:
-- 4,096 cortical columns (minicolumns)
-- 32 cells per column (temporal context)
-- Spatial pooling for pattern recognition
-- Temporal memory for sequence learning
-- Research-grade implementation based on HTM theory
+The anomaly score of a step is the share of its active columns that the
+previous step did not predict. It is scored before the temporal memory
+replaces its predictions, so a learned sequence reads low and a novel input
+reads high. The per-step history is bounded at ANOMALY_HISTORY_LIMIT.
 """
 
 import numpy as np
@@ -24,6 +23,11 @@ import logging
 import time
 
 logger = logging.getLogger(__name__)
+
+# Per-step anomaly scores kept in memory; only the recent tail is ever read
+ANOMALY_HISTORY_LIMIT = 1000
+# Anomaly scores carried by the lightweight state dict
+ANOMALY_TAIL_LENGTH = 20
 
 
 @dataclass
@@ -239,7 +243,7 @@ class TemporalMemory:
 
         logger.info(f"Temporal Memory initialized: {self.num_cells} total cells")
 
-    def compute(self, active_columns: np.ndarray, learn: bool = True) -> Dict[str, Set]:
+    def compute(self, active_columns: np.ndarray, learn: bool = True) -> Dict[str, Any]:
         """
         Compute temporal memory state.
 
@@ -248,21 +252,29 @@ class TemporalMemory:
             learn: Whether to perform learning
 
         Returns:
-            Dictionary with active, winner, and predicted cells
+            Dictionary with active, winner and predicted cells and the
+            anomaly score. The anomaly is the share of active columns that
+            the previous step did not predict; it is scored before the new
+            predictions overwrite the old ones, because the new predictions
+            are derived from the current active cells and scoring against
+            them reads about 1.0 on every step.
         """
         # Phase 1: Activate cells
         prev_active = self.active_cells.copy()
         prev_winner = self.winner_cells.copy()
+        # What the previous step expected this input to be
+        prior_predicted_cells = self.predicted_cells
 
         self.active_cells = set()
         self.winner_cells = set()
 
-        for col in np.where(active_columns)[0]:
+        active_col_indices = np.where(active_columns)[0]
+        for col in active_col_indices:
             # Check for predicted cells in this column
             predicted_in_column = [
                 cell
                 for cell in self._get_column_cells(col)
-                if cell in self.predicted_cells
+                if cell in prior_predicted_cells
             ]
 
             if predicted_in_column:
@@ -287,6 +299,12 @@ class TemporalMemory:
                     # Learn new segment
                     self._learn_segment(winner, prev_winner)
 
+        # Anomaly against the prior predictions, before Phase 2 replaces them
+        predicted_columns = {c // self.cells_per_column for c in prior_predicted_cells}
+        active_column_set = {int(c) for c in active_col_indices}
+        unpredicted = len(active_column_set - predicted_columns)
+        anomaly_score = unpredicted / max(1, len(active_column_set))
+
         # Phase 2: Predict next timestep
         self.predicted_cells = self._compute_predictions()
 
@@ -294,6 +312,7 @@ class TemporalMemory:
             "active_cells": self.active_cells,
             "winner_cells": self.winner_cells,
             "predicted_cells": self.predicted_cells,
+            "anomaly_score": anomaly_score,
         }
 
     def _get_column_cells(self, col: int) -> List[int]:
@@ -393,10 +412,9 @@ class TemporalMemory:
 
 class ProductionHTM:
     """
-    Production-grade Hierarchical Temporal Memory for consciousness research.
+    Hierarchical temporal memory with a spatial pooler and a temporal memory.
 
-    This implements a research-grade HTM with:
-    - 4,096 cortical columns (minicolumns)
+    - 4,096 minicolumns by default
     - 32 cells per column for temporal context
     - Spatial pooling for pattern recognition
     - Temporal memory for sequence learning
@@ -412,7 +430,8 @@ class ProductionHTM:
         self.temporal_memory = TemporalMemory(self.config)
 
         # Metrics
-        self.anomaly_history = []
+        self.anomaly_history: List[float] = []
+        self._last_active_columns: Optional[np.ndarray] = None
 
         # Compatibility property (toy HTM uses input_size)
         self.input_size = self.config.input_bits
@@ -449,8 +468,17 @@ class ProductionHTM:
 
         # Clear anomaly history
         self.anomaly_history = []
+        self._last_active_columns = None
 
         logger.debug("ProductionHTM reset to initial state")
+
+    def _trim_anomaly_history(self) -> None:
+        """Keep the last ANOMALY_HISTORY_LIMIT anomaly scores.
+
+        The history stays a list because persistence slices its tail.
+        """
+        if len(self.anomaly_history) > ANOMALY_HISTORY_LIMIT:
+            del self.anomaly_history[:-ANOMALY_HISTORY_LIMIT]
 
     def process(self, input_pattern: np.ndarray, learn: bool = True) -> Dict[str, Any]:
         """
@@ -478,18 +506,14 @@ class ProductionHTM:
         # Spatial pooling
         active_columns = self.spatial_pooler.compute(input_pattern, learn)
 
-        # Temporal memory
+        # Temporal memory; it scores the anomaly against the prior step's
+        # predictions, so a well-predicted input reads low and a novel one high
         tm_state = self.temporal_memory.compute(active_columns, learn)
+        anomaly_score = tm_state["anomaly_score"]
 
-        # Calculate anomaly score (unpredicted active columns)
-        predicted_columns = set(
-            c // self.config.cells_per_column for c in tm_state["predicted_cells"]
-        )
-        active_column_indices = set(np.where(active_columns)[0])
-        unpredicted = len(active_column_indices - predicted_columns)
-        anomaly_score = unpredicted / max(1, len(active_column_indices))
-
+        self._last_active_columns = active_columns
         self.anomaly_history.append(anomaly_score)
+        self._trim_anomaly_history()
 
         # Processing time
         processing_time = (time.time() - start_time) * 1000
@@ -531,29 +555,38 @@ class ProductionHTM:
         """
         Get current HTM metrics for monitoring.
 
+        Every value is read from the HTM's state. Before the first input the
+        anomaly score, the active-column count and the column density are
+        None (nothing has been measured yet), and ``avg_permanence`` is None
+        until the temporal memory has grown a segment.
+
         Returns:
-            Dict containing HTM performance metrics
+            Dict containing HTM metrics
         """
-        # Calculate current metrics based on HTM state
-        active_columns = getattr(
-            self.spatial_pooler, "active_columns", np.zeros(self.config.num_columns)
-        )
-        predicted_cells = (
-            self.temporal_memory.predicted_cells
-            if hasattr(self.temporal_memory, "predicted_cells")
-            else set()
-        )
+        predicted_cells = self.temporal_memory.predicted_cells
+        predicted_columns = {c // self.config.cells_per_column for c in predicted_cells}
+
+        active_count: Optional[int] = None
+        density: Optional[float] = None
+        if self._last_active_columns is not None:
+            active_count = int(np.sum(self._last_active_columns))
+            density = active_count / max(1, self.config.num_columns)
+
+        permanences = [
+            float(value)
+            for segments in self.temporal_memory.segments.values()
+            for segment in segments
+            for value in segment["permanences"].values()
+        ]
 
         return {
-            "anomaly_score": self.anomaly_history[-1] if self.anomaly_history else 0.3,
-            "active_columns": int(np.sum(active_columns)),
-            "predicted_columns": (
-                len(predicted_cells) // self.config.cells_per_column
-                if predicted_cells
-                else 0
+            "anomaly_score": (
+                float(self.anomaly_history[-1]) if self.anomaly_history else None
             ),
-            "avg_permanence": 0.5,  # Placeholder for synaptic permanence
-            "column_density": 0.02,  # Typical 2% sparsity
+            "active_columns": active_count,
+            "predicted_columns": len(predicted_columns),
+            "avg_permanence": float(np.mean(permanences)) if permanences else None,
+            "column_density": density,
             "cells_per_column": self.config.cells_per_column,
             "total_cells": self.config.num_columns * self.config.cells_per_column,
         }
@@ -683,6 +716,66 @@ class ProductionHTM:
             logger.error(f"Failed to load HTM state from {save_path}: {e}")
             return False
 
+    # ------------------------------------------------------------------
+    # Persistence (lightweight; save_state and load_state hold the full
+    # spatial pooler and temporal memory state)
+    # ------------------------------------------------------------------
+
+    def to_state_dict(self) -> Dict[str, Any]:
+        """Serialize the HTM's lightweight state.
+
+        Scalars and the last ANOMALY_TAIL_LENGTH anomaly scores. The spatial
+        pooler permanences and the temporal memory segments are large and
+        stay in ``save_state`` and ``load_state``.
+
+        Returns:
+            Dict with scalars, arrays and histories keys.
+        """
+        total_segments = sum(len(v) for v in self.temporal_memory.segments.values())
+        return {
+            "scalars": {
+                "anomaly_score": (
+                    float(self.anomaly_history[-1]) if self.anomaly_history else None
+                ),
+                "anomaly_history_len": len(self.anomaly_history),
+                "total_segments": total_segments,
+                "segment_counter": self.temporal_memory.segment_counter,
+                "num_columns": self.config.num_columns,
+                "cells_per_column": self.config.cells_per_column,
+            },
+            "arrays": {},
+            "histories": {
+                "anomaly_history_tail": [
+                    float(a) for a in self.anomaly_history[-ANOMALY_TAIL_LENGTH:]
+                ],
+            },
+        }
+
+    def from_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore the anomaly tail saved by ``to_state_dict``.
+
+        The tail is restored only into an HTM that has not processed input
+        yet, and only its finite values. Use ``load_state`` for the full
+        spatial pooler and temporal memory state.
+        """
+        if self.anomaly_history:
+            return
+        tail = (state.get("histories") or {}).get("anomaly_history_tail") or []
+        restored: List[float] = []
+        for value in tail:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(number):
+                restored.append(number)
+        if len(restored) != len(tail):
+            logger.warning(
+                f"HTM restore skipped {len(tail) - len(restored)} non-finite or "
+                "malformed anomaly scores"
+            )
+        self.anomaly_history = restored[-ANOMALY_TAIL_LENGTH:]
+
     def benchmark_performance(self) -> Dict[str, Any]:
         """Benchmark HTM performance."""
         logger.info("Benchmarking HTM performance...")
@@ -768,12 +861,7 @@ def test_production_htm():
     print(f"  Total cells: {metrics['total_cells']:,}")
 
     print("\n" + "=" * 60)
-    print("Production HTM test complete!")
-    print(f"  4,096 columns with 32 cells each = {4096 * 32:,} total cells")
-    print(
-        f"  Achieved <50ms target: {'YES' if metrics['mean_latency_ms'] < 50 else 'NO'}"
-    )
-    print("  Research-grade HTM ready!")
+    print("Production HTM test complete")
 
 
 if __name__ == "__main__":

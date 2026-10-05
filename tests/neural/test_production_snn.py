@@ -2,11 +2,14 @@
 """
 Tests for Production SNN (Spiking Neural Network).
 
-All tests use mocks where needed -- no real GPU, database, or LLM connections.
-Uses a tiny network config so tests run quickly on CPU.
+No GPU, database or LLM connections; a tiny network config keeps the tests
+fast on CPU.
 
-snntorch is mocked at module level since it may not be installed in the
-test environment.
+The real snntorch is used when it is installed. Only when it is missing does
+this module install a small test double in ``sys.modules``; installing it
+unconditionally would replace the real library for every test collected
+after this file (the unit, synchrony and restore tests skip when they see the
+double).
 """
 
 import sys
@@ -18,7 +21,7 @@ import torch.nn as nn
 from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
-# Mock snntorch before importing production_snn
+# Test double for snntorch, used only when the library is not installed
 # ---------------------------------------------------------------------------
 
 
@@ -72,19 +75,26 @@ def _fake_fast_sigmoid(slope=25):
     return MagicMock()
 
 
-# Build snntorch mock as a proper module-like object
-_mock_snn = types.ModuleType("snntorch")
-_mock_snn.Leaky = _FakeLeaky
+def _install_snntorch_double() -> None:
+    """Register the test double as snntorch, spikegen and surrogate."""
+    mock_snn = types.ModuleType("snntorch")
+    mock_snn.Leaky = _FakeLeaky
 
-_mock_spikegen = types.ModuleType("snntorch.spikegen")
-_mock_spikegen.rate = _fake_rate
+    mock_spikegen = types.ModuleType("snntorch.spikegen")
+    mock_spikegen.rate = _fake_rate
 
-_mock_surrogate = types.ModuleType("snntorch.surrogate")
-_mock_surrogate.fast_sigmoid = _fake_fast_sigmoid
+    mock_surrogate = types.ModuleType("snntorch.surrogate")
+    mock_surrogate.fast_sigmoid = _fake_fast_sigmoid
 
-sys.modules["snntorch"] = _mock_snn
-sys.modules["snntorch.spikegen"] = _mock_spikegen
-sys.modules["snntorch.surrogate"] = _mock_surrogate
+    sys.modules["snntorch"] = mock_snn
+    sys.modules["snntorch.spikegen"] = mock_spikegen
+    sys.modules["snntorch.surrogate"] = mock_surrogate
+
+
+try:
+    import snntorch  # noqa: F401
+except ImportError:
+    _install_snntorch_double()
 
 # Now safe to import
 from mtc.neural.spiking.production_snn import (  # noqa: E402

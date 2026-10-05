@@ -12,12 +12,11 @@ awareness. This module provides:
 - NeuralSynchronizer: multi-system coordination
 - SyncState: observable synchronization snapshot
 
-Created: March 7, 2026
-Authors: Multi-Theory Consciousness Contributors
+Sync state timestamps are timezone-aware UTC.
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 import time
 import math
@@ -213,7 +212,7 @@ class NeuralSynchronizer:
                 sync_errors[key] = abs(diff - expected)
 
         state = SyncState(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             phase_differences=phase_diffs,
             sync_errors=sync_errors,
         )

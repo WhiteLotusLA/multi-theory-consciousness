@@ -18,15 +18,17 @@ Position in pipeline:
     Phase 3: Create workspace candidates (with salience modifiers)
 
 Coupling: Hybrid static (architectural priors) + Hebbian (experience-dependent).
-Computation: Pure NumPy on CPU. <1ms per consciousness cycle.
+Computation: pure NumPy on CPU.
+
+Numerical guards: the order parameter is computed from a normalized copy of
+the phases, so it stays in [0, 1]; non-finite phase rows are reinitialized as
+random unit vectors; a restore rejects non-finite phases and learned coupling
+and keeps the constructor's history window.
 
 References:
   - Miyato et al. (2025). "Artificial Kuramoto Oscillatory Neurons." ICLR.
   - Fries (2005). "Neuronal communication through coherence." TiCS.
   - Lamme (2006). "Towards a true neural stance on consciousness." TiCS.
-
-Created: 2026-03-18
-Author: MTC Contributors
 """
 
 import logging
@@ -120,6 +122,9 @@ class OscillatoryBinding:
         self.sync_threshold = sync_threshold
 
         rng = np.random.default_rng(seed=seed)
+        # The same stream, after the draws below, re-seeds corrupted phase
+        # rows; it never touches numpy's global generator
+        self._rng = rng
 
         raw = rng.standard_normal((num_oscillators, phase_dim))
         self.phases = raw / np.linalg.norm(raw, axis=1, keepdims=True)
@@ -143,8 +148,11 @@ class OscillatoryBinding:
             "cross": slice(24, 30),
         }
 
+        self._history_window = history_window
         self._order_history: deque = deque(maxlen=history_window)
         self._binding_count = 0
+        # Pairwise substrate coherence from the latest bind; RPT reads it
+        self._last_cross_coherence: Dict[str, float] = {}
 
         # Oscillator-level TPM tracking for causal emergence analysis
         self._osc_transition_counts = np.zeros((81, 81), dtype=np.int64)
@@ -247,12 +255,34 @@ class OscillatoryBinding:
         norms = np.maximum(norms, 1e-8)
         self.phases = x_new / norms
 
+    def _random_unit_rows(self, count: int) -> np.ndarray:
+        """Standard-normal rows projected onto the unit sphere S^(D-1)."""
+        raw = self._rng.standard_normal((count, self.phase_dim))
+        norms = np.linalg.norm(raw, axis=1, keepdims=True)
+        return raw / np.maximum(norms, 1e-8)
+
     def _global_order_parameter(self) -> float:
-        if np.any(np.isnan(self.phases)):
-            # Corrupted phases (e.g., from state restoration) - reset to random
-            self.phases = np.random.uniform(0, 2 * np.pi, self.phases.shape)
-        r = float(np.linalg.norm(np.mean(self.phases, axis=0)))
-        return 0.0 if np.isnan(r) else r
+        """Global order parameter r = ||mean of the unit phase vectors||.
+
+        Rows holding NaN or infinity (for example after a bad restore) are
+        reinitialized as random unit vectors; uniform angles would break the
+        unit-sphere invariant and give r far above 1. r is computed from a
+        normalized copy with a 1e-8 norm floor, so it stays in [0, 1] even
+        for off-sphere rows while healthy phases, already unit vectors after
+        every Kuramoto step, are left bitwise untouched.
+        """
+        corrupted = ~np.all(np.isfinite(self.phases), axis=1)
+        if np.any(corrupted):
+            logger.warning(
+                f"Oscillatory binding: {int(corrupted.sum())} non-finite phase "
+                "rows reinitialized on the unit sphere"
+            )
+            self.phases = np.array(self.phases, dtype=float)
+            self.phases[corrupted] = self._random_unit_rows(int(corrupted.sum()))
+        norms = np.linalg.norm(self.phases, axis=1, keepdims=True)
+        unit = self.phases / np.maximum(norms, 1e-8)
+        r = float(np.linalg.norm(np.mean(unit, axis=0)))
+        return 0.0 if not np.isfinite(r) else min(1.0, r)
 
     def _group_order_parameters(self) -> Dict[str, float]:
         result = {}
@@ -420,6 +450,9 @@ class OscillatoryBinding:
                 "num_oscillators": self.num_oscillators,
                 "phase_dim": self.phase_dim,
                 "osc_prev_state_idx": self._osc_prev_state_idx,
+                "last_cross_coherence": {
+                    k: float(v) for k, v in self._last_cross_coherence.items()
+                },
             },
             "arrays": {
                 "phases": self.phases,
@@ -434,30 +467,87 @@ class OscillatoryBinding:
             },
         }
 
+    def _restorable(self, name: str, loaded: np.ndarray, shape: tuple) -> bool:
+        """True when a persisted array has the shape of the live one."""
+        if loaded.shape != shape:
+            logger.warning(
+                f"Oscillatory binding: persisted {name} has shape "
+                f"{loaded.shape}, expected {shape}; keeping the fresh value"
+            )
+            return False
+        return True
+
     def from_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore from ``to_state_dict`` output.
+
+        Non-finite phases are replaced by fresh unit vectors and non-finite
+        learned coupling by zeros (Hebbian learning rebuilds it), each with a
+        warning; arrays whose shape disagrees with this instance are skipped.
+        The order history keeps this instance's window.
+        """
         scalars = state.get("scalars", {})
         arrays = state.get("arrays", {})
         histories = state.get("histories", {})
         self._binding_count = scalars.get("binding_count", 0)
         self._osc_prev_state_idx = scalars.get("osc_prev_state_idx", None)
+        coherence = scalars.get("last_cross_coherence") or {}
+        self._last_cross_coherence = {
+            str(k): float(v)
+            for k, v in coherence.items()
+            if isinstance(v, (int, float)) and np.isfinite(v)
+        }
         if "phases" in arrays:
-            self.phases = np.array(arrays["phases"])
+            loaded = np.array(arrays["phases"], dtype=float)
+            if self._restorable("phases", loaded, self.phases.shape):
+                if not np.all(np.isfinite(loaded)):
+                    logger.warning(
+                        "Oscillatory binding: non-finite persisted phases; "
+                        "reinitializing them on the unit sphere"
+                    )
+                    raw = np.random.default_rng().standard_normal(loaded.shape)
+                    norms = np.linalg.norm(raw, axis=1, keepdims=True)
+                    self.phases = raw / np.maximum(norms, 1e-8)
+                else:
+                    self.phases = loaded
         if "J_learned" in arrays:
-            self.J_learned = np.array(arrays["J_learned"])
-        if "proj_vectors" in arrays:
-            self.proj_vectors = np.array(arrays["proj_vectors"])
-        if "omega" in arrays:
-            self.omega = np.array(arrays["omega"])
-        if "osc_transition_counts" in arrays:
-            self._osc_transition_counts = np.array(
-                arrays["osc_transition_counts"], dtype=np.int64
-            )
-        if "osc_state_visit_counts" in arrays:
-            self._osc_state_visit_counts = np.array(
-                arrays["osc_state_visit_counts"], dtype=np.int64
-            )
+            loaded_j = np.array(arrays["J_learned"], dtype=float)
+            if self._restorable("J_learned", loaded_j, self.J_learned.shape):
+                if not np.all(np.isfinite(loaded_j)):
+                    logger.warning(
+                        "Oscillatory binding: non-finite persisted J_learned; "
+                        "starting the learned coupling from zero"
+                    )
+                    self.J_learned = np.zeros_like(self.J_learned)
+                else:
+                    self.J_learned = loaded_j
+        for name in ("proj_vectors", "omega"):
+            if name in arrays:
+                loaded = np.array(arrays[name], dtype=float)
+                current = getattr(self, name)
+                if not self._restorable(name, loaded, current.shape):
+                    continue
+                if not np.all(np.isfinite(loaded)):
+                    logger.warning(
+                        f"Oscillatory binding: non-finite persisted {name}; "
+                        "keeping the seeded value"
+                    )
+                    continue
+                setattr(self, name, loaded)
+        for name, attr in (
+            ("osc_transition_counts", "_osc_transition_counts"),
+            ("osc_state_visit_counts", "_osc_state_visit_counts"),
+        ):
+            if name in arrays:
+                loaded = np.asarray(arrays[name])
+                current = getattr(self, attr)
+                if self._restorable(name, loaded, current.shape) and np.all(
+                    np.isfinite(loaded)
+                ):
+                    setattr(self, attr, loaded.astype(np.int64))
         if "order_history" in histories:
-            self._order_history = deque(histories["order_history"], maxlen=100)
+            self._order_history = deque(
+                histories["order_history"], maxlen=self._history_window
+            )
         logger.info(
             f"OscillatoryBinding restored: {self._binding_count} prior bindings, "
             f"J_learned max={np.max(np.abs(self.J_learned)):.4f}"

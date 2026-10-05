@@ -12,13 +12,12 @@ EmotionalState -- Emotional processing output (VAD model)
 CreativeVector -- LSM output (high-dimensional reservoir state)
 TemporalPattern -- HTM output (learned sequential patterns)
 
-Created: March 7, 2026
-Authors: Multi-Theory Consciousness Contributors
+Message timestamps are timezone-aware UTC.
 """
 
 from enum import Enum
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Union
 import numpy as np
 import uuid
@@ -204,7 +203,7 @@ class NeuralMessage:
     payload: Optional[
         Union[SpikeTrain, EmotionalState, CreativeVector, TemporalPattern]
     ] = None
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     sequence_number: int = field(default=-1)
     requires_ack: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)

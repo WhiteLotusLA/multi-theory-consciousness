@@ -198,6 +198,23 @@ class TestProcessSubconscious:
         assert isinstance(result["emotional_valence"], float)
         assert isinstance(result["emotional_arousal"], float)
 
+    def test_fast_mode_leaves_unmeasured_dynamics_unset(self, lsm):
+        result = lsm.process_subconscious(np.random.randn(10, 50).astype(np.float32))
+
+        # No 0.5 stand-ins for the metrics fast mode skips
+        assert result["creative_emergence"] is None
+        assert result["stability"] is None
+        assert result["processing_depth"] is None
+
+    def test_slow_mode_derives_dynamics_from_measurements(self, lsm_slow):
+        result = lsm_slow.process_subconscious(
+            np.random.randn(20, 50).astype(np.float32)
+        )
+
+        assert result["creative_emergence"] == result["entropy"]
+        assert result["stability"] == pytest.approx(1.0 - result["edge_of_chaos_score"])
+        assert result["processing_depth"] == result["correlation_time"]
+
 
 class TestAnalyzeReservoirState:
     def test_basic_metrics_always_present(self, lsm):

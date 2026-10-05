@@ -213,3 +213,78 @@ class TestOscillatorTPM:
             ob._osc_state_visit_counts, ob2._osc_state_visit_counts
         )
         assert ob._osc_prev_state_idx == ob2._osc_prev_state_idx
+
+
+class TestNumericalGuards:
+    def test_nan_phase_recovery_keeps_order_parameter_in_unit_interval(self):
+        ob = OscillatoryBinding()
+        healthy = ob.phases.copy()
+        ob.phases[[0, 5, 29]] = np.nan
+
+        r = ob._global_order_parameter()
+
+        assert 0.0 <= r <= 1.0
+        assert np.all(np.isfinite(ob.phases))
+        np.testing.assert_allclose(np.linalg.norm(ob.phases, axis=1), 1.0, atol=1e-12)
+        # Only the corrupted rows are reinitialized
+        untouched = [i for i in range(ob.num_oscillators) if i not in (0, 5, 29)]
+        np.testing.assert_array_equal(ob.phases[untouched], healthy[untouched])
+
+    def test_all_nan_phases_recover_onto_the_sphere(self):
+        ob = OscillatoryBinding()
+        ob.phases[:] = np.nan
+
+        r = ob._global_order_parameter()
+
+        assert 0.0 <= r <= 1.0
+        np.testing.assert_allclose(np.linalg.norm(ob.phases, axis=1), 1.0, atol=1e-12)
+
+    def test_bind_after_nan_phases_reports_valid_order_parameter(self):
+        ob = OscillatoryBinding()
+        ob.phases[3] = np.nan
+
+        result = ob.bind({name: 0.5 for name in OSCILLATOR_NAMES})
+
+        assert 0.0 <= result.global_order_parameter <= 1.0
+        assert np.all(np.isfinite(ob.phases))
+
+    def test_order_parameter_leaves_healthy_phases_untouched(self):
+        ob = OscillatoryBinding()
+        ob.bind({name: float(i) / 30 for i, name in enumerate(OSCILLATOR_NAMES)})
+        before = ob.phases.copy()
+
+        ob._global_order_parameter()
+
+        assert ob.phases.tobytes() == before.tobytes()
+
+    def test_order_parameter_bounded_for_off_sphere_phases(self):
+        ob = OscillatoryBinding()
+        # A restored state that lost unit norm: aligned rows of length 3
+        ob.phases = np.tile(ob.phases[0] * 3.0, (ob.num_oscillators, 1))
+
+        r = ob._global_order_parameter()
+
+        assert 0.0 <= r <= 1.0 + 1e-12
+
+    def test_restore_keeps_history_window(self):
+        source = OscillatoryBinding(history_window=7)
+        for _ in range(10):
+            source.bind({name: 0.5 for name in OSCILLATOR_NAMES})
+        state = source.to_state_dict()
+
+        restored = OscillatoryBinding(history_window=7)
+        restored.from_state_dict(state)
+
+        assert restored._order_history.maxlen == 7
+        assert list(restored._order_history) == list(source._order_history)
+
+    def test_last_cross_coherence_initialized(self):
+        ob = OscillatoryBinding()
+        assert ob._last_cross_coherence == {}
+
+        ob.bind({name: 0.5 for name in OSCILLATOR_NAMES})
+        assert set(ob._last_cross_coherence) == {"snn_lsm", "snn_htm", "lsm_htm"}
+
+        restored = OscillatoryBinding()
+        restored.from_state_dict(ob.to_state_dict())
+        assert restored._last_cross_coherence == ob._last_cross_coherence
