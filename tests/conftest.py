@@ -21,6 +21,9 @@ What each fixture yields:
 - ``throwaway_redis``: a ``RedisTarget`` (client, key prefix and a Settings
   copy whose ``REDIS_KEY_PREFIX`` is that prefix).
 - ``throwaway_neo4j``: a ``Neo4jTarget`` (driver and a new database name).
+
+The session also defaults ``MTC_DEVICE`` to ``cpu`` (set before any test
+module is imported); an exported ``MTC_DEVICE`` still wins.
 """
 
 import os
@@ -31,6 +34,10 @@ from typing import Any, Optional
 
 import pytest
 import pytest_asyncio
+
+# The machine running the suite may share its accelerator with a live system,
+# so no test claims it by default: accelerator tests opt in explicitly.
+os.environ.setdefault("MTC_DEVICE", "cpu")
 
 OPT_IN_VARIABLE = "MTC_TEST_STORES"
 PREFIX_VARIABLE = "MTC_TEST_DB_PREFIX"

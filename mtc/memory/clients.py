@@ -19,7 +19,9 @@ here:
   ``DB_POOL_IDLE_TIMEOUT`` as the idle connection lifetime). JSON and JSONB
   codecs are installed per connection so stores pass and receive dicts.
 - ``create_mongo_client``: ``MONGODB_HOST``, ``MONGODB_PORT``, the optional
-  credentials, ``tz_aware=True`` and ``MONGODB_SERVER_SELECTION_TIMEOUT_MS``.
+  credentials, ``tz_aware=True``, ``MONGODB_SERVER_SELECTION_TIMEOUT_MS`` and
+  ``connect=False``, so building a client opens no connection (the driver
+  connects on the first operation).
 - ``create_redis_client``: ``REDIS_HOST``, ``REDIS_PORT``, ``REDIS_DB``,
   ``REDIS_PASSWORD``, ``REDIS_MAX_CONNECTIONS``, ``REDIS_SOCKET_TIMEOUT`` and
   ``decode_responses=True``.
@@ -94,7 +96,13 @@ async def create_postgres_pool(
 
 
 def create_mongo_client(settings: Optional[Settings] = None, **overrides: Any) -> Any:
-    """Create a pymongo client from Settings (it connects lazily)."""
+    """Create a pymongo client from Settings without connecting.
+
+    The client is built with ``connect=False``: construction starts no
+    background connection or server monitoring, and the driver connects on the
+    first operation. ``overrides`` replace client arguments, so an explicit
+    ``connect=True`` still connects at construction.
+    """
     pymongo = require_client("pymongo", "mongo")
     active = _settings(settings)
     arguments = {
@@ -102,6 +110,7 @@ def create_mongo_client(settings: Optional[Settings] = None, **overrides: Any) -
         "port": active.MONGODB_PORT,
         "tz_aware": True,
         "serverSelectionTimeoutMS": active.MONGODB_SERVER_SELECTION_TIMEOUT_MS,
+        "connect": False,
     }
     if active.MONGODB_USER and active.MONGODB_PASSWORD:
         arguments["username"] = active.MONGODB_USER
@@ -120,7 +129,11 @@ def mongo_database(
     settings: Optional[Settings] = None,
     name: Optional[str] = None,
 ) -> Any:
-    """Return the configured (or named) MongoDB database of a client."""
+    """Return the configured (or named) MongoDB database of a client.
+
+    Without ``client`` one is built through ``create_mongo_client``, so it
+    does not connect until the first operation.
+    """
     active = _settings(settings)
     owner = client if client is not None else create_mongo_client(active)
     return owner[name or active.MONGODB_DB]

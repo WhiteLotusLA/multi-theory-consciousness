@@ -109,6 +109,9 @@ def settings_env(monkeypatch, tmp_path):
     for key in list(os.environ):
         if key.startswith("MTC_"):
             monkeypatch.delenv(key, raising=False)
+    # The device is on the CPU unless a case names one, so no case resolves
+    # (or depends on) an accelerator this machine happens to have.
+    monkeypatch.setenv("MTC_DEVICE", "cpu")
     monkeypatch.chdir(tmp_path)
 
     def apply(**values):
