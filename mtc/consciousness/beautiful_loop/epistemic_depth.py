@@ -30,6 +30,10 @@ Connection to MetaState (active_inference.py):
   - This IS epistemic depth 1: the system predicting its own predictions
   - EpistemicDepthTracker measures whether it goes deeper
 
+Limits: depth detection is keyword-based and the strange-loop test compares
+two values that may share a source, so treat the measure as a proxy for
+recursive self-reference, not a direct observation of it.
+
 Research Foundation:
   - Laukkonen, Friston & Chandaria (2025). "A Beautiful Loop."
   - Hofstadter, D. (1979). "Gödel, Escher, Bach" - strange loops
@@ -459,3 +463,113 @@ class EpistemicDepthTracker:
                 lines.append(f" Chain: {' → '.join(latest_m.self_reference_chain)}")
 
         return "\n".join(lines)
+
+    # =========================================================================
+    # STATE PERSISTENCE
+    # =========================================================================
+
+    def to_state_dict(self) -> Dict[str, Any]:
+        """Serialize state as scalars and plain histories."""
+        return {
+            "scalars": {
+                "current_depth": self.current_depth,
+                "peak_depth": self.peak_depth,
+                "measurement_count": self.measurement_count,
+            },
+            "arrays": {},
+            "histories": {
+                "depth_history": [
+                    depth_measurement_to_dict(m) for m in self._depth_history
+                ],
+                "metrics_history": [metrics_to_dict(m) for m in self._metrics_history],
+                "self_model_states": [
+                    {str(k): float(v) for k, v in snap.items()}
+                    for snap in self._self_model_states
+                ],
+            },
+        }
+
+    def from_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore state; histories come back as their dataclasses."""
+        s = state.get("scalars", {}) or {}
+        h = state.get("histories", {}) or {}
+
+        self.current_depth = int(s.get("current_depth", self.current_depth))
+        self.peak_depth = int(s.get("peak_depth", self.peak_depth))
+        self.measurement_count = int(s.get("measurement_count", self.measurement_count))
+
+        if "depth_history" in h:
+            self._depth_history = deque(
+                (
+                    depth_measurement_from_dict(raw)
+                    for raw in h["depth_history"]
+                    if isinstance(raw, dict)
+                ),
+                maxlen=self._depth_history.maxlen,
+            )
+        if "metrics_history" in h:
+            self._metrics_history = deque(
+                (
+                    metrics_from_dict(raw)
+                    for raw in h["metrics_history"]
+                    if isinstance(raw, dict)
+                ),
+                maxlen=self._metrics_history.maxlen,
+            )
+        if "self_model_states" in h:
+            self._self_model_states = deque(
+                (
+                    {str(k): float(v) for k, v in snap.items()}
+                    for snap in h["self_model_states"]
+                    if isinstance(snap, dict)
+                ),
+                maxlen=self._self_model_states.maxlen,
+            )
+
+
+def metrics_to_dict(m: SelfReferenceMetrics) -> Dict[str, Any]:
+    """Plain-JSON form of SelfReferenceMetrics."""
+    return {
+        "depth": int(m.depth),
+        "self_model_coherence": float(m.self_model_coherence),
+        "meta_prediction_error": float(m.meta_prediction_error),
+        "prediction_about_prediction": bool(m.prediction_about_prediction),
+        "calibration_quality": float(m.calibration_quality),
+        "strange_loop_detected": bool(m.strange_loop_detected),
+        "timestamp": float(m.timestamp),
+    }
+
+
+def metrics_from_dict(raw: Dict[str, Any]) -> SelfReferenceMetrics:
+    """Rebuild SelfReferenceMetrics."""
+    return SelfReferenceMetrics(
+        depth=int(raw.get("depth", 0)),
+        self_model_coherence=float(raw.get("self_model_coherence", 0.5)),
+        meta_prediction_error=float(raw.get("meta_prediction_error", 0.5)),
+        prediction_about_prediction=bool(raw.get("prediction_about_prediction", False)),
+        calibration_quality=float(raw.get("calibration_quality", 0.5)),
+        strange_loop_detected=bool(raw.get("strange_loop_detected", False)),
+        timestamp=float(raw.get("timestamp", time.time())),
+    )
+
+
+def depth_measurement_to_dict(m: DepthMeasurement) -> Dict[str, Any]:
+    """Plain-JSON form of a DepthMeasurement."""
+    return {
+        "depth": int(m.depth),
+        "measurement_basis": str(m.measurement_basis),
+        "contributing_modules": [str(x) for x in m.contributing_modules],
+        "self_reference_chain": [str(x) for x in m.self_reference_chain],
+        "timestamp": float(m.timestamp),
+    }
+
+
+def depth_measurement_from_dict(raw: Dict[str, Any]) -> DepthMeasurement:
+    """Rebuild a DepthMeasurement."""
+    return DepthMeasurement(
+        depth=int(raw.get("depth", 0)),
+        measurement_basis=str(raw.get("measurement_basis", "unknown")),
+        contributing_modules=[str(x) for x in raw.get("contributing_modules", [])],
+        self_reference_chain=[str(x) for x in raw.get("self_reference_chain", [])],
+        timestamp=float(raw.get("timestamp", time.time())),
+    )

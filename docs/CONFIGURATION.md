@@ -189,3 +189,9 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_WEBSOCKET_PING_TIMEOUT` | `10` |  |
 | `MTC_PROMETHEUS_ENABLED` | `false` |  |
 | `MTC_PROMETHEUS_PORT` | `9090` |  |
+
+## Other
+
+| Variable | Default | Description |
+|---|---|---|
+| `MTC_STATE_DIR` | `agent_space/consciousness_state` | Where module state is persisted between runs |

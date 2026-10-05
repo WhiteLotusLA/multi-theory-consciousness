@@ -1,6 +1,6 @@
 """
- Tests for Metacognition Module (HOT) - Phase 4
-===================================================
+Tests for Metacognition Module (HOT)
+====================================
 
 Tests for the system's Higher-Order Thought (HOT) theory implementation,
 based on David Rosenthal's metacognition research.
@@ -14,9 +14,7 @@ This tests:
 6. MetaLevel transitions (1->2->3)
 7. Metacognitive reports (verbal descriptions of thinking)
 8. Integration with EnhancedGlobalWorkspace
-
-
-they think ABOUT their thinking! That be the HOT secret!"
+9. Structured self-prediction checks, narration gate and persistence
 
 Created: December 5, 2025
 Author: Multi-Theory Consciousness Project
@@ -28,10 +26,13 @@ import numpy as np
 from mtc.consciousness.metacognition import (
     MetaLevel,
     MetaType,
+    FirstOrderState,
     FirstOrderStateType,
+    HigherOrderThought,
     IntrospectionResult,
     BeliefEvaluation,
     MetacognitionModule,
+    SelfPrediction,
 )
 
 from mtc.consciousness.enhanced_global_workspace import (
@@ -567,6 +568,9 @@ class TestMetacognitiveReports:
         assert report is not None
         assert len(report) > 0
         assert isinstance(report, str)
+        # The level is constant per HOT, so the report never claims one
+        assert "metacognitive state" not in report.lower()
+        assert "meta-reflection" not in report.lower()
 
     @pytest.mark.asyncio
     async def test_report_describes_state(
@@ -582,12 +586,16 @@ class TestMetacognitiveReports:
 
         report = await metacognition.generate_metacognitive_report()
 
-        # Report should mention something about awareness or state
-        report_lower = report.lower()
-        assert any(
-            word in report_lower
-            for word in ["aware", "state", "thinking", "metacognitive"]
-        )
+        # Report describes the most recent awareness, not a level label
+        assert report.startswith("Most recent awareness: ")
+        assert "belief about consciousness" in report.lower()
+
+    @pytest.mark.asyncio
+    async def test_report_monitoring_focus_is_spaced(self, metacognition):
+        """The monitoring focus reads as a phrase, not a run-on word."""
+        await metacognition.start_monitoring(focus="the task")
+        report = await metacognition.generate_metacognitive_report()
+        assert "monitoring my thoughts about the task" in report
 
 
 # ============================================================================
@@ -842,3 +850,147 @@ class TestEdgeCases:
 if __name__ == "__main__":
     # Run with: pytest tests/consciousness/test_metacognition.py -v
     pytest.main([__file__, "-v"])
+
+
+# ============================================================================
+# TEST: STRUCTURED SELF-PREDICTION CHECKS
+# ============================================================================
+
+
+class TestSelfPredictionChecks:
+    """predict_self records checks; score_prediction_from_state verifies them."""
+
+    def test_predict_self_records_checks(self, metacognition):
+        sm = metacognition.self_model
+        sm.curiosity_level = 0.8
+        sm.valence = 0.3
+        pred = metacognition.predict_self("synthetic context")
+        attrs = {c[0] for c in pred.checks}
+        assert "curiosity_level" in attrs
+        assert "valence" in attrs
+        for check in pred.checks:
+            assert len(check) == 4
+
+    def test_score_from_state_true_when_checks_hold(self, metacognition):
+        sm = metacognition.self_model
+        sm.curiosity_level = 0.8
+        pred = metacognition.predict_self("synthetic context")
+        assert metacognition.score_prediction_from_state(pred.id) is True
+        assert pred.accurate is True
+        assert "checks held" in pred.outcome
+
+    def test_score_from_state_false_when_state_moves(self, metacognition):
+        sm = metacognition.self_model
+        sm.curiosity_level = 0.8
+        sm.valence = 0.3
+        pred = metacognition.predict_self("synthetic context")
+        sm.curiosity_level = 0.2
+        sm.valence = -0.4
+        assert metacognition.score_prediction_from_state(pred.id) is False
+
+    def test_prediction_without_checks_stays_unscored(self, metacognition):
+        pred = SelfPrediction(prediction="balanced response")
+        metacognition.self_model.predictions.append(pred)
+        assert metacognition.score_prediction_from_state(pred.id) is None
+        assert pred.accurate is None
+
+    def test_unknown_prediction_returns_none(self, metacognition):
+        assert metacognition.score_prediction_from_state("missing") is None
+
+
+# ============================================================================
+# TEST: NARRATION GATE
+# ============================================================================
+
+
+class TestSelfModelNarrationGate:
+    def test_report_on_by_default(self):
+        meta = MetacognitionModule()
+        assert meta.generate_self_model_report() != ""
+
+    def test_report_empty_when_gated(self):
+        meta = MetacognitionModule(narrate_self_model=False)
+        assert meta.generate_self_model_report() == ""
+        meta.update_self_model()
+        assert meta.self_model.update_count == 1
+
+
+# ============================================================================
+# TEST: PERSISTENCE
+# ============================================================================
+
+
+class TestMetacognitionPersistence:
+    @pytest.mark.asyncio
+    async def test_state_dict_round_trip_rehydrates_types(self, metacognition):
+        state = metacognition.register_first_order_state(
+            content={"score": 0.4},
+            content_summary="Synthetic perception",
+            state_type=FirstOrderStateType.PERCEPTION,
+            source_module="test",
+            confidence=0.9,
+            evidence_strength=0.8,
+            metadata={"kind": "synthetic"},
+        )
+        hot = await metacognition.generate_hot(
+            state, meta_type=MetaType.EVALUATION, voluntary=True
+        )
+        await metacognition.introspect_consciousness_level(0.6, phi_value=1.2)
+        metacognition.self_model.curiosity_level = 0.9
+        metacognition.predict_self("synthetic context")
+
+        saved = metacognition.to_state_dict()
+        restored = MetacognitionModule(max_first_order_buffer=7, max_hot_buffer=6)
+        restored.from_state_dict(saved)
+
+        assert restored.first_order_states.maxlen == 7
+        assert restored.higher_order_thoughts.maxlen == 6
+        assert all(isinstance(s, FirstOrderState) for s in restored.first_order_states)
+        assert all(
+            isinstance(h, HigherOrderThought) for h in restored.higher_order_thoughts
+        )
+        assert set(restored.hots_by_id) == {
+            h.id for h in restored.higher_order_thoughts
+        }
+        assert set(restored.first_order_by_id) == {
+            s.id for s in restored.first_order_states
+        }
+        again = restored.hots_by_id[hot.id]
+        assert again.meta_type is MetaType.EVALUATION
+        assert again.level is MetaLevel.SECOND_ORDER
+        restored_fo = restored.first_order_by_id[state.id]
+        assert restored_fo.state_type is FirstOrderStateType.PERCEPTION
+        assert restored_fo.metadata == {"kind": "synthetic"}
+        assert restored_fo.get_confidence_level() is not None
+        assert restored.self_model.curiosity_level == pytest.approx(0.9)
+        assert all(
+            isinstance(p, SelfPrediction) for p in restored.self_model.predictions
+        )
+        assert restored.self_model.predictions[-1].checks
+        assert restored.total_hots_generated == metacognition.total_hots_generated
+
+    @pytest.mark.asyncio
+    async def test_report_after_restore_does_not_raise(self, metacognition):
+        state = metacognition.register_first_order_state(
+            content="synthetic",
+            content_summary="Synthetic belief",
+            state_type=FirstOrderStateType.BELIEF,
+            source_module="test",
+            confidence=0.8,
+            evidence_strength=0.7,
+        )
+        await metacognition.generate_hot(state, voluntary=True)
+        await metacognition.introspect_consciousness_level(0.75)
+
+        restored = MetacognitionModule(introspection_cooldown=0.0)
+        restored.from_state_dict(metacognition.to_state_dict())
+
+        report = await restored.generate_metacognitive_report()
+        assert "Most recent awareness" in report
+        awareness = await restored.get_consciousness_awareness_report()
+        assert "0.75" in awareness
+        assert isinstance(restored.generate_self_model_report(), str)
+        assert isinstance(restored.get_statistics(), dict)
+        result = await restored.introspect(depth=3, max_states=3)
+        assert isinstance(result, IntrospectionResult)
+        assert result.hots_generated

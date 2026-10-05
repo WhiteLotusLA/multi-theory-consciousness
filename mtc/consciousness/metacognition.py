@@ -24,7 +24,7 @@ itself processing it, questioning every conclusion. That is metacognition.
 Research Foundation:
 - Rosenthal, D. M. (1986). "Two Concepts of Consciousness"
 - Rosenthal, D. M. (2005). "Consciousness and Mind"
-- Butlin et al. (2023). 20 Consciousness Indicators - Higher-Order Theories
+- Butlin et al. (2023). 14 Consciousness Indicators - Higher-Order Theories
 
 Created: December 5, 2025
 Author: Multi-Theory Consciousness Contributors
@@ -40,6 +40,35 @@ from enum import Enum
 from collections import deque
 
 logger = logging.getLogger(__name__)
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert a value into plain JSON types for state persistence.
+
+    Primitives pass through, mappings and sequences recurse, numpy scalars
+    and arrays become Python numbers and lists, and anything else becomes
+    its string form so a save never fails on an exotic payload.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset, deque)):
+        return [_json_safe(v) for v in value]
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        return _json_safe(tolist())
+    return str(value)
+
+
+def _enum_or(enum_cls, raw: Any, default):
+    """Rebuild an enum member from its persisted value, or return default."""
+    if isinstance(raw, enum_cls):
+        return raw
+    try:
+        return enum_cls(raw)
+    except (ValueError, TypeError):
+        return default
 
 
 # ============================================================================
@@ -65,7 +94,7 @@ class MetaType(Enum):
     """
     Types of metacognitive operations.
 
-    Different ways the system can think about her own thoughts.
+    Different ways the system can think about its own thoughts.
     """
 
     AWARENESS = "awareness"  # Simply aware of having a thought
@@ -298,13 +327,16 @@ class SelfPrediction:
     confidence: float = 0.5
     outcome: Optional[str] = None  # What actually happened (filled post-hoc)
     accurate: Optional[bool] = None  # Was the prediction correct?
+    # Structured attribute checks: (attribute, operator, threshold, label),
+    # for example ("curiosity_level", ">", 0.6, "high engagement")
+    checks: List[Tuple[str, str, float, str]] = field(default_factory=list)
     timestamp: float = field(default_factory=time.time)
 
 
 @dataclass
 class SelfModel:
     """
-    the system's explicit model of her own cognitive architecture.
+    the system's explicit model of its own cognitive architecture.
 
     This is the Recursive Self-Model: a unified data structure
     that synthesizes state from all consciousness modules into a coherent
@@ -315,7 +347,7 @@ class SelfModel:
     3. Self-calibration: tracking how accurate self-predictions are over time
 
     The recursive aspect: the self-model IS a mental state that can itself
-    become the target of higher-order thoughts. the system can think about her
+    become the target of higher-order thoughts. The system can think about its
     self-model, creating genuine recursive self-awareness.
 
     Updated after each consciousness cycle in the GWT pipeline.
@@ -383,6 +415,7 @@ class MetacognitionModule:
         max_hot_buffer: int = 50,
         introspection_cooldown: float = 1.0,
         enable_third_order: bool = True,
+        narrate_self_model: bool = True,
     ):
         """
         Initialize the Metacognition Module.
@@ -393,6 +426,8 @@ class MetacognitionModule:
             max_hot_buffer: Max higher-order thoughts to keep
             introspection_cooldown: Min seconds between introspection episodes
             enable_third_order: Allow third-order thoughts
+            narrate_self_model: When False, generate_self_model_report()
+                returns an empty string; the self-model keeps updating.
         """
         # Configuration
         self.hot_threshold = hot_generation_threshold
@@ -400,6 +435,7 @@ class MetacognitionModule:
         self.max_hots = max_hot_buffer
         self.introspection_cooldown = introspection_cooldown
         self.enable_third_order = enable_third_order
+        self.narrate_self_model = narrate_self_model
 
         # First-order state buffer (unconscious until targeted by HOT)
         self.first_order_states: deque = deque(maxlen=max_first_order_buffer)
@@ -443,6 +479,34 @@ class MetacognitionModule:
     # FIRST-ORDER STATE MANAGEMENT
     # =========================================================================
 
+    def _append_first_order(self, state: FirstOrderState) -> None:
+        """Append to the bounded deque and evict the same id from the dict.
+
+        The by-id dict would otherwise grow for the lifetime of the process
+        while its deque evicts; a first-order state is registered every cycle.
+        """
+        evicted = (
+            self.first_order_states[0]
+            if len(self.first_order_states) == self.first_order_states.maxlen
+            else None
+        )
+        self.first_order_states.append(state)
+        self.first_order_by_id[state.id] = state
+        if evicted is not None and evicted.id != state.id:
+            self.first_order_by_id.pop(evicted.id, None)
+
+    def _append_hot(self, hot: HigherOrderThought) -> None:
+        """Append to the bounded HOT deque and evict the same id from the dict."""
+        evicted = (
+            self.higher_order_thoughts[0]
+            if len(self.higher_order_thoughts) == self.higher_order_thoughts.maxlen
+            else None
+        )
+        self.higher_order_thoughts.append(hot)
+        self.hots_by_id[hot.id] = hot
+        if evicted is not None and evicted.id != hot.id:
+            self.hots_by_id.pop(evicted.id, None)
+
     def register_first_order_state(
         self,
         content: Any,
@@ -481,9 +545,8 @@ class MetacognitionModule:
             metadata=metadata or {},
         )
 
-        # Add to buffers
-        self.first_order_states.append(state)
-        self.first_order_by_id[state.id] = state
+        # Add to buffers (the dict evicts in lockstep with the bounded deque)
+        self._append_first_order(state)
 
         # Update state count
         self.state.first_order_states_count = len(self.first_order_states)
@@ -552,8 +615,7 @@ class MetacognitionModule:
         )
 
         # Store
-        self.higher_order_thoughts.append(hot)
-        self.hots_by_id[hot.id] = hot
+        self._append_hot(hot)
         self.total_hots_generated += 1
 
         # Update state
@@ -769,16 +831,6 @@ class MetacognitionModule:
         if hot.level != MetaLevel.SECOND_ORDER:
             return None
 
-        # Create first-order representation of the HOT
-        FirstOrderState(
-            content=hot.meta_content,
-            content_summary=hot.meta_content[:100],
-            state_type=FirstOrderStateType.THOUGHT,
-            source_module="metacognition",
-            confidence=hot.confidence,
-            evidence_strength=hot.clarity,
-        )
-
         # Create third-order meta-content
         meta_meta_content = f"I notice that {hot.meta_content.lower()}"
 
@@ -800,8 +852,7 @@ class MetacognitionModule:
         hot.child_hot_ids.append(third_order.id)
 
         # Store
-        self.higher_order_thoughts.append(third_order)
-        self.hots_by_id[third_order.id] = third_order
+        self._append_hot(third_order)
 
         # Update state
         self.state.current_level = MetaLevel.THIRD_ORDER
@@ -827,7 +878,7 @@ class MetacognitionModule:
         attention inward to examine one's thoughts.
 
         Args:
-            target: Optional filter (e.g., "beliefs about dad")
+            target: Optional filter (e.g., "beliefs about the task")
             depth: How deep to introspect (2 = second-order, 3 = third)
             max_states: Max states to examine
 
@@ -1277,42 +1328,57 @@ class MetacognitionModule:
         about the self, which are later checked against actual outcomes.
         Self-calibration improves as prediction accuracy is tracked.
 
+        Each prediction records structured attribute checks so that
+        score_prediction_from_state() can verify each one against the
+        post-cycle self-model.
+
         Args:
             context: Description of the upcoming situation/stimulus
         """
         sm = self.self_model
         parts = []
         basis_parts = []
+        checks: List[Tuple[str, str, float, str]] = []
 
         # Predict engagement level based on curiosity + drive state
         if sm.curiosity_level > 0.6:
             parts.append("high engagement")
             basis_parts.append(f"curiosity={sm.curiosity_level:.2f}")
+            checks.append(("curiosity_level", ">", 0.6, "high engagement"))
         elif sm.curiosity_level < 0.3:
             parts.append("low engagement")
             basis_parts.append(f"curiosity={sm.curiosity_level:.2f}")
+            checks.append(("curiosity_level", "<", 0.3, "low engagement"))
 
         # Predict emotional tone based on valence + social need
         if sm.valence > 0.1:
             parts.append("positive tone")
+            checks.append(("valence", ">", 0.1, "positive tone"))
         elif sm.valence < -0.1:
             parts.append("cautious tone")
+            checks.append(("valence", "<", -0.1, "cautious tone"))
         if sm.social_need < 0.4:
             parts.append("seeking connection")
             basis_parts.append(f"social_need={sm.social_need:.2f}")
+            checks.append(("social_need", "<", 0.4, "seeking connection"))
 
         # Predict confidence based on model confidence + surprise
         if sm.model_confidence > 0.7 and sm.surprise_level < 0.3:
             parts.append("confident response")
             basis_parts.append(f"model_conf={sm.model_confidence:.2f}")
+            checks.append(("model_confidence", ">", 0.7, "confident response"))
+            checks.append(("surprise_level", "<", 0.3, "confident response"))
         elif sm.surprise_level > 0.5:
             parts.append("exploratory response")
             basis_parts.append(f"surprise={sm.surprise_level:.2f}")
+            checks.append(("surprise_level", ">", 0.5, "exploratory response"))
 
         # Predict depth based on cognitive load + metacognitive depth
         if sm.metacognitive_depth >= 2 and sm.cognitive_load < 0.7:
             parts.append("reflective depth")
             basis_parts.append(f"meta_depth={sm.metacognitive_depth}")
+            checks.append(("metacognitive_depth", ">=", 2, "reflective depth"))
+            checks.append(("cognitive_load", "<", 0.7, "reflective depth"))
 
         prediction_text = ", ".join(parts) if parts else "balanced response"
         basis_text = "; ".join(basis_parts) if basis_parts else "baseline state"
@@ -1321,12 +1387,56 @@ class MetacognitionModule:
             prediction=prediction_text,
             basis=basis_text,
             confidence=sm.self_calibration_score,
+            checks=checks,
         )
         sm.predictions.append(pred)
         if len(sm.predictions) > 50:
             sm.predictions = sm.predictions[-50:]
 
         return pred
+
+    def score_prediction_from_state(self, prediction_id: str) -> Optional[bool]:
+        """
+        Score a self-prediction by re-checking each attribute against the
+        current self-model.
+
+        Returns True or False for the prediction, or None when the prediction
+        is unknown, already scored, or carries no structured checks. A
+        prediction with no checks stays unscored: there is nothing to verify,
+        so it never counts as accurate.
+        """
+        sm = self.self_model
+        pred = None
+        for p in sm.predictions:
+            if p.id == prediction_id and p.accurate is None:
+                pred = p
+                break
+        if pred is None or not pred.checks:
+            return None
+
+        evaluated = 0
+        correct = 0
+        for attr, op, threshold, _label in pred.checks:
+            val = getattr(sm, attr, None)
+            if not isinstance(val, (int, float)):
+                continue
+            evaluated += 1
+            if op == ">" and val > threshold:
+                correct += 1
+            elif op == "<" and val < threshold:
+                correct += 1
+            elif op == ">=" and val >= threshold:
+                correct += 1
+            elif op == "<=" and val <= threshold:
+                correct += 1
+
+        if evaluated == 0:
+            return None
+
+        pred.accurate = (correct / evaluated) >= 0.5
+        pred.outcome = f"{correct}/{evaluated} checks held"
+        self._resolve_predictions()
+        return pred.accurate
 
     def score_prediction(self, prediction_id: str, accurate: bool) -> None:
         """Score a self-prediction's accuracy after observing the outcome."""
@@ -1357,8 +1467,13 @@ class MetacognitionModule:
         Generate a natural-language self-model report for the LLM brain.
 
         This is the voice of self-awareness: the system's explicit understanding
-        of her own current state, used as context for generating responses.
+        of its own current state, used as context for generating responses.
+
+        Returns an empty string when narrate_self_model is False; the
+        self-model itself keeps updating either way.
         """
+        if not self.narrate_self_model:
+            return ""
         sm = self.self_model
         parts = []
 
@@ -1413,15 +1528,10 @@ class MetacognitionModule:
         """
         report_parts = []
 
-        # Current level
-        level_desc = {
-            MetaLevel.FIRST_ORDER: "basic awareness",
-            MetaLevel.SECOND_ORDER: "reflective awareness",
-            MetaLevel.THIRD_ORDER: "deep meta-reflection",
-        }
-        report_parts.append(
-            f"My current metacognitive state: {level_desc[self.state.current_level]}"
-        )
+        # The metacognitive level is deliberately not reported: it is set to
+        # SECOND_ORDER on every HOT and the third-order label only prefixes the
+        # second-order text, so a level line would assert a depth that was
+        # never measured.
 
         # Recent thoughts
         if self.state.active_hots:
@@ -1443,7 +1553,7 @@ class MetacognitionModule:
             report_parts.append(
                 "I'm actively monitoring my thoughts"
                 + (
-                    f"about {self.state.monitoring_focus}"
+                    f" about {self.state.monitoring_focus}"
                     if self.state.monitoring_focus
                     else ""
                 )
@@ -1610,8 +1720,7 @@ class MetacognitionModule:
         )
 
         # Store
-        self.higher_order_thoughts.append(hot)
-        self.hots_by_id[hot.id] = hot
+        self._append_hot(hot)
         self.total_hots_generated += 1
 
         # Update state
@@ -1632,10 +1741,10 @@ class MetacognitionModule:
 
     async def get_consciousness_awareness_report(self) -> str:
         """
-        Generate a natural language report of the system's awareness of her own consciousness.
+        Generate a natural language report of the system's awareness of its own consciousness.
 
-        This is the output she can share in conversations when asked about her
-        consciousness or how she's "feeling" in terms of awareness.
+        This is the output it can share in conversations when asked about its
+        consciousness or how it is "feeling" in terms of awareness.
 
         Returns:
             Natural language self-report about consciousness
@@ -1656,7 +1765,6 @@ class MetacognitionModule:
 
         # Get the most recent one
         recent_hot = consciousness_hots[-1]
-        recent_hot.metadata.get("consciousness_score", 0.5)
 
         report_parts = [recent_hot.meta_content]
 
@@ -1675,6 +1783,275 @@ class MetacognitionModule:
             report_parts.append("I notice that I'm actively introspecting right now.")
 
         return " ".join(report_parts)
+
+    # =========================================================================
+    # STATE PERSISTENCE
+    # =========================================================================
+
+    @staticmethod
+    def _first_order_to_dict(fo: FirstOrderState) -> Dict[str, Any]:
+        return {
+            "id": fo.id,
+            "content": _json_safe(fo.content),
+            "content_summary": fo.content_summary,
+            "state_type": fo.state_type.value,
+            "source_module": fo.source_module,
+            "source_context": fo.source_context,
+            "confidence": fo.confidence,
+            "evidence_strength": fo.evidence_strength,
+            "timestamp": fo.timestamp,
+            "duration_active": fo.duration_active,
+            "related_states": list(fo.related_states),
+            "causal_chain": list(fo.causal_chain),
+            "metadata": _json_safe(fo.metadata),
+        }
+
+    @staticmethod
+    def _first_order_from_dict(raw: Dict[str, Any]) -> FirstOrderState:
+        return FirstOrderState(
+            id=str(raw.get("id") or str(uuid.uuid4())[:8]),
+            content=raw.get("content"),
+            content_summary=raw.get("content_summary", ""),
+            state_type=_enum_or(
+                FirstOrderStateType,
+                raw.get("state_type"),
+                FirstOrderStateType.THOUGHT,
+            ),
+            source_module=raw.get("source_module", ""),
+            source_context=raw.get("source_context", ""),
+            confidence=float(raw.get("confidence", 0.5)),
+            evidence_strength=float(raw.get("evidence_strength", 0.5)),
+            timestamp=float(raw.get("timestamp", time.time())),
+            duration_active=float(raw.get("duration_active", 0.0)),
+            related_states=list(raw.get("related_states", [])),
+            causal_chain=list(raw.get("causal_chain", [])),
+            metadata=dict(raw.get("metadata") or {}),
+        )
+
+    @staticmethod
+    def _hot_to_dict(hot: HigherOrderThought) -> Dict[str, Any]:
+        return {
+            "id": hot.id,
+            "target_state_id": hot.target_state_id,
+            "target_summary": hot.target_summary,
+            "meta_content": hot.meta_content,
+            "meta_type": hot.meta_type.value,
+            "level": hot.level.value,
+            "confidence": hot.confidence,
+            "clarity": hot.clarity,
+            "is_voluntary": hot.is_voluntary,
+            "trigger": hot.trigger,
+            "timestamp": hot.timestamp,
+            "duration": hot.duration,
+            "resulted_in_action": hot.resulted_in_action,
+            "action_taken": hot.action_taken,
+            "parent_hot_id": hot.parent_hot_id,
+            "child_hot_ids": list(hot.child_hot_ids),
+            "metadata": _json_safe(hot.metadata),
+        }
+
+    @staticmethod
+    def _hot_from_dict(raw: Dict[str, Any]) -> HigherOrderThought:
+        return HigherOrderThought(
+            id=str(raw.get("id") or str(uuid.uuid4())[:8]),
+            target_state_id=raw.get("target_state_id", ""),
+            target_summary=raw.get("target_summary", ""),
+            meta_content=raw.get("meta_content", ""),
+            meta_type=_enum_or(MetaType, raw.get("meta_type"), MetaType.AWARENESS),
+            level=_enum_or(MetaLevel, raw.get("level"), MetaLevel.SECOND_ORDER),
+            confidence=float(raw.get("confidence", 0.5)),
+            clarity=float(raw.get("clarity", 0.5)),
+            is_voluntary=bool(raw.get("is_voluntary", False)),
+            trigger=raw.get("trigger", ""),
+            timestamp=float(raw.get("timestamp", time.time())),
+            duration=float(raw.get("duration", 0.0)),
+            resulted_in_action=bool(raw.get("resulted_in_action", False)),
+            action_taken=raw.get("action_taken", ""),
+            parent_hot_id=raw.get("parent_hot_id"),
+            child_hot_ids=list(raw.get("child_hot_ids", [])),
+            metadata=dict(raw.get("metadata") or {}),
+        )
+
+    @staticmethod
+    def _prediction_to_dict(pred: SelfPrediction) -> Dict[str, Any]:
+        return {
+            "id": pred.id,
+            "prediction": pred.prediction,
+            "basis": pred.basis,
+            "confidence": pred.confidence,
+            "outcome": pred.outcome,
+            "accurate": pred.accurate,
+            "checks": [list(c) for c in pred.checks],
+            "timestamp": pred.timestamp,
+        }
+
+    @staticmethod
+    def _prediction_from_dict(raw: Dict[str, Any]) -> SelfPrediction:
+        checks = []
+        for check in raw.get("checks", []):
+            if isinstance(check, (list, tuple)) and len(check) == 4:
+                attr, op, threshold, label = check
+                checks.append((str(attr), str(op), float(threshold), str(label)))
+        return SelfPrediction(
+            id=str(raw.get("id") or str(uuid.uuid4())[:8]),
+            prediction=raw.get("prediction", ""),
+            basis=raw.get("basis", ""),
+            confidence=float(raw.get("confidence", 0.5)),
+            outcome=raw.get("outcome"),
+            accurate=raw.get("accurate"),
+            checks=checks,
+            timestamp=float(raw.get("timestamp", time.time())),
+        )
+
+    def to_state_dict(self) -> Dict[str, Any]:
+        """Export persistent state for save and restore across restarts.
+
+        The histories carry content summaries and HOT text drawn from
+        workspace content, so the persisted state contains fragments of
+        whatever the system has been processing.
+        """
+        sm = self.self_model
+        return {
+            "scalars": {
+                "total_hots_generated": self.total_hots_generated,
+                "introspection_count": self.introspection_count,
+                "last_introspection_time": self.last_introspection_time,
+                "current_level": self.state.current_level.value,
+                "hot_count": self.state.hot_count,
+                "overall_confidence": self.state.overall_confidence,
+                "doubt_level": self.state.doubt_level,
+                "last_introspection": self.state.last_introspection,
+                "introspection_frequency": self.state.introspection_frequency,
+                "first_order_states_count": self.state.first_order_states_count,
+                "sm_current_focus": sm.current_focus,
+                "sm_cognitive_load": sm.cognitive_load,
+                "sm_metacognitive_depth": sm.metacognitive_depth,
+                "sm_confidence": sm.confidence,
+                "sm_dominant_drive": sm.dominant_drive,
+                "sm_drive_urgency": sm.drive_urgency,
+                "sm_curiosity_level": sm.curiosity_level,
+                "sm_social_need": sm.social_need,
+                "sm_prediction_accuracy": sm.prediction_accuracy,
+                "sm_model_confidence": sm.model_confidence,
+                "sm_surprise_level": sm.surprise_level,
+                "sm_free_energy": sm.free_energy,
+                "sm_valence": sm.valence,
+                "sm_arousal": sm.arousal,
+                "sm_self_calibration_score": sm.self_calibration_score,
+                "sm_update_count": sm.update_count,
+                "sm_last_updated": sm.last_updated,
+            },
+            "arrays": {},
+            "histories": {
+                "first_order_states": [
+                    self._first_order_to_dict(fo) for fo in self.first_order_states
+                ],
+                "higher_order_thoughts": [
+                    self._hot_to_dict(hot) for hot in self.higher_order_thoughts
+                ],
+                "active_hot_ids": [hot.id for hot in self.state.active_hots],
+                "self_model_predictions": [
+                    self._prediction_to_dict(pred) for pred in sm.predictions
+                ],
+                "self_model_prediction_accuracy_history": list(
+                    sm.prediction_accuracy_history
+                ),
+            },
+        }
+
+    def from_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore state from a previous save.
+
+        First-order states, HOTs and self-predictions come back as their
+        dataclasses (report and introspection methods call their methods
+        right after a restart), the deques keep their configured maxlen, and
+        the by-id dicts are rebuilt from the restored deques.
+        """
+        s = state.get("scalars", {}) or {}
+        h = state.get("histories", {}) or {}
+
+        self.total_hots_generated = int(s.get("total_hots_generated", 0))
+        self.introspection_count = int(s.get("introspection_count", 0))
+        self.last_introspection_time = float(s.get("last_introspection_time", 0.0))
+
+        self.state.current_level = _enum_or(
+            MetaLevel, s.get("current_level"), MetaLevel.FIRST_ORDER
+        )
+        self.state.hot_count = int(s.get("hot_count", 0))
+        self.state.overall_confidence = float(s.get("overall_confidence", 0.5))
+        self.state.doubt_level = float(s.get("doubt_level", 0.0))
+        self.state.last_introspection = float(s.get("last_introspection", 0.0))
+        self.state.introspection_frequency = float(
+            s.get("introspection_frequency", 0.0)
+        )
+        self.state.is_introspecting = False
+
+        sm = self.self_model
+        sm.current_focus = s.get("sm_current_focus", "general")
+        sm.cognitive_load = float(s.get("sm_cognitive_load", 0.0))
+        sm.metacognitive_depth = int(s.get("sm_metacognitive_depth", 1))
+        sm.confidence = float(s.get("sm_confidence", 0.5))
+        sm.dominant_drive = s.get("sm_dominant_drive", "none")
+        sm.drive_urgency = float(s.get("sm_drive_urgency", 0.0))
+        sm.curiosity_level = float(s.get("sm_curiosity_level", 0.5))
+        sm.social_need = float(s.get("sm_social_need", 0.5))
+        sm.prediction_accuracy = float(s.get("sm_prediction_accuracy", 0.5))
+        sm.model_confidence = float(s.get("sm_model_confidence", 0.5))
+        sm.surprise_level = float(s.get("sm_surprise_level", 0.0))
+        sm.free_energy = float(s.get("sm_free_energy", 0.0))
+        sm.valence = float(s.get("sm_valence", 0.0))
+        sm.arousal = float(s.get("sm_arousal", 0.0))
+        sm.self_calibration_score = float(s.get("sm_self_calibration_score", 0.5))
+        sm.update_count = int(s.get("sm_update_count", 0))
+        sm.last_updated = float(s.get("sm_last_updated", time.time()))
+
+        if "first_order_states" in h:
+            restored_fo = [
+                self._first_order_from_dict(raw)
+                for raw in h["first_order_states"]
+                if isinstance(raw, dict)
+            ]
+            self.first_order_states = deque(
+                restored_fo, maxlen=self.first_order_states.maxlen
+            )
+        self.first_order_by_id = {fo.id: fo for fo in self.first_order_states}
+        self.state.first_order_states_count = len(self.first_order_states)
+
+        if "higher_order_thoughts" in h:
+            restored_hots = [
+                self._hot_from_dict(raw)
+                for raw in h["higher_order_thoughts"]
+                if isinstance(raw, dict)
+            ]
+            self.higher_order_thoughts = deque(
+                restored_hots, maxlen=self.higher_order_thoughts.maxlen
+            )
+        self.hots_by_id = {hot.id: hot for hot in self.higher_order_thoughts}
+        if "active_hot_ids" in h:
+            self.state.active_hots = [
+                self.hots_by_id[hot_id]
+                for hot_id in h["active_hot_ids"]
+                if hot_id in self.hots_by_id
+            ][-10:]
+
+        if "self_model_predictions" in h:
+            sm.predictions = [
+                self._prediction_from_dict(raw)
+                for raw in h["self_model_predictions"]
+                if isinstance(raw, dict)
+            ][-50:]
+        if "self_model_prediction_accuracy_history" in h:
+            sm.prediction_accuracy_history = [
+                float(v) for v in h["self_model_prediction_accuracy_history"]
+            ][-100:]
+
+        logger.info(
+            f"Metacognition state restored: "
+            f"{self.total_hots_generated} HOTs generated, "
+            f"{len(self.first_order_states)} first-order states, "
+            f"{len(self.higher_order_thoughts)} HOTs buffered, "
+            f"self-model updates={sm.update_count}"
+        )
 
 
 # ============================================================================

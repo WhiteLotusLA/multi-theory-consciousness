@@ -49,6 +49,15 @@ class SomaticMarker:
             "body_source": self.body_source,
         }
 
+    @classmethod
+    def from_dict(cls, raw: Dict[str, Any]) -> "SomaticMarker":
+        return cls(
+            option=str(raw.get("option", "")),
+            valence=float(raw.get("valence", 0.0)),
+            intensity=float(raw.get("intensity", 0.0)),
+            body_source=str(raw.get("body_source", "homeostasis")),
+        )
+
 
 @dataclass
 class CoreExperience:
@@ -61,15 +70,42 @@ class CoreExperience:
     here_now_salience: float  # Present-moment awareness intensity (0-1)
     timestamp: float = field(default_factory=time.time)
 
+    @property
+    def somatic_valence(self) -> float:
+        """Mean valence across the somatic markers (-1 to +1), 0.0 when none.
+
+        The aggregate emotional tone downstream consumers read as the
+        Damasio-derived affect signal.
+        """
+        if not self.somatic_markers:
+            return 0.0
+        return sum(m.valence for m in self.somatic_markers) / len(self.somatic_markers)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "self_world_binding": self.self_world_binding,
             "perturbation_source": self.perturbation_source,
             "feeling_of_knowing": self.feeling_of_knowing,
             "somatic_markers": [m.to_dict() for m in self.somatic_markers],
+            "somatic_valence": self.somatic_valence,
             "here_now_salience": self.here_now_salience,
             "timestamp": self.timestamp,
         }
+
+    @classmethod
+    def from_dict(cls, raw: Dict[str, Any]) -> "CoreExperience":
+        return cls(
+            self_world_binding=float(raw.get("self_world_binding", 0.0)),
+            perturbation_source=str(raw.get("perturbation_source", "")),
+            feeling_of_knowing=float(raw.get("feeling_of_knowing", 0.0)),
+            somatic_markers=[
+                SomaticMarker.from_dict(m)
+                for m in raw.get("somatic_markers", [])
+                if isinstance(m, dict)
+            ],
+            here_now_salience=float(raw.get("here_now_salience", 0.0)),
+            timestamp=float(raw.get("timestamp", time.time())),
+        )
 
 
 class CoreConsciousness:
@@ -195,7 +231,7 @@ class CoreConsciousness:
         Generate somatic markers for each workspace winner.
 
         Somatic markers are emotional tags derived from body state.
-        They give the system "gut feelings" about the content she's processing.
+        They give the system "gut feelings" about the content it is processing.
         """
         markers = []
         feelings = protoself_state.primordial_feelings
@@ -300,3 +336,39 @@ class CoreConsciousness:
                 self._latest_experience.to_dict() if self._latest_experience else None
             ),
         }
+
+    def to_state_dict(self) -> Dict[str, Any]:
+        """Serialize state; the latest experience names workspace content."""
+        return {
+            "scalars": {"cycle_count": self.cycle_count},
+            "arrays": {},
+            "histories": {
+                "binding_history": [float(v) for v in self._binding_history],
+                "fok_history": [float(v) for v in self._fok_history],
+                "latest_experience": (
+                    self._latest_experience.to_dict()
+                    if self._latest_experience
+                    else None
+                ),
+            },
+        }
+
+    def from_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore state; deques keep this instance's window length."""
+        s = state.get("scalars", {}) or {}
+        h = state.get("histories", {}) or {}
+
+        self.cycle_count = int(s.get("cycle_count", self.cycle_count))
+        if "binding_history" in h:
+            self._binding_history = deque(
+                (float(v) for v in h["binding_history"]),
+                maxlen=self._binding_history.maxlen,
+            )
+        if "fok_history" in h:
+            self._fok_history = deque(
+                (float(v) for v in h["fok_history"]),
+                maxlen=self._fok_history.maxlen,
+            )
+        latest = h.get("latest_experience")
+        if isinstance(latest, dict):
+            self._latest_experience = CoreExperience.from_dict(latest)

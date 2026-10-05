@@ -1,5 +1,5 @@
 """
-Tests for Beautiful Loop Theory Implementation (Phase H)
+Tests for Beautiful Loop Theory Implementation
 
 Tests the three components (HyperModel, BayesianBinding, EpistemicDepth)
 and their integration via the BeautifulLoop class.
@@ -27,7 +27,7 @@ from mtc.consciousness.beautiful_loop import (
 )
 
 # ==========================================================================
-# HyperModel Tests (H.1)
+# HyperModel Tests
 # ==========================================================================
 
 
@@ -163,7 +163,7 @@ class TestHyperModel:
 
 
 # ==========================================================================
-# BayesianBinding Tests (H.2)
+# BayesianBinding Tests
 # ==========================================================================
 
 
@@ -291,7 +291,7 @@ class TestBayesianBinding:
 
 
 # ==========================================================================
-# EpistemicDepthTracker Tests (H.3)
+# EpistemicDepthTracker Tests
 # ==========================================================================
 
 
@@ -480,7 +480,7 @@ class TestEpistemicDepthTracker:
 
 
 # ==========================================================================
-# BeautifulLoop Integration Tests (H.4)
+# BeautifulLoop Integration Tests
 # ==========================================================================
 
 
@@ -710,3 +710,26 @@ class TestBeautifulLoop:
             or level1.precision != 1.0
             or level2.precision != 1.0
         )
+
+
+class TestBeautifulLoopNarrationGate:
+    """generate_consciousness_context is gated; computation is not."""
+
+    @pytest.mark.asyncio
+    async def test_context_empty_when_gated(self):
+        loop = BeautifulLoop(narrate_self_model=False)
+        mock_self_model = Mock()
+        mock_self_model.update_count = 5
+        mock_self_model.current_focus = "test"
+        mock_self_model.confidence = 0.6
+        mock_self_model.cognitive_load = 0.3
+
+        moment = await loop.process_conscious_moment(self_model=mock_self_model)
+        assert loop.generate_consciousness_context() == ""
+        assert moment.epistemic_depth >= 1
+        assert loop.cycle_count == 1
+
+    def test_binding_level_reexported(self):
+        from mtc.consciousness.beautiful_loop import BindingLevel
+
+        assert BindingLevel.GLOBAL.value == "global"

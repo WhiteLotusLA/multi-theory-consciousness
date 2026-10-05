@@ -1,5 +1,5 @@
 """
-Tests for Phase J: Damasio Three-Layer Consciousness Model.
+Tests for the Damasio Three-Layer Consciousness Model.
 
 Tests the protoself (body-state representation), core consciousness
 (self-world binding), extended consciousness (autobiographic self),
@@ -1018,3 +1018,127 @@ class TestDamasioGWTIntegration:
 
     # The former DCM scorer test was removed with mtc.consciousness.dcm_scoring
     # (v0.2.0). DCM coverage lives in tests/assessment/test_dcm_benchmark.py.
+
+
+# ============================================================================
+# NARRATION GATES
+# ============================================================================
+
+
+def _gate_drives():
+    drives = MagicMock()
+    drives.get_drive_state.return_value = {
+        "attention_budget": {
+            "current_level": 0.8,
+            "optimal_level": 0.7,
+            "deviation": 0.1,
+            "urgency": 0.1,
+        },
+    }
+    drives.get_overall_valence.return_value = 0.3
+    drives.get_free_energy.return_value = 0.1
+    return drives
+
+
+def _gate_winner():
+    winner = MagicMock()
+    winner.candidate = MagicMock()
+    winner.candidate.summary = "synthetic discovery"
+    winner.candidate.content_type = "discovery"
+    winner.salience = 0.8
+    return winner
+
+
+class TestDamasioNarrationGates:
+    """The three narration kwargs drop context segments, not computation."""
+
+    async def _run(self, **kwargs):
+        from mtc.consciousness.damasio import DamasioLayers
+
+        dl = DamasioLayers(**kwargs)
+        result = None
+        for _ in range(3):
+            result = await dl.process(
+                homeostatic_drives=_gate_drives(),
+                workspace_winners=[_gate_winner()],
+                conversation_history=[
+                    {"role": "user", "content": "a synthetic message for themes"}
+                ],
+            )
+        return dl, result
+
+    @pytest.mark.asyncio
+    async def test_all_segments_on_by_default(self):
+        dl, _ = await self._run()
+        context = dl.generate_context()
+        assert "[Body:" in context
+        assert "[Present moment:" in context
+        assert "[Somatic:" in context
+        assert "[Narrative:" in context
+
+    @pytest.mark.asyncio
+    async def test_each_gate_drops_only_its_segment(self):
+        body_off, _ = await self._run(narrate_body_drives=False)
+        assert "[Body:" not in body_off.generate_context()
+        assert "[Somatic:" in body_off.generate_context()
+
+        somatic_off, _ = await self._run(narrate_somatic=False)
+        assert "[Somatic:" not in somatic_off.generate_context()
+        assert "[Narrative:" in somatic_off.generate_context()
+
+        narrative_off, _ = await self._run(narrate_narrative_identity=False)
+        assert "[Narrative:" not in narrative_off.generate_context()
+        assert "[Body:" in narrative_off.generate_context()
+
+    @pytest.mark.asyncio
+    async def test_all_gates_off_leave_only_present_moment(self):
+        dl, _ = await self._run(
+            narrate_body_drives=False,
+            narrate_somatic=False,
+            narrate_narrative_identity=False,
+        )
+        context = dl.generate_context()
+        assert context.startswith("[Present moment:")
+        assert "[Body:" not in context
+        assert "[Somatic:" not in context
+        assert "[Narrative:" not in context
+
+    @pytest.mark.asyncio
+    async def test_empty_context_before_any_cycle_when_gated(self):
+        from mtc.consciousness.damasio import DamasioLayers
+
+        dl = DamasioLayers(
+            narrate_body_drives=False,
+            narrate_somatic=False,
+            narrate_narrative_identity=False,
+        )
+        assert dl.generate_context() == ""
+
+    @pytest.mark.asyncio
+    async def test_gates_leave_computation_unchanged(self):
+        _, on = await self._run()
+        _, off = await self._run(
+            narrate_body_drives=False,
+            narrate_somatic=False,
+            narrate_narrative_identity=False,
+        )
+        for key in (
+            "protoself_stability",
+            "self_world_binding",
+            "feeling_of_knowing",
+            "autobiographic_continuity",
+            "narrative_context",
+        ):
+            if isinstance(on[key], float):
+                assert off[key] == pytest.approx(on[key])
+            else:
+                assert off[key] == on[key]
+
+    @pytest.mark.asyncio
+    async def test_agent_name_in_narrative(self):
+        _, result = await self._run()
+        assert result["narrative_context"].startswith("The system is")
+        assert " she " not in f" {result['narrative_context']} "
+
+        _, named = await self._run(agent_name="the agent")
+        assert named["narrative_context"].startswith("The agent is")

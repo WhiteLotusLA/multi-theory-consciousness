@@ -78,9 +78,16 @@ class PADAffectModel:
     into a single (P, A, D) coordinate per consciousness cycle.
     """
 
-    def __init__(self, history_window: int = 100):
+    def __init__(self, history_window: int = 100, narrate_affect_line: bool = True):
+        """
+        Args:
+            history_window: Number of PAD states kept for coherence scoring
+            narrate_affect_line: When False, generate_context() returns an
+                empty string; computation and history continue unchanged.
+        """
         self._history: deque = deque(maxlen=history_window)
         self._computation_count = 0
+        self.narrate_affect_line = narrate_affect_line
 
         logger.info("PADAffectModel initialized")
 
@@ -168,7 +175,13 @@ class PADAffectModel:
         return self._history[-1] if self._history else None
 
     def generate_context(self) -> str:
-        """Generate context string for the reasoning module."""
+        """Generate context string for the reasoning module.
+
+        Returns an empty string when narrate_affect_line is False, so no
+        affect label is handed to the reasoning module as a felt state.
+        """
+        if not self.narrate_affect_line:
+            return ""
         latest = self.get_latest()
         if not latest:
             return ""

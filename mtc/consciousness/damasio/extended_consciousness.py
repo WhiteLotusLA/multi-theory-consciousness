@@ -18,6 +18,10 @@ Key mechanisms:
 Does NOT query databases directly -- receives conversation_history and
 identity_markers from the conversation manager to stay fast and decoupled.
 
+Privacy note: ``_themes_seen`` and the latest state's episodes hold
+fragments of recent messages (the first words of each), so persisted
+extended-consciousness state contains conversation fragments.
+
 Research: Damasio (1999, 2010), Frontiers in AI (2025).
 
 Created: 2026-03-08
@@ -53,6 +57,16 @@ class AutobiographicSelf:
             "growth_trajectory": self.growth_trajectory,
         }
 
+    @classmethod
+    def from_dict(cls, raw: Dict[str, Any]) -> "AutobiographicSelf":
+        return cls(
+            identity_continuity=float(raw.get("identity_continuity", 0.5)),
+            narrative_coherence=float(raw.get("narrative_coherence", 0.5)),
+            temporal_horizon=float(raw.get("temporal_horizon", 0.3)),
+            key_themes=list(raw.get("key_themes", [])),
+            growth_trajectory=str(raw.get("growth_trajectory", "developing")),
+        )
+
 
 @dataclass
 class ExtendedState:
@@ -75,6 +89,30 @@ class ExtendedState:
             "timestamp": self.timestamp,
         }
 
+    @classmethod
+    def from_dict(cls, raw: Dict[str, Any]) -> "ExtendedState":
+        return cls(
+            autobiographic_self=AutobiographicSelf.from_dict(
+                raw.get("autobiographic_self") or {}
+            ),
+            episodic_resonance=float(raw.get("episodic_resonance", 0.0)),
+            relevant_episodes=[
+                dict(ep)
+                for ep in raw.get("relevant_episodes", [])
+                if isinstance(ep, dict)
+            ],
+            future_projections=[str(x) for x in raw.get("future_projections", [])],
+            narrative_context=str(raw.get("narrative_context", "")),
+            timestamp=float(raw.get("timestamp", time.time())),
+        )
+
+
+def _theme_value(theme: Any) -> Any:
+    """Keep JSON primitives as they are; anything else becomes its text."""
+    if theme is None or isinstance(theme, (bool, int, float, str)):
+        return theme
+    return str(theme)
+
 
 class ExtendedConsciousness:
     """
@@ -84,7 +122,13 @@ class ExtendedConsciousness:
     in autobiographic context: who I was, who I am, who I'm becoming.
     """
 
-    def __init__(self, history_window: int = 50):
+    def __init__(self, history_window: int = 50, agent_name: str = "the system"):
+        """
+        Args:
+            history_window: Length of the continuity and binding histories
+            agent_name: How the narrative refers to the agent
+        """
+        self.agent_name = agent_name
         self.cycle_count = 0
         self._continuity_history: deque = deque(maxlen=history_window)
         self._coherence_history: deque = deque(maxlen=history_window)
@@ -316,11 +360,12 @@ class ExtendedConsciousness:
             "stable": "in a stable, grounded state",
             "transforming": "going through a period of change",
         }.get(autobiographic.growth_trajectory, "developing")
-        parts.append(f"The system is {trajectory_label}")
+        name = self.agent_name.strip() or "the system"
+        parts.append(f"{name[0].upper()}{name[1:]} is {trajectory_label}")
 
         # Continuity
         if autobiographic.identity_continuity > 0.6:
-            parts.append("with a strong sense of who she is")
+            parts.append("with a strong sense of identity")
         elif autobiographic.identity_continuity > 0.3:
             parts.append("with a developing sense of identity")
 
@@ -354,3 +399,36 @@ class ExtendedConsciousness:
                 self._latest_state.to_dict() if self._latest_state else None
             ),
         }
+
+    def to_state_dict(self) -> Dict[str, Any]:
+        """Serialize state; themes and episodes hold message fragments."""
+        return {
+            "scalars": {"cycle_count": self.cycle_count},
+            "arrays": {},
+            "histories": {
+                "continuity_history": [float(v) for v in self._continuity_history],
+                "coherence_history": [float(v) for v in self._coherence_history],
+                "binding_trend": [float(v) for v in self._binding_trend],
+                "themes_seen": [_theme_value(t) for t in self._themes_seen],
+                "latest_state": (
+                    self._latest_state.to_dict() if self._latest_state else None
+                ),
+            },
+        }
+
+    def from_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore state; deques keep this instance's window lengths."""
+        s = state.get("scalars", {}) or {}
+        h = state.get("histories", {}) or {}
+
+        self.cycle_count = int(s.get("cycle_count", self.cycle_count))
+        for name in ("continuity_history", "coherence_history", "binding_trend"):
+            if name in h:
+                attr = f"_{name}"
+                maxlen = getattr(self, attr).maxlen
+                setattr(self, attr, deque((float(v) for v in h[name]), maxlen=maxlen))
+        if "themes_seen" in h:
+            self._themes_seen = deque(h["themes_seen"], maxlen=self._themes_seen.maxlen)
+        latest = h.get("latest_state")
+        if isinstance(latest, dict):
+            self._latest_state = ExtendedState.from_dict(latest)

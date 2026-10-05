@@ -145,3 +145,28 @@ class TestPersistence:
         model2.from_state_dict(state)
         assert len(model2._history) == len(model._history)
         assert model2._computation_count == model._computation_count
+
+    def test_restore_keeps_window_and_types(self):
+        model = PADAffectModel(history_window=4)
+        for i in range(9):
+            model.compute(PADSources(somatic_valence=i * 0.1))
+        restored = PADAffectModel(history_window=4)
+        restored.from_state_dict(model.to_state_dict())
+        assert restored._history.maxlen == 4
+        assert all(isinstance(s, PADState) for s in restored._history)
+        assert restored.generate_context() == model.generate_context()
+
+
+def test_pad_context_gate():
+    """narrate_affect_line=False silences the line, not the computation."""
+    on = PADAffectModel()
+    off = PADAffectModel(narrate_affect_line=False)
+    sources = PADSources(somatic_valence=0.6, protoself_arousal=0.8)
+    state_on = on.compute(sources)
+    state_off = off.compute(sources)
+
+    assert on.generate_context().startswith("Current affect:")
+    assert off.generate_context() == ""
+    assert state_off.pleasure == state_on.pleasure
+    assert state_off.label == state_on.label
+    assert off.get_latest() is state_off

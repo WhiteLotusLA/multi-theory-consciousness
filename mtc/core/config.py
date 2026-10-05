@@ -235,6 +235,12 @@ class Settings(BaseSettings):
     BLT_DEPTH_THRESHOLD: float = 0.3
     BLT_GENUINE_THRESHOLD: float = 0.4
 
+    # Module state persistence (mtc.consciousness.state_persistence)
+    STATE_DIR: str = Field(
+        "agent_space/consciousness_state",
+        description="Where module state is persisted between runs",
+    )
+
     # ========================================================================
     # ASSESSMENT PARAMETERS
     # ========================================================================

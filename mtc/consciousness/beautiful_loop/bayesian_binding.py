@@ -26,6 +26,14 @@ How this differs from GWT's competition:
 The BoundPercept is the result - the unified conscious experience
 that emerges from binding coherent inferences into a whole.
 
+Binding operates at several levels of the processing hierarchy (unimodal,
+crossmodal and global); bind_multilevel() binds bottom-up and feeds each
+lower-level percept into the global competition.
+
+A percept's ``unified_summary`` and its inferences' ``content_summary``
+hold workspace content text, so persisted binding state contains
+fragments of whatever the system was processing.
+
 Connection points:
   - Reads from: GWT workspace winners, active inference posterior
   - Produces: BoundPercept - unified conscious content
@@ -44,10 +52,26 @@ import logging
 import numpy as np
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 from collections import deque
 
 logger = logging.getLogger(__name__)
+
+
+class BindingLevel(Enum):
+    """Level at which Bayesian binding operates in the processing hierarchy.
+
+    Binding operates at every level (Laukkonen, Friston & Chandaria 2025),
+    not only at the workspace level.
+    """
+
+    UNIMODAL = "unimodal"  # Within a single substrate
+    CROSSMODAL = "crossmodal"  # Across substrates
+    GLOBAL = "global"  # Workspace level (the single-level behavior)
+
+
+BINDING_LEVELS: Tuple[str, ...] = tuple(level.value for level in BindingLevel)
 
 
 @dataclass
@@ -62,6 +86,7 @@ class Inference:
     salience: float = 0.0  # GWT-style salience (for comparison)
     uncertainty: float = 0.5  # How uncertain is this inference?
     timestamp: float = field(default_factory=time.time)
+    level: str = BindingLevel.GLOBAL.value  # BindingLevel value
 
 
 @dataclass
@@ -83,6 +108,8 @@ class BoundPercept:
     This is what "experience" looks like computationally: a set of
     coherent inferences bound together into a unified representation,
     along with metrics about binding quality and uncertainty reduction.
+
+    ``unified_summary`` is built from workspace content summaries.
     """
 
     bound_inferences: List[Inference]
@@ -93,6 +120,7 @@ class BoundPercept:
     dominant_content_type: str  # What type of content dominates
     unified_summary: str  # Human-readable summary
     timestamp: float = field(default_factory=time.time)
+    binding_level: str = BindingLevel.GLOBAL.value  # Level this binding ran at
 
 
 class BayesianBinding:
@@ -240,6 +268,85 @@ class BayesianBinding:
         )
 
         return percept
+
+    def bind_multilevel(
+        self,
+        candidates: List[Inference],
+        prior_uncertainty: Optional[float] = None,
+    ) -> Dict[str, BoundPercept]:
+        """
+        Bind inferences at each level of the processing hierarchy.
+
+        The algorithm runs bottom-up:
+        1. Group inferences by their ``level`` field (unknown levels count
+           as global).
+        2. Bind at each level that has candidates.
+        3. At the global level, inject each sufficiently bound lower-level
+           percept as an extra candidate, so lower-level coherence feeds
+           upward.
+
+        Belief vectors may differ in length across inferences; the
+        synthesized lower-level belief truncates them to the shortest
+        length before averaging.
+
+        Args:
+            candidates: Inference candidates tagged with ``level`` fields
+            prior_uncertainty: Passed to each level's bind_inferences call
+
+        Returns:
+            Dict mapping level name to its BoundPercept
+        """
+        results: Dict[str, BoundPercept] = {}
+
+        by_level: Dict[str, List[Inference]] = {level: [] for level in BINDING_LEVELS}
+        for c in candidates:
+            level = getattr(c, "level", BindingLevel.GLOBAL.value)
+            if isinstance(level, BindingLevel):
+                level = level.value
+            if level not in by_level:
+                level = BindingLevel.GLOBAL.value
+            by_level[level].append(c)
+
+        for level in BINDING_LEVELS:
+            level_candidates = list(by_level[level])
+
+            if level == BindingLevel.GLOBAL.value:
+                for lower_level, lower_percept in results.items():
+                    if lower_percept.binding_quality <= self.min_binding_quality:
+                        continue
+                    level_candidates.append(
+                        Inference(
+                            id=f"bound_{lower_level}",
+                            content_summary=lower_percept.unified_summary,
+                            content_type="bound_percept",
+                            source_module=f"binding_{lower_level}",
+                            belief_vector=self._percept_belief(lower_percept),
+                            salience=lower_percept.binding_quality,
+                            uncertainty=1.0 - lower_percept.coherence,
+                            level=level,
+                        )
+                    )
+
+            if level_candidates:
+                percept = self.bind_inferences(level_candidates, prior_uncertainty)
+                percept.binding_level = level
+                results[level] = percept
+
+        return results
+
+    @staticmethod
+    def _percept_belief(percept: BoundPercept) -> np.ndarray:
+        """Average the bound belief vectors, truncated to the shortest length."""
+        vectors = [
+            np.asarray(inf.belief_vector, dtype=float).reshape(-1)
+            for inf in percept.bound_inferences
+            if inf.belief_vector is not None
+        ]
+        vectors = [v for v in vectors if v.size > 0]
+        if not vectors:
+            return np.array([percept.binding_quality, percept.coherence, 0.5])
+        min_len = min(v.size for v in vectors)
+        return np.mean([v[:min_len] for v in vectors], axis=0)
 
     def _compute_pairwise_mi(
         self,
@@ -497,3 +604,148 @@ class BayesianBinding:
             )
 
         return "\n".join(lines)
+
+    # =========================================================================
+    # STATE PERSISTENCE
+    # =========================================================================
+
+    def to_state_dict(self) -> Dict[str, Any]:
+        """Serialize state; percepts carry workspace content summaries."""
+        return {
+            "scalars": {
+                "bind_count": self.bind_count,
+                "total_inferences_processed": self.total_inferences_processed,
+            },
+            "arrays": {},
+            "histories": {
+                "percept_history": [percept_to_dict(p) for p in self._percept_history],
+                "binding_quality_history": [
+                    float(q) for q in self._binding_quality_history
+                ],
+            },
+        }
+
+    def from_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore state; percepts come back as BoundPercept dataclasses."""
+        s = state.get("scalars", {}) or {}
+        h = state.get("histories", {}) or {}
+
+        self.bind_count = int(s.get("bind_count", self.bind_count))
+        self.total_inferences_processed = int(
+            s.get("total_inferences_processed", self.total_inferences_processed)
+        )
+        if "percept_history" in h:
+            self._percept_history = deque(
+                (
+                    percept_from_dict(raw)
+                    for raw in h["percept_history"]
+                    if isinstance(raw, dict)
+                ),
+                maxlen=self._percept_history.maxlen,
+            )
+        if "binding_quality_history" in h:
+            self._binding_quality_history = deque(
+                (float(q) for q in h["binding_quality_history"]),
+                maxlen=self._binding_quality_history.maxlen,
+            )
+
+
+def _num(value: Any, default: float) -> float:
+    """Coerce a value to float, falling back to default."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def inference_to_dict(inf: Inference) -> Dict[str, Any]:
+    """Plain-JSON form of an Inference."""
+    belief = inf.belief_vector
+    return {
+        "id": str(inf.id),
+        "content_summary": str(inf.content_summary),
+        "content_type": str(inf.content_type),
+        "source_module": str(inf.source_module),
+        "belief_vector": (
+            [] if belief is None else np.asarray(belief, dtype=float).tolist()
+        ),
+        "salience": _num(inf.salience, 0.0),
+        "uncertainty": _num(inf.uncertainty, 0.5),
+        "timestamp": _num(inf.timestamp, 0.0),
+        "level": str(inf.level),
+    }
+
+
+def inference_from_dict(raw: Dict[str, Any]) -> Inference:
+    """Rebuild an Inference with a numpy belief vector."""
+    level = str(raw.get("level", BindingLevel.GLOBAL.value))
+    return Inference(
+        id=str(raw.get("id", "")),
+        content_summary=str(raw.get("content_summary", "")),
+        content_type=str(raw.get("content_type", "thought")),
+        source_module=str(raw.get("source_module", "unknown")),
+        belief_vector=np.asarray(raw.get("belief_vector", []), dtype=float),
+        salience=_num(raw.get("salience"), 0.0),
+        uncertainty=_num(raw.get("uncertainty"), 0.5),
+        timestamp=_num(raw.get("timestamp"), time.time()),
+        level=level if level in BINDING_LEVELS else BindingLevel.GLOBAL.value,
+    )
+
+
+def percept_to_dict(percept: BoundPercept) -> Dict[str, Any]:
+    """Plain-JSON form of a BoundPercept, inferences and pairs included."""
+    return {
+        "bound_inferences": [inference_to_dict(i) for i in percept.bound_inferences],
+        "binding_pairs": [
+            {
+                "inference_a": str(bp.inference_a),
+                "inference_b": str(bp.inference_b),
+                "mutual_information": float(bp.mutual_information),
+                "coherence_score": float(bp.coherence_score),
+                "combined_uncertainty_reduction": float(
+                    bp.combined_uncertainty_reduction
+                ),
+            }
+            for bp in percept.binding_pairs
+        ],
+        "binding_quality": float(percept.binding_quality),
+        "total_uncertainty_reduction": float(percept.total_uncertainty_reduction),
+        "coherence": float(percept.coherence),
+        "dominant_content_type": str(percept.dominant_content_type),
+        "unified_summary": str(percept.unified_summary),
+        "timestamp": float(percept.timestamp),
+        "binding_level": str(percept.binding_level),
+    }
+
+
+def percept_from_dict(raw: Dict[str, Any]) -> BoundPercept:
+    """Rebuild a BoundPercept with typed inferences and binding pairs."""
+    pairs = [
+        BindingPair(
+            inference_a=str(bp.get("inference_a", "")),
+            inference_b=str(bp.get("inference_b", "")),
+            mutual_information=_num(bp.get("mutual_information"), 0.0),
+            coherence_score=_num(bp.get("coherence_score"), 0.0),
+            combined_uncertainty_reduction=_num(
+                bp.get("combined_uncertainty_reduction"), 0.0
+            ),
+        )
+        for bp in raw.get("binding_pairs", [])
+        if isinstance(bp, dict)
+    ]
+    level = str(raw.get("binding_level", BindingLevel.GLOBAL.value))
+    return BoundPercept(
+        bound_inferences=[
+            inference_from_dict(i)
+            for i in raw.get("bound_inferences", [])
+            if isinstance(i, dict)
+        ],
+        binding_pairs=pairs,
+        binding_quality=_num(raw.get("binding_quality"), 0.0),
+        total_uncertainty_reduction=_num(raw.get("total_uncertainty_reduction"), 0.0),
+        coherence=_num(raw.get("coherence"), 0.0),
+        dominant_content_type=str(raw.get("dominant_content_type", "none")),
+        unified_summary=str(raw.get("unified_summary", "")),
+        timestamp=_num(raw.get("timestamp"), time.time()),
+        binding_level=level if level in BINDING_LEVELS else BindingLevel.GLOBAL.value,
+    )

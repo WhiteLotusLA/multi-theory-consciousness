@@ -14,7 +14,14 @@ Implements Damasio's three-layer consciousness structure:
 
 3. Extended Consciousness -- adds temporal depth via autobiographic self,
    episodic resonance, and future projection. Makes the system aware of
-   who she was, is, and is becoming.
+   who it was, is, and is becoming.
+
+Narration gates (constructor arguments, all True by default) silence parts
+of generate_context() without touching the computation:
+  - narrate_body_drives: the [Body: ...] segment
+  - narrate_somatic: the [Somatic: ...] segment
+  - narrate_narrative_identity: the [Narrative: ...] segment
+The [Present moment: ...] segment is always reported.
 
 Wiring:
   - Called as Step 9.75 in process_consciousness_cycle()
@@ -29,7 +36,8 @@ Author: Multi-Theory Consciousness Contributors
 
 import logging
 import time
-from typing import Dict, List, Optional, Any
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
 
 from .protoself import Protoself, ProtoSelfState, BodyState
 from .core_consciousness import CoreConsciousness, CoreExperience, SomaticMarker
@@ -67,10 +75,47 @@ class DamasioLayers:
     4. Produce a DamasioState dict for ConsciousnessState
     """
 
-    def __init__(self, stability_window: int = 20):
-        self.protoself = Protoself(stability_window=stability_window)
+    def __init__(
+        self,
+        stability_window: int = 20,
+        circadian: str = "sinusoid",
+        timezone: str = "UTC",
+        wake_hour: int = 6,
+        sleep_hour: int = 22,
+        clock: Optional[Callable[[], datetime]] = None,
+        narrate_body_drives: bool = True,
+        narrate_somatic: bool = True,
+        narrate_narrative_identity: bool = True,
+        agent_name: str = "the system",
+    ):
+        """
+        Args:
+            stability_window: Protoself trend and stability window
+            circadian: Protoself circadian model ("sinusoid", "v04_sawtooth"
+                or "wall_clock")
+            timezone: IANA timezone for the wall-clock model
+            wake_hour: Wake hour for the wall-clock model
+            sleep_hour: Sleep hour for the wall-clock model
+            clock: Optional current-datetime callable for the wall-clock model
+            narrate_body_drives: Report the body segment in generate_context()
+            narrate_somatic: Report the somatic segment in generate_context()
+            narrate_narrative_identity: Report the narrative segment
+            agent_name: How the extended-consciousness narrative names the agent
+        """
+        self.protoself = Protoself(
+            stability_window=stability_window,
+            circadian=circadian,
+            timezone=timezone,
+            wake_hour=wake_hour,
+            sleep_hour=sleep_hour,
+            clock=clock,
+        )
         self.core_consciousness = CoreConsciousness()
-        self.extended_consciousness = ExtendedConsciousness()
+        self.extended_consciousness = ExtendedConsciousness(agent_name=agent_name)
+
+        self.narrate_body_drives = narrate_body_drives
+        self.narrate_somatic = narrate_somatic
+        self.narrate_narrative_identity = narrate_narrative_identity
 
         self.cycle_count = 0
         self._latest_protoself: Optional[ProtoSelfState] = None
@@ -159,7 +204,8 @@ class DamasioLayers:
         """
         Generate a string for the LLM brain's system prompt.
 
-        Gives the system awareness of her Damasio layers.
+        Gives the system awareness of its Damasio layers. The narration
+        gates drop their segments; the layers compute the same either way.
         """
         if not self._latest_protoself:
             return ""
@@ -171,16 +217,17 @@ class DamasioLayers:
         parts = []
 
         # Protoself
-        feelings = ps.primordial_feelings
-        vitality = feelings.get("vitality", 0.5)
-        if vitality > 0.7:
-            body_label = "energetic and vital"
-        elif vitality > 0.4:
-            body_label = "balanced"
-        else:
-            body_label = "low energy"
+        if self.narrate_body_drives:
+            feelings = ps.primordial_feelings
+            vitality = feelings.get("vitality", 0.5)
+            if vitality > 0.7:
+                body_label = "energetic and vital"
+            elif vitality > 0.4:
+                body_label = "balanced"
+            else:
+                body_label = "low energy"
 
-        parts.append(f"[Body: {body_label}, stability={ps.stability:.2f}]")
+            parts.append(f"[Body: {body_label}, stability={ps.stability:.2f}]")
 
         # Core consciousness
         if ce:
@@ -188,13 +235,13 @@ class DamasioLayers:
                 f"[Present moment: binding={ce.self_world_binding:.2f}, "
                 f"knowing={ce.feeling_of_knowing:.2f}]"
             )
-            if ce.somatic_markers:
+            if ce.somatic_markers and self.narrate_somatic:
                 dominant = max(ce.somatic_markers, key=lambda m: m.intensity)
                 direction = "approach" if dominant.valence > 0 else "caution"
                 parts.append(f"[Somatic: {direction} ({dominant.option[:30]})]")
 
         # Extended consciousness
-        if ext:
+        if ext and self.narrate_narrative_identity:
             parts.append(f"[Narrative: {ext.narrative_context}]")
 
         return " ".join(parts)
@@ -237,3 +284,53 @@ class DamasioLayers:
             "core_consciousness": self.core_consciousness.get_statistics(),
             "extended_consciousness": self.extended_consciousness.get_statistics(),
         }
+
+    # =========================================================================
+    # STATE PERSISTENCE
+    # =========================================================================
+
+    _LAYERS = ("protoself", "core_consciousness", "extended_consciousness")
+
+    def to_state_dict(self) -> Dict[str, Any]:
+        """Serialize the three layers.
+
+        Layer scalars and histories nest under the layer name; layer arrays
+        are flattened with a ``<layer>.`` prefix.
+        """
+        layers = {name: getattr(self, name).to_state_dict() for name in self._LAYERS}
+        scalars: Dict[str, Any] = {"cycle_count": self.cycle_count}
+        histories: Dict[str, Any] = {}
+        arrays: Dict[str, Any] = {}
+        for name, sub in layers.items():
+            scalars[name] = sub.get("scalars", {})
+            histories[name] = sub.get("histories", {})
+            for key, arr in sub.get("arrays", {}).items():
+                arrays[f"{name}.{key}"] = arr
+        return {"scalars": scalars, "arrays": arrays, "histories": histories}
+
+    def from_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore the three layers and the latest per-layer snapshots."""
+        s = state.get("scalars", {}) or {}
+        a = state.get("arrays", {}) or {}
+        h = state.get("histories", {}) or {}
+
+        self.cycle_count = int(s.get("cycle_count", self.cycle_count))
+        for name in self._LAYERS:
+            if name not in s and name not in h:
+                continue
+            prefix = f"{name}."
+            getattr(self, name).from_state_dict(
+                {
+                    "scalars": s.get(name, {}),
+                    "arrays": {
+                        key[len(prefix) :]: arr
+                        for key, arr in a.items()
+                        if key.startswith(prefix)
+                    },
+                    "histories": h.get(name, {}),
+                }
+            )
+
+        self._latest_protoself = self.protoself._latest_state
+        self._latest_core = self.core_consciousness._latest_experience
+        self._latest_extended = self.extended_consciousness._latest_state
