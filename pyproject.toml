@@ -38,7 +38,7 @@ dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
     "pydantic>=2.0",
-    "pydantic-settings>=2.0",
+    "pydantic-settings>=2.7",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
 ]
@@ -70,10 +70,20 @@ qdrant = [
 databases = [
     "multi-theory-consciousness[postgres,mongo,redis,neo4j,qdrant]",
 ]
+# llm: the local chat-completions provider's HTTP client.
+llm = [
+    "httpx>=0.27",
+]
+# anthropic: the optional Anthropic provider (sends prompts to an external API).
+anthropic = [
+    "anthropic>=0.50",
+]
+# assessment: the DCM evaluator completes through the llm and anthropic
+# providers; the DCM benchmark still fetches its scheme with requests.
 assessment = [
     "pymc>=5.0",
-    "anthropic>=0.50",
     "requests>=2.28",
+    "multi-theory-consciousness[llm,anthropic]",
 ]
 embeddings = [
     "sentence-transformers>=2.2",
@@ -91,7 +101,7 @@ iit = [
     "pyphi @ git+https://github.com/wmayner/pyphi.git@46ca11273f676b0c91eb79860f34f4ee63dc7a6e ; python_version >= '3.12'",
 ]
 all = [
-    "multi-theory-consciousness[neural,fep,databases,assessment,embeddings,dev]",
+    "multi-theory-consciousness[neural,fep,databases,llm,anthropic,assessment,embeddings,dev]",
 ]
 
 [project.urls]

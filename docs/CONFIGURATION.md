@@ -96,8 +96,17 @@ Every key is read through `get_settings()`. Values come from the process environ
 |---|---|---|
 | `MTC_LLM_HOST` | `localhost` |  |
 | `MTC_LLM_PORT` | `8080` |  |
+| `MTC_LLM_PROVIDER` | `local` | Active brain provider: local (a chat-completions server), anthropic (optional; needs ANTHROPIC_API_KEY and ANTHROPIC_MODEL) or mock (deterministic, labelled replies); a failing provider is reported, never replaced by another |
+| `MTC_LLM_BASE_URL` | `(empty)` | Base URL of the local chat-completions server; empty derives LLM_URL from LLM_HOST and LLM_PORT |
+| `MTC_LLM_MODEL` | `(empty)` | Served model id sent as the request's model field; empty sends no model field and the server uses its loaded model |
+| `MTC_LLM_COMPLETIONS_PATH` | `v1/chat/completions` | Chat-completions URL path under LLM_BASE_URL; a leading slash is optional |
+| `MTC_LLM_HEALTH_PATHS` | `/health,/v1/models` | Comma-separated URL paths the local provider probes in order; the first that answers 200 marks the server healthy |
+| `MTC_LLM_TEMPLATE_FAMILY` | `generic` | Chat-template family: generic (standard fields only, the safe default for instruct models), qwen or gemma (reasoning models with their stop tokens, thinking switch and extended sampling fields) |
+| `MTC_LLM_CONNECT_TIMEOUT_S` | `10.0` | Seconds the local provider waits to connect |
+| `MTC_LLM_REQUEST_TIMEOUT_S` | `600.0` | Seconds the local provider waits for a non-streamed reply or between streamed bytes (raised for streams to GENERATION_TIMEOUT_S plus 60 when that is longer) |
+| `MTC_LLM_MAX_TOKENS` | `4096` | Default completion budget in tokens when a caller sets none |
+| `MTC_LLM_EXTRA_BODY` | `{}` | JSON object merged last into every local request body, for server-specific fields; empty means none |
 | `MTC_MODEL_PATH` | `./models/default` |  |
-| `MTC_MODEL_TYPE` | `default` |  |
 | `MTC_MODEL_QUANTIZATION` | `(empty)` |  |
 | `MTC_CONTEXT_SIZE` | `131072` |  |
 | `MTC_BATCH_SIZE` | `512` |  |
@@ -113,6 +122,44 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_USE_MLOCK` | `true` |  |
 | `ANTHROPIC_API_KEY` | `(empty)` | Optional; enables the Anthropic provider and DCM evaluator mode |
 | `MTC_ANTHROPIC_MODEL` | `(empty)` | Anthropic model id for the DCM evaluator's claude mode and the Anthropic provider; empty disables claude mode |
+| `MTC_ANTHROPIC_MAX_TOKENS` | `8192` | Default completion budget for the Anthropic provider |
+| `MTC_ANTHROPIC_THINKING_BUDGET` | `0` | 0 asks for adaptive thinking when a caller wants reasoning; a positive value sends a fixed thinking budget, only for models that still accept one, at least 1024 and below ANTHROPIC_MAX_TOKENS |
+| `MTC_ANTHROPIC_SAMPLING_ENABLED` | `false` | Send temperature (or top_p, never both) and top_k to Anthropic; current models reject sampling parameters, so leave false unless the configured model accepts them |
+
+## Brain and prompt
+
+| Variable | Default | Description |
+|---|---|---|
+| `MTC_GENERATION_TIMEOUT_S` | `900.0` | Seconds a generation may take before its first token; past it the turn ends with an honest timeout and nothing is stored |
+| `MTC_THINKING_LOOP_MAX_RETRIES` | `2` | Retries after a detected thinking loop, each with a raised penalty; when they run out the turn has no answer |
+| `MTC_THINKING_LOOP_PENALTY_STEP` | `0.2` | Amount the template family's penalty field rises on each thinking-loop retry |
+| `MTC_PROVIDER_STATE_PATH` | `(empty)` | File recording the active provider id for status and the CLI; empty derives <DATA_DIRECTORY>/provider_state.json |
+| `MTC_VISION_ENABLED` | `false` | Vision input is not part of this release; true is refused |
+| `MTC_HISTORY_TOKEN_BUDGET` | `6000` | Token budget for conversation history in one prompt; the brain also keeps history inside CONTEXT_SIZE less the reply and system prompt |
+| `MTC_CHARS_PER_TOKEN` | `3.5` | Characters per token for the conservative token estimate |
+| `MTC_PROMPT_MAX_THOUGHTS` | `5` | Most recent thoughts the prompt shows |
+| `MTC_PROMPT_MAX_GISTS` | `5` | Thought gists the prompt shows |
+| `MTC_PROMPT_MAX_MEMORIES` | `5` | Recalled memories the prompt shows |
+| `MTC_PROMPT_MAX_MEMORY_CHARS` | `250` | Characters of each recalled memory the prompt shows |
+| `MTC_PROMPT_MAX_CONCEPTS` | `3` | Retrieved concepts the prompt shows |
+| `MTC_PROMPT_DISABLED_SECTIONS` | `(empty)` | Comma-separated prompt section names left out, for ablation; empty renders every section that has content |
+| `MTC_TRANSITION_HISTORY_DIR` | `(empty)` | Model-transition evaluations; empty derives <RESULTS_DIR>/model_transitions |
+
+## Narration
+
+| Variable | Default | Description |
+|---|---|---|
+| `MTC_NARRATE_SOMATIC` | `false` | Narrate the somatic segment of the Damasio layers |
+| `MTC_NARRATE_AFFECT_LINE` | `false` | Narrate the PAD affect line |
+| `MTC_NARRATE_NARRATIVE_IDENTITY` | `false` | Narrate the narrative-identity segment of the Damasio layers |
+| `MTC_NARRATE_BODY_DRIVES` | `false` | Narrate body drives (Damasio segment, active inference and the body-state and circadian lines) |
+| `MTC_NARRATE_BINDING` | `false` | Narrate the binding line and the neural-state section |
+| `MTC_NARRATE_SELF_MODEL` | `false` | Narrate metacognition and beautiful-loop self-model reports |
+| `MTC_NARRATE_FREE_ENERGY` | `false` | Narrate free energy and the surprise line |
+| `MTC_NARRATE_THOUGHT_MOOD` | `false` | Stamp thoughts in the prompt with their mood |
+| `MTC_NARRATE_SPEAKER_MODEL` | `false` | Narrate the theory-of-mind speaker model |
+| `MTC_NARRATE_INNER_STATE` | `false` | Render the orchestrator's self-awareness layer |
+| `MTC_NARRATE_ALL` | `false` | Experiment profile: turns on all ten NARRATE_ flags at once |
 
 ## Neural substrates
 

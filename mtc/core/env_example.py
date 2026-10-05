@@ -5,6 +5,7 @@ The committed files are generated artifacts; tests fail when they drift.
 
 from __future__ import annotations
 
+import json
 from typing import Iterable, List, Tuple, Type
 
 from pydantic import AliasChoices
@@ -26,6 +27,10 @@ SECTIONS: List[Tuple[str, Tuple[str, ...]]] = [
     ("LLM", ("LLM_", "MODEL_", "CONTEXT_SIZE", "BATCH_SIZE", "TEMPERATURE",
              "TOP_", "MIN_P", "REPEAT_PENALTY", "THINKING_MODE", "GPU_LAYERS",
              "THREADS", "USE_M", "ANTHROPIC_")),
+    ("Brain and prompt", ("GENERATION_", "THINKING_LOOP_", "PROVIDER_STATE_PATH",
+                          "VISION_ENABLED", "HISTORY_TOKEN_BUDGET",
+                          "CHARS_PER_TOKEN", "PROMPT_", "TRANSITION_")),
+    ("Narration", ("NARRATE_",)),
     ("Neural substrates", ("DEVICE", "SNN_", "LSM_", "HTM_")),
     ("Speakers and trust", ("DEFAULT_SPEAKER_TRUST",)),
     ("Consciousness modules", ("CONSCIOUSNESS_CYCLE", "CONSCIOUSNESS_ENABLED",
@@ -67,13 +72,21 @@ def _env_name(settings_cls: Type[BaseSettings], name: str, info) -> str:
 
 
 def _render_default(name: str, default) -> str:
-    if any(marker in name for marker in SECRET_MARKERS):
+    # A marker in the name hides a text value only: numeric keys such as
+    # HISTORY_TOKEN_BUDGET are not secrets and must render their default.
+    if isinstance(default, str) and any(m in name for m in SECRET_MARKERS):
         return ""
     if default is None:
         return ""
     if isinstance(default, bool):
         return "true" if default else "false"
+    if isinstance(default, (dict, list)):
+        return json.dumps(default, sort_keys=True)
     return str(default)
+
+
+def _default(info):
+    return info.get_default(call_default_factory=True)
 
 
 def _grouped(settings_cls: Type[BaseSettings]) -> Iterable[Tuple[str, list]]:
@@ -101,7 +114,7 @@ def render_env_example(settings_cls: Type[BaseSettings]) -> str:
                 lines.append(f"# {info.description}")
             lines.append(
                 f"{_env_name(settings_cls, name, info)}="
-                f"{_render_default(name, info.default)}"
+                f"{_render_default(name, _default(info))}"
             )
         lines.append("")
     return "\n".join(lines)
@@ -127,7 +140,7 @@ def render_configuration_md(settings_cls: Type[BaseSettings]) -> str:
             "|---|---|---|",
         ]
         for name, info in items:
-            default = _render_default(name, info.default) or "(empty)"
+            default = _render_default(name, _default(info)) or "(empty)"
             desc = (info.description or "").replace("|", "/")
             lines.append(
                 f"| `{_env_name(settings_cls, name, info)}` | `{default}` | {desc} |"

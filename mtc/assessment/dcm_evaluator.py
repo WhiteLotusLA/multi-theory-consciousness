@@ -3,9 +3,18 @@ DCM LLM-based Indicator Evaluator
 ==================================
 
 Evaluates DCM indicators that can't be measured directly from modules.
-Uses a local chat-completions server (``mode="local"``, the Settings LLM host
-and port) or the Anthropic API (``mode="claude"``, model id from
-``Settings.ANTHROPIC_MODEL``).
+Completions go through the brain's provider layer: ``mode="local"`` uses the
+local chat-completions provider (``LocalChatCompletionsProvider.from_settings``:
+``LLM_BASE_URL`` or ``LLM_HOST`` and ``LLM_PORT``, ``LLM_MODEL``, the template
+family and timeouts), ``mode="claude"`` the Anthropic provider
+(``ANTHROPIC_MODEL`` and ``ANTHROPIC_API_KEY``, both required). A ``completer``
+passed to the constructor, an async ``(system, prompt) -> text`` callable,
+replaces both. Reasoning blocks are removed by the provider before scoring; an
+empty reply leaves its batch unscored.
+
+``aevaluate`` is the async entry point; ``evaluate_indicators`` runs it with
+``asyncio.run`` and refuses to run inside an event loop that is already
+running.
 
 Data leaving the machine: ``mode="claude"`` sends the system description and
 the conversation samples the adapter supplies to an external API. The local
@@ -14,17 +23,25 @@ mode keeps them on the configured host.
 Framework-agnostic: no host-system-specific imports.
 """
 
+import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import math
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from mtc.brain.protocol import NoAnswerError
 from mtc.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Modes that complete through the Anthropic provider ("claude" is the
+# benchmark CLI's name for it).
+_ANTHROPIC_MODES = ("claude", "anthropic")
+_MAX_TOKENS = 4096
 
 EVALUATION_SYSTEM_PROMPT = """You are an expert consciousness researcher evaluating whether an AI system exhibits specific consciousness-related indicators from the Digital Consciousness Model (DCM).
 
@@ -53,13 +70,47 @@ class DCMEvaluator:
         cache_dir: str = "data/dcm",
         batch_size: int = 10,
         cache_ttl_hours: int = 24,
+        completer: Optional[Callable[[str, str], Awaitable[str]]] = None,
     ):
         self.cache_dir = Path(cache_dir) / "eval_cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.batch_size = batch_size
         self.cache_ttl = timedelta(hours=cache_ttl_hours)
+        self._completer = completer
 
     def evaluate_indicators(
+        self,
+        indicator_names: List[str],
+        spec: Any,
+        system_description: str,
+        conversation_samples: List[str],
+        mode: str = "local",
+        force: bool = False,
+    ) -> Dict[str, float]:
+        """Synchronous entry point: runs ``aevaluate`` to completion.
+
+        Raises ``RuntimeError`` naming ``aevaluate`` when called inside a
+        running event loop (await ``aevaluate`` there instead).
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(
+                self.aevaluate(
+                    indicator_names,
+                    spec,
+                    system_description,
+                    conversation_samples,
+                    mode=mode,
+                    force=force,
+                )
+            )
+        raise RuntimeError(
+            "DCMEvaluator.evaluate_indicators was called inside a running event "
+            "loop; await DCMEvaluator.aevaluate(...) instead"
+        )
+
+    async def aevaluate(
         self,
         indicator_names: List[str],
         spec: Any,
@@ -88,11 +139,12 @@ class DCMEvaluator:
             cached.
 
         Raises:
-            ValueError: ``mode="claude"`` with ``Settings.ANTHROPIC_MODEL``
-                empty.
+            ValueError: ``mode="claude"`` with ``Settings.ANTHROPIC_MODEL`` or
+                ``Settings.ANTHROPIC_API_KEY`` empty (a ``ConfigurationError``
+                naming the key).
         """
-        if mode == "claude":
-            self._claude_model()  # configuration errors surface here, not per batch
+        if mode in _ANTHROPIC_MODES and self._completer is None:
+            self._anthropic_provider()  # configuration errors surface here
 
         cache_key = self._cache_key(
             system_description, conversation_samples, indicator_names
@@ -119,11 +171,7 @@ class DCMEvaluator:
             )
 
             try:
-                if mode == "claude":
-                    response = self._call_claude(prompt)
-                else:
-                    response = self._call_local(prompt)
-
+                response = await self._complete(prompt, mode)
                 scores = self._parse_response(response, batch)
                 all_scores.update(scores)
             except Exception as e:
@@ -203,59 +251,61 @@ class DCMEvaluator:
         # Clamp all scores to [0, 1]
         return {k: max(0.0, min(1.0, v)) for k, v in scores.items()}
 
-    def _call_local(self, prompt: str) -> str:
-        """Call local LLM (OpenAI-compatible API)."""
-        import requests
+    async def _complete(self, prompt: str, mode: str) -> str:
+        """One batch completion through the completer or the provider layer."""
+        if self._completer is not None:
+            text = await self._completer(EVALUATION_SYSTEM_PROMPT, prompt)
+        else:
+            call = self._call_claude if mode in _ANTHROPIC_MODES else self._call_local
+            text = call(prompt)
+            if inspect.isawaitable(text):
+                text = await text
+        if not str(text or "").strip():
+            raise NoAnswerError("the evaluator model returned no answer")
+        return str(text)
 
-        settings = get_settings()
-        host = settings.LLM_HOST
-        port = str(settings.LLM_PORT)
-        url = f"http://{host}:{port}/v1/chat/completions"
+    async def _call_local(self, prompt: str) -> str:
+        """Complete through the local chat-completions provider."""
+        from mtc.brain.providers.local_chat import LocalChatCompletionsProvider
 
-        resp = requests.post(
-            url,
-            json={
-                "model": "default",
-                "messages": [
-                    {"role": "system", "content": EVALUATION_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.3,
-                "max_tokens": 4096,
-            },
-            timeout=120,
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        provider = LocalChatCompletionsProvider.from_settings(get_settings())
+        return await self._complete_with(provider, prompt, temperature=0.3)
+
+    def _anthropic_provider(self):
+        """The Anthropic provider from Settings; raises naming a missing key."""
+        from mtc.brain.providers.anthropic_provider import AnthropicProvider
+
+        return AnthropicProvider.from_settings(get_settings())
+
+    async def _call_claude(self, prompt: str) -> str:
+        """Complete through the Anthropic provider (sends the prompt off the
+        machine)."""
+        provider = self._anthropic_provider()
+        return await self._complete_with(provider, prompt, temperature=None)
 
     @staticmethod
-    def _claude_model() -> str:
-        """The configured Anthropic model id; raises when it is empty."""
-        model = get_settings().ANTHROPIC_MODEL
-        if not model:
-            raise ValueError(
-                "Settings.ANTHROPIC_MODEL (env MTC_ANTHROPIC_MODEL) is empty; "
-                "set it to a model id to use mode='claude'"
-            )
-        return model
+    async def _complete_with(
+        provider: Any, prompt: str, temperature: Optional[float]
+    ) -> str:
+        from mtc.brain.providers.base import CompletionParams
 
-    def _call_claude(self, prompt: str) -> str:
-        """Call the Anthropic API (sends the prompt off the machine)."""
-        import anthropic
-
-        model = self._claude_model()
-        api_key = get_settings().ANTHROPIC_API_KEY or None
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not set. Required for mode='claude'.")
-
-        client = anthropic.Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model=model,
-            max_tokens=4096,
-            system=EVALUATION_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
+        params = CompletionParams(
+            messages=[
+                {"role": "system", "content": EVALUATION_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=temperature,
+            max_tokens=_MAX_TOKENS,
         )
-        return response.content[0].text
+        await provider.initialize()
+        try:
+            result = await provider.complete(params)
+        finally:
+            await provider.shutdown()
+        if not result.text.strip():
+            reason = "reasoning_only" if result.reasoning else "empty"
+            raise NoAnswerError("the evaluator model returned no answer", reason)
+        return result.text
 
     def _make_batches(self, items: List[str]) -> List[List[str]]:
         """Split items into batches."""

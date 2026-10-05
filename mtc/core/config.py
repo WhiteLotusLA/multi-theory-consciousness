@@ -13,9 +13,10 @@ Provides type-safe access to all framework settings including:
 - LLM connection settings
 """
 
+import json
 import os
 from datetime import date
-from typing import Any, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 from zoneinfo import ZoneInfo
 
 from pydantic import (
@@ -25,7 +26,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # Companion relationship types the onboarding schema and the developmental
 # gate recognise.
@@ -292,8 +293,65 @@ class Settings(BaseSettings):
         """Construct LLM server URL."""
         return f"http://{self.LLM_HOST}:{self.LLM_PORT}"
 
+    LLM_PROVIDER: Literal["local", "anthropic", "mock"] = Field(
+        "local",
+        description="Active brain provider: local (a chat-completions server), "
+        "anthropic (optional; needs ANTHROPIC_API_KEY and ANTHROPIC_MODEL) or "
+        "mock (deterministic, labelled replies); a failing provider is reported, "
+        "never replaced by another",
+    )
+    LLM_BASE_URL: str = Field(
+        "",
+        description="Base URL of the local chat-completions server; empty derives "
+        "LLM_URL from LLM_HOST and LLM_PORT",
+    )
+    LLM_MODEL: str = Field(
+        "",
+        description="Served model id sent as the request's model field; empty "
+        "sends no model field and the server uses its loaded model",
+    )
+    LLM_COMPLETIONS_PATH: str = Field(
+        "v1/chat/completions",
+        description="Chat-completions URL path under LLM_BASE_URL; a leading "
+        "slash is optional",
+    )
+    LLM_HEALTH_PATHS: str = Field(
+        "/health,/v1/models",
+        description="Comma-separated URL paths the local provider probes in "
+        "order; the first that answers 200 marks the server healthy",
+    )
+    LLM_TEMPLATE_FAMILY: Literal["generic", "qwen", "gemma"] = Field(
+        "generic",
+        description="Chat-template family: generic (standard fields only, the "
+        "safe default for instruct models), qwen or gemma (reasoning models with "
+        "their stop tokens, thinking switch and extended sampling fields)",
+    )
+    LLM_CONNECT_TIMEOUT_S: float = Field(
+        10.0,
+        gt=0,
+        allow_inf_nan=False,
+        description="Seconds the local provider waits to connect",
+    )
+    LLM_REQUEST_TIMEOUT_S: float = Field(
+        600.0,
+        gt=0,
+        allow_inf_nan=False,
+        description="Seconds the local provider waits for a non-streamed reply "
+        "or between streamed bytes (raised for streams to GENERATION_TIMEOUT_S "
+        "plus 60 when that is longer)",
+    )
+    LLM_MAX_TOKENS: int = Field(
+        4096,
+        gt=0,
+        description="Default completion budget in tokens when a caller sets none",
+    )
+    LLM_EXTRA_BODY: Annotated[Dict[str, Any], NoDecode] = Field(
+        default_factory=dict,
+        description="JSON object merged last into every local request body, for "
+        "server-specific fields; empty means none",
+    )
+
     MODEL_PATH: str = "./models/default"
-    MODEL_TYPE: str = "default"
     MODEL_QUANTIZATION: str = ""
 
     # Model Parameters
@@ -309,6 +367,116 @@ class Settings(BaseSettings):
     THREADS: int = 8
     USE_MMAP: bool = True
     USE_MLOCK: bool = True
+
+    # ========================================================================
+    # BRAIN AND PROMPT
+    # ========================================================================
+
+    GENERATION_TIMEOUT_S: float = Field(
+        900.0,
+        gt=0,
+        allow_inf_nan=False,
+        description="Seconds a generation may take before its first token; past "
+        "it the turn ends with an honest timeout and nothing is stored",
+    )
+    THINKING_LOOP_MAX_RETRIES: int = Field(
+        2,
+        ge=0,
+        description="Retries after a detected thinking loop, each with a raised "
+        "penalty; when they run out the turn has no answer",
+    )
+    THINKING_LOOP_PENALTY_STEP: float = Field(
+        0.2,
+        ge=0,
+        allow_inf_nan=False,
+        description="Amount the template family's penalty field rises on each "
+        "thinking-loop retry",
+    )
+    PROVIDER_STATE_PATH: str = Field(
+        "",
+        description="File recording the active provider id for status and the "
+        "CLI; empty derives <DATA_DIRECTORY>/provider_state.json",
+    )
+    VISION_ENABLED: bool = Field(
+        False,
+        description="Vision input is not part of this release; true is refused",
+    )
+    HISTORY_TOKEN_BUDGET: int = Field(
+        6000,
+        gt=0,
+        description="Token budget for conversation history in one prompt; the "
+        "brain also keeps history inside CONTEXT_SIZE less the reply and system "
+        "prompt",
+    )
+    CHARS_PER_TOKEN: float = Field(
+        3.5,
+        gt=0,
+        allow_inf_nan=False,
+        description="Characters per token for the conservative token estimate",
+    )
+    PROMPT_MAX_THOUGHTS: int = Field(
+        5, ge=1, description="Most recent thoughts the prompt shows"
+    )
+    PROMPT_MAX_GISTS: int = Field(5, ge=1, description="Thought gists the prompt shows")
+    PROMPT_MAX_MEMORIES: int = Field(
+        5, ge=1, description="Recalled memories the prompt shows"
+    )
+    PROMPT_MAX_MEMORY_CHARS: int = Field(
+        250, ge=1, description="Characters of each recalled memory the prompt shows"
+    )
+    PROMPT_MAX_CONCEPTS: int = Field(
+        3, ge=1, description="Retrieved concepts the prompt shows"
+    )
+    PROMPT_DISABLED_SECTIONS: str = Field(
+        "",
+        description="Comma-separated prompt section names left out, for "
+        "ablation; empty renders every section that has content",
+    )
+    TRANSITION_HISTORY_DIR: str = Field(
+        "",
+        description="Model-transition evaluations; empty derives "
+        "<RESULTS_DIR>/model_transitions",
+    )
+
+    # ========================================================================
+    # NARRATION (mtc.core.narration; every flag off by default)
+    # ========================================================================
+
+    NARRATE_SOMATIC: bool = Field(
+        False, description="Narrate the somatic segment of the Damasio layers"
+    )
+    NARRATE_AFFECT_LINE: bool = Field(False, description="Narrate the PAD affect line")
+    NARRATE_NARRATIVE_IDENTITY: bool = Field(
+        False,
+        description="Narrate the narrative-identity segment of the Damasio layers",
+    )
+    NARRATE_BODY_DRIVES: bool = Field(
+        False,
+        description="Narrate body drives (Damasio segment, active inference and "
+        "the body-state and circadian lines)",
+    )
+    NARRATE_BINDING: bool = Field(
+        False, description="Narrate the binding line and the neural-state section"
+    )
+    NARRATE_SELF_MODEL: bool = Field(
+        False, description="Narrate metacognition and beautiful-loop self-model reports"
+    )
+    NARRATE_FREE_ENERGY: bool = Field(
+        False, description="Narrate free energy and the surprise line"
+    )
+    NARRATE_THOUGHT_MOOD: bool = Field(
+        False, description="Stamp thoughts in the prompt with their mood"
+    )
+    NARRATE_SPEAKER_MODEL: bool = Field(
+        False, description="Narrate the theory-of-mind speaker model"
+    )
+    NARRATE_INNER_STATE: bool = Field(
+        False, description="Render the orchestrator's self-awareness layer"
+    )
+    NARRATE_ALL: bool = Field(
+        False,
+        description="Experiment profile: turns on all ten NARRATE_ flags at once",
+    )
 
     # ========================================================================
     # NEURAL NETWORK PARAMETERS
@@ -572,6 +740,24 @@ class Settings(BaseSettings):
         description="Anthropic model id for the DCM evaluator's claude mode and "
         "the Anthropic provider; empty disables claude mode",
     )
+    ANTHROPIC_MAX_TOKENS: int = Field(
+        8192,
+        gt=0,
+        description="Default completion budget for the Anthropic provider",
+    )
+    ANTHROPIC_THINKING_BUDGET: int = Field(
+        0,
+        ge=0,
+        description="0 asks for adaptive thinking when a caller wants reasoning; "
+        "a positive value sends a fixed thinking budget, only for models that "
+        "still accept one, at least 1024 and below ANTHROPIC_MAX_TOKENS",
+    )
+    ANTHROPIC_SAMPLING_ENABLED: bool = Field(
+        False,
+        description="Send temperature (or top_p, never both) and top_k to "
+        "Anthropic; current models reject sampling parameters, so leave false "
+        "unless the configured model accepts them",
+    )
 
     # ========================================================================
     # Pydantic Configuration
@@ -636,6 +822,62 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("LLM_EXTRA_BODY", mode="before")
+    @classmethod
+    def _extra_body_is_json_object(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return {}
+            try:
+                value = json.loads(text)
+            except ValueError as exc:
+                raise ValueError(
+                    "LLM_EXTRA_BODY must be a JSON object, for example "
+                    '{"cache_prompt": true}'
+                ) from exc
+        if not isinstance(value, dict):
+            raise ValueError("LLM_EXTRA_BODY must be a JSON object")
+        return value
+
+    @field_validator("LLM_BASE_URL")
+    @classmethod
+    def _base_url_without_trailing_slash(cls, value: str) -> str:
+        return value.strip().rstrip("/")
+
+    @field_validator("LLM_COMPLETIONS_PATH")
+    @classmethod
+    def _completions_path_is_url_path(cls, value: str) -> str:
+        # Stored without the leading slash: the path is relative to
+        # LLM_BASE_URL, and the provider joins the two with one slash.
+        path = value.strip().lstrip("/")
+        if not path or "://" in path or " " in path:
+            raise ValueError(
+                "LLM_COMPLETIONS_PATH must be a URL path under LLM_BASE_URL, "
+                "for example v1/chat/completions"
+            )
+        return path
+
+    @field_validator("LLM_HEALTH_PATHS")
+    @classmethod
+    def _health_paths_are_url_paths(cls, value: str) -> str:
+        bad = [path for path in csv_list(value) if "://" in path or " " in path]
+        if bad:
+            raise ValueError(
+                f"LLM_HEALTH_PATHS entries {bad} must be URL paths under LLM_BASE_URL"
+            )
+        return value
+
+    @field_validator("VISION_ENABLED")
+    @classmethod
+    def _vision_stays_off(cls, value: bool) -> bool:
+        if value:
+            raise ValueError(
+                "VISION_ENABLED: vision input is not part of this release; "
+                "leave it false"
+            )
+        return value
+
     @field_validator("COMPANION_TYPE")
     @classmethod
     def _companion_type_is_known(cls, value: str) -> str:
@@ -668,6 +910,20 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _check_thinking_budget(self) -> "Settings":
+        budget = self.ANTHROPIC_THINKING_BUDGET
+        if budget:
+            if budget < 1024:
+                raise ValueError(
+                    "ANTHROPIC_THINKING_BUDGET must be 0 or at least 1024 tokens"
+                )
+            if budget >= self.ANTHROPIC_MAX_TOKENS:
+                raise ValueError(
+                    "ANTHROPIC_THINKING_BUDGET must stay below ANTHROPIC_MAX_TOKENS"
+                )
+        return self
+
+    @model_validator(mode="after")
     def _derive_store_names(self) -> "Settings":
         prefix = self.DB_PREFIX
         if not self.POSTGRES_DB:
@@ -688,6 +944,16 @@ class Settings(BaseSettings):
             )
         if not self.SHADOW_LOG_DIR:
             self.SHADOW_LOG_DIR = os.path.join(self.LOG_DIRECTORY, "shadow_signals")
+        if not self.LLM_BASE_URL:
+            self.LLM_BASE_URL = self.LLM_URL
+        if not self.PROVIDER_STATE_PATH:
+            self.PROVIDER_STATE_PATH = os.path.join(
+                self.DATA_DIRECTORY, "provider_state.json"
+            )
+        if not self.TRANSITION_HISTORY_DIR:
+            self.TRANSITION_HISTORY_DIR = os.path.join(
+                self.RESULTS_DIR, "model_transitions"
+            )
         return self
 
 
