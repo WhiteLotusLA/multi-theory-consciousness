@@ -76,6 +76,16 @@ Seven defects affect v0.4.0 measurements. All are fixed in v0.5.0, published v0.
 
 ---
 
+## 11. Limits of the generic cognition modules
+
+- **Speaker models are heuristics.** Speaker models are keyword and exponential-moving-average heuristics, and the trust attached to a speaker is configured, not measured.
+- **Emotion extraction is rule-based.** It compares text against running baselines and starts from a declared neutral prior until those baselines exist.
+- **Self-assessment is model text.** Self-assessment answers are text the model produced, so divergence from the indicators is information about the report, not about the system.
+- **The behavioral battery measures behavior.** It measures response patterns, not experience.
+- **Developmental stages are unvalidated.** They have no external validation and stay off unless enabled.
+
+---
+
 ## Why Share It Anyway
 
 Given these limitations, why release this framework?

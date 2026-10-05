@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 4: Tier B generic modules
+
+- Perception, affect and research: cross-modal binding, perceptual reality monitor, self-assessment, emotion dynamics and extraction, affect estimator with shadow taps, embeddings seam, shadow log, statistics helper, behavioral battery without a mock fallback, longitudinal study manager
+- Time, identity and development: configuration-driven temporal context, developmental stages (off by default), identity continuity, identity statement loader, drift tools, prospective simulation, attention appraisal, locale, path and identity settings, a tree-wide trust audit
+- Seams and learning: store protocols with in-memory implementations and contract tests, a brain protocol with a deterministic fake, the experiential learning package and intrinsic goals
+- Verification and speakers: honest verification suite and state assembler, temporal samples, orchestrator verification, snapshot service, theory of mind without seeded speakers, attention-capture journal, noticing and default-trust settings
+- Sleep and autonomous life: dream engine with configuration templates and sentence trimming, sleep scheduler with an injected clock and seams, a lean autonomous-life loop with brain-only activities; nothing is wired into the runners
+
 ### Phase 3: assessment, measurement and substrates
 
 - Assessment: honest missing-signal semantics (`insufficient_data`, `absent`, report status and coverage), indicator formulas that read what the producers emit, weighted Fiedler irreducibility, exact IIT 4.0 Phi through the PyPhi bridge with a `phi_tracker` input, temporal affect coherence, causal emergence row order, RPT plasticity and persistence, DCM history cap, cache key and reference adapter; every behaviour change is a switch with its v0.4.0 value in the `legacy_v04` preset
