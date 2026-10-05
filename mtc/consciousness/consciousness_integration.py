@@ -17,16 +17,19 @@ This provides the foundation for academic validation of consciousness emergence.
 """
 
 import numpy as np
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 import asyncio
 import logging
 from dataclasses import dataclass, asdict
-import json
 
 from mtc.consciousness.consciousness_metrics import ConsciousnessMetrics
-from mtc.neural.neural_orchestrator import NeuralOrchestrator, Experience
-from mtc.neural.mongodb_schemas import NeuralDataManager
+from mtc.neural.orchestrator import Experience, NeuralOrchestrator
+
+try:  # the Mongo persistence layer arrives with the infrastructure phase
+    from mtc.neural.mongodb_schemas import NeuralDataManager
+except ImportError:  # pragma: no cover - exercised on base installs
+    NeuralDataManager = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +108,9 @@ class ConsciousnessIntegration:
 
         logger.info(
             "Consciousness Integration initialized\n"
-            f"   Assessment interval: {assessment_interval_ms}ms\n"
-            f"   Persistence: {'enabled' if enable_persistence else 'disabled'}\n"
-            f"   Indicators: 20 consciousness metrics active"
+            f"  Assessment interval: {assessment_interval_ms}ms\n"
+            f"  Persistence: {'enabled' if enable_persistence else 'disabled'}\n"
+            f"  Indicators: 20 consciousness metrics active"
         )
 
     def collect_neural_data(self) -> Dict[str, Any]:
@@ -134,7 +137,7 @@ class ConsciousnessIntegration:
                     ),
                 }
             else:
-                # SNN not available — use sensible defaults (not random)
+                # SNN not available - use sensible defaults (not random)
                 data["snn"] = {
                     "total_spikes": 0,
                     "spike_rate": 0.0,
@@ -155,7 +158,7 @@ class ConsciousnessIntegration:
                     ),
                 }
             else:
-                # LSM not available — use sensible defaults (not random)
+                # LSM not available - use sensible defaults (not random)
                 data["lsm"] = {
                     "dominant_pattern": "idle",
                     "coherence": 0.5,
@@ -280,7 +283,7 @@ class ConsciousnessIntegration:
         for indicator_name, indicator in self.metrics.indicators.items():
             try:
                 # Prepare additional context for measurement
-                additional_context = {
+                {
                     "history": (
                         self.snapshot_history[-10:] if self.snapshot_history else []
                     ),
@@ -615,7 +618,6 @@ class ConsciousNeuralOrchestrator(NeuralOrchestrator):
 
 # Testing
 if __name__ == "__main__":
-    import asyncio
 
     logging.basicConfig(level=logging.INFO)
 
@@ -636,7 +638,7 @@ if __name__ == "__main__":
                 "curiosity": np.random.uniform(0.3, 0.8),
             }
 
-            experience = orchestrator.process_experience(
+            orchestrator.process_experience(
                 experience_type="test",
                 emotions=emotions,
                 context=f"Test experience {i+1}",
@@ -655,15 +657,15 @@ if __name__ == "__main__":
 
         if report["current"]:
             print(
-                f"   Overall Level: {report['current']['overall_consciousness_level']:.3f}"
+                f"  Overall Level: {report['current']['overall_consciousness_level']:.3f}"
             )
-            print(f"   Confidence: {report['current']['consciousness_confidence']:.3f}")
+            print(f"  Confidence: {report['current']['consciousness_confidence']:.3f}")
 
         if report["statistics"]:
             print("\n   Indicator Statistics:")
             for indicator, stats in list(report["statistics"].items())[:3]:
                 print(
-                    f"   • {indicator}: mean={stats['mean']:.3f}, current={stats['current']:.3f}"
+                    f"  • {indicator}: mean={stats['mean']:.3f}, current={stats['current']:.3f}"
                 )
 
         print("\n4. Testing hypothesis validation...")
@@ -672,7 +674,7 @@ if __name__ == "__main__":
                 "consciousness_increasing"
             )
         )
-        print(f"   Hypothesis 'consciousness_increasing': {hypothesis_result}")
+        print(f"  Hypothesis 'consciousness_increasing': {hypothesis_result}")
 
         print("\n5. Stopping monitoring...")
         await orchestrator.stop_consciousness_monitoring()
@@ -685,7 +687,7 @@ if __name__ == "__main__":
             print(
                 f"\nFinal consciousness level: {final_summary['overall']['current']:.3f}"
             )
-            print(f"   Trend: {final_summary['overall']['trend']}")
+            print(f"  Trend: {final_summary['overall']['trend']}")
 
     # Run test
     asyncio.run(test_consciousness_integration())

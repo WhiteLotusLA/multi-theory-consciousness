@@ -10,20 +10,17 @@ test environment.
 """
 
 import sys
-from pathlib import Path
 
 
 import types
-import numpy as np
-import pytest
 import torch
 import torch.nn as nn
 from unittest.mock import MagicMock
 
-
 # ---------------------------------------------------------------------------
 # Mock snntorch before importing production_snn
 # ---------------------------------------------------------------------------
+
 
 class _StraightThroughSpike(torch.autograd.Function):
     """Spike function with straight-through estimator for gradients."""
@@ -37,7 +34,7 @@ class _StraightThroughSpike(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        mem, = ctx.saved_tensors
+        (mem,) = ctx.saved_tensors
         # Straight-through estimator: pass gradient through unchanged
         return grad_output, None
 
@@ -45,8 +42,9 @@ class _StraightThroughSpike(torch.autograd.Function):
 class _FakeLeaky(nn.Module):
     """Minimal stand-in for snn.Leaky that behaves like a LIF neuron."""
 
-    def __init__(self, beta=0.9, spike_grad=None, threshold=1.0,
-                 reset_mechanism="zero", **kwargs):
+    def __init__(
+        self, beta=0.9, spike_grad=None, threshold=1.0, reset_mechanism="zero", **kwargs
+    ):
         super().__init__()
         self.beta = beta
         self.threshold = threshold
@@ -95,10 +93,10 @@ from mtc.neural.spiking.production_snn import (  # noqa: E402
     ProductionSNN,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _tiny_config(**overrides) -> SNNConfig:
     """Return a minimal SNNConfig that runs fast on CPU."""
@@ -129,6 +127,7 @@ def _set_inference_mode(model):
 # ---------------------------------------------------------------------------
 # STDPLayer tests
 # ---------------------------------------------------------------------------
+
 
 class TestSTDPLayer:
     """Tests for the STDP (Spike-Timing-Dependent Plasticity) layer."""
@@ -203,6 +202,7 @@ class TestSTDPLayer:
 # ProductionSNN tests
 # ---------------------------------------------------------------------------
 
+
 class TestProductionSNN:
     """Tests for the top-level ProductionSNN."""
 
@@ -235,8 +235,14 @@ class TestProductionSNN:
         with torch.no_grad():
             _, state = model(inp)
 
-        for key in ["spike_counts", "membrane_potentials", "output_spikes",
-                     "firing_rates", "timesteps_processed", "num_layers"]:
+        for key in [
+            "spike_counts",
+            "membrane_potentials",
+            "output_spikes",
+            "firing_rates",
+            "timesteps_processed",
+            "num_layers",
+        ]:
             assert key in state, f"Missing state key: {key}"
 
     def test_process_emotion_returns_metrics(self):
@@ -249,8 +255,13 @@ class TestProductionSNN:
         output, metrics = model.process_emotion(emotion)
 
         assert output.shape[-1] == cfg.output_dim
-        for key in ["processing_time_ms", "total_spikes", "mean_firing_rate",
-                     "output_pattern", "layer_activities"]:
+        for key in [
+            "processing_time_ms",
+            "total_spikes",
+            "mean_firing_rate",
+            "output_pattern",
+            "layer_activities",
+        ]:
             assert key in metrics, f"Missing metric key: {key}"
 
     def test_process_emotion_unsqueezes_1d_input(self):
@@ -263,6 +274,21 @@ class TestProductionSNN:
         output, _ = model.process_emotion(emotion)
 
         assert output.shape[-1] == cfg.output_dim
+
+    def test_process_emotion_batch_input(self):
+        """A 2-D batch keeps its batch dimension and metrics still compute."""
+        cfg = _tiny_config()
+        model = ProductionSNN(cfg)
+        _set_inference_mode(model)
+
+        batch = torch.randn(3, cfg.input_dim)
+        output, metrics = model.process_emotion(batch)
+
+        assert output.shape[0] == 3
+        assert output.shape[-1] == cfg.output_dim
+        assert metrics["total_spikes"] >= 0
+        assert isinstance(metrics["layer_activities"], list)
+        assert metrics["processing_time_ms"] >= 0.0
 
     def test_train_on_batch_computes_loss(self):
         """Forward pass should produce a valid MSE loss against targets."""

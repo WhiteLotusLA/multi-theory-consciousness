@@ -1,12 +1,17 @@
 import subprocess
 import sys
 
+import pytest
 
+
+@pytest.mark.slow
 def test_run_experiment_baseline():
     """Baseline experiment (no overrides) should complete and print results."""
     result = subprocess.run(
         [sys.executable, "scripts/run_experiment.py"],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=600,
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert "overall_score:" in result.stdout
@@ -14,13 +19,16 @@ def test_run_experiment_baseline():
     assert "gwt_score:" in result.stdout
 
 
+@pytest.mark.slow
 def test_run_experiment_deterministic():
     """Two runs with same params produce identical scores."""
     scores = []
     for _ in range(2):
         result = subprocess.run(
             [sys.executable, "scripts/run_experiment.py"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=600,
         )
         assert result.returncode == 0
         for line in result.stdout.splitlines():

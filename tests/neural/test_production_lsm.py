@@ -3,17 +3,15 @@ Tests for ProductionLSM - the system's Liquid State Machine implementation.
 ReservoirPy components are mocked so no heavy computation is needed.
 """
 
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
+# ---------------------------------------------------------------------------
+# Helpers: build mocks that behave like reservoirpy nodes
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Helpers — build mocks that behave like reservoirpy nodes
-# ---------------------------------------------------------------------------
 
 def _make_mock_reservoir(units: int = 100):
     """Return a mock Reservoir node whose .run() produces plausible states."""
@@ -47,14 +45,17 @@ def _make_mock_readout(output_dim: int = 50):
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def lsm():
     """Create a ProductionLSM with all reservoirpy internals mocked."""
-    with patch("src.neural.liquid.production_lsm.rpy") as mock_rpy, \
-         patch("src.neural.liquid.production_lsm.Reservoir") as MockReservoir, \
-         patch("src.neural.liquid.production_lsm.RLS") as MockRLS, \
-         patch("src.neural.liquid.production_lsm.Ridge") as MockRidge, \
-         patch("src.neural.liquid.production_lsm.Input") as MockInput:
+    with (
+        patch("mtc.neural.liquid.production_lsm.rpy"),
+        patch("mtc.neural.liquid.production_lsm.Reservoir") as MockReservoir,
+        patch("mtc.neural.liquid.production_lsm.RLS") as MockRLS,
+        patch("mtc.neural.liquid.production_lsm.Ridge") as MockRidge,
+        patch("mtc.neural.liquid.production_lsm.Input") as MockInput,
+    ):
 
         mock_reservoir = _make_mock_reservoir(units=100)
         MockReservoir.return_value = mock_reservoir
@@ -87,11 +88,13 @@ def lsm():
 @pytest.fixture
 def lsm_slow():
     """Create a ProductionLSM with fast_mode=False for metric tests."""
-    with patch("src.neural.liquid.production_lsm.rpy"), \
-         patch("src.neural.liquid.production_lsm.Reservoir") as MockReservoir, \
-         patch("src.neural.liquid.production_lsm.RLS") as MockRLS, \
-         patch("src.neural.liquid.production_lsm.Ridge") as MockRidge, \
-         patch("src.neural.liquid.production_lsm.Input") as MockInput:
+    with (
+        patch("mtc.neural.liquid.production_lsm.rpy"),
+        patch("mtc.neural.liquid.production_lsm.Reservoir") as MockReservoir,
+        patch("mtc.neural.liquid.production_lsm.RLS") as MockRLS,
+        patch("mtc.neural.liquid.production_lsm.Ridge") as MockRidge,
+        patch("mtc.neural.liquid.production_lsm.Input") as MockInput,
+    ):
 
         mock_reservoir = _make_mock_reservoir(units=100)
         MockReservoir.return_value = mock_reservoir
@@ -126,7 +129,9 @@ class TestLSMConfig:
         from mtc.neural.liquid.production_lsm import LSMConfig
 
         cfg = LSMConfig()
-        assert cfg.reservoir_size == 5000  # Scaled from 10K: 5K is latency ceiling for CPU-bound ReservoirPy
+        assert (
+            cfg.reservoir_size == 5000
+        )  # Scaled from 10K: 5K is latency ceiling for CPU-bound ReservoirPy
         assert cfg.input_dim == 100
         assert cfg.output_dim == 50
         assert cfg.spectral_radius == 0.9

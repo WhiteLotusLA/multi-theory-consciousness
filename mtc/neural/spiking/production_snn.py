@@ -58,7 +58,9 @@ class SNNConfig:
     # Training parameters
     learning_rate: float = 1e-3
     batch_size: int = 32
-    timesteps: int = 10  # Simulation timesteps (scaled down: fewer steps + wider layers is faster on Metal)
+    timesteps: int = (
+        10  # Simulation timesteps (scaled down: fewer steps + wider layers is faster on Metal)
+    )
 
     # Hardware
     use_gpu: bool = True
@@ -186,9 +188,7 @@ class ProductionSNN(nn.Module):
         self.spike_counts = []
         self.membrane_potentials = []
 
-        logger.info(
-            f"Production SNN initialized with {self._count_neurons()} neurons"
-        )
+        logger.info(f"Production SNN initialized with {self._count_neurons()} neurons")
 
     def _build_network(self):
         """Build the SNN architecture."""
@@ -262,9 +262,7 @@ class ProductionSNN(nn.Module):
             # (batch, dim) -> (timesteps, batch, dim).
             # Previously we manually expanded to (batch, timesteps, dim) first,
             # causing spikegen.rate to produce a 4D tensor (double expansion).
-            input_spikes = spikegen.rate(
-                input_data, num_steps=self.config.timesteps
-            )
+            input_spikes = spikegen.rate(input_data, num_steps=self.config.timesteps)
         else:
             input_spikes = input_data
 
@@ -349,6 +347,44 @@ class ProductionSNN(nn.Module):
         del spike_recordings, mem_potentials, input_spikes
 
         return output, state
+
+    def process_emotion(
+        self, emotion_vector: torch.Tensor
+    ) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        """Run one emotion encoding through the network.
+
+        Returns the output tensor and a metrics dict with processing time,
+        spike totals, mean firing rate, the output pattern, per-layer
+        activities and the synchrony reading from the forward state.
+        """
+        start = time.perf_counter()
+        if emotion_vector.dim() == 1:
+            emotion_vector = emotion_vector.unsqueeze(0)
+        emotion_vector = emotion_vector.to(self.device)
+
+        grad_ctx = torch.enable_grad() if self.training else torch.no_grad()
+        with grad_ctx:
+            output, state = self.forward(emotion_vector)
+
+        processing_time_ms = (time.perf_counter() - start) * 1000.0
+        spike_counts = state.get("spike_counts", [])
+        firing_rates = state.get("firing_rates", [])
+        total_spikes = int(sum(float(s.sum().item()) for s in spike_counts))
+        layer_activities = [float(f.mean().item()) for f in firing_rates]
+        mean_firing_rate = (
+            float(sum(layer_activities) / len(layer_activities))
+            if layer_activities
+            else 0.0
+        )
+        metrics: Dict[str, Any] = {
+            "processing_time_ms": processing_time_ms,
+            "total_spikes": total_spikes,
+            "mean_firing_rate": mean_firing_rate,
+            "output_pattern": output.detach().cpu().numpy(),
+            "layer_activities": layer_activities,
+            "synchrony": float(state.get("synchrony", 0.0)),
+        }
+        return output, metrics
 
     def process_input(
         self, input_vector: torch.Tensor
@@ -517,7 +553,7 @@ def test_production_snn():
         stdp_enabled=False,  # Disable STDP during benchmark to prevent memory explosion
     )
 
-    print(f"   Using hidden layers: {hidden}, timesteps: {timesteps}")
+    print(f"  Using hidden layers: {hidden}, timesteps: {timesteps}")
 
     snn_net = ProductionSNN(config)
 
@@ -531,18 +567,18 @@ def test_production_snn():
     test_input = torch.randn(1000, dtype=torch.float32)  # Random input vector
     output, metrics = snn_net.process_input(test_input)
 
-    print(f"   Processed in {metrics['processing_time_ms']:.2f}ms")
-    print(f"   Total spikes: {metrics['total_spikes']}")
-    print(f"   Mean firing rate: {metrics['mean_firing_rate']:.3f}")
+    print(f"  Processed in {metrics['processing_time_ms']:.2f}ms")
+    print(f"  Total spikes: {metrics['total_spikes']}")
+    print(f"  Mean firing rate: {metrics['mean_firing_rate']:.3f}")
 
     # Benchmark performance
     print("\n2. Running performance benchmark...")
     benchmark = snn_net.benchmark_performance()
 
-    print(f"   Mean latency: {benchmark['mean_latency_ms']:.2f}ms")
-    print(f"   Total neurons: {benchmark['neurons_total']}")
-    print(f"   Total parameters: {benchmark['parameters_total']:,}")
-    print(f"   Device: {benchmark['device']}")
+    print(f"  Mean latency: {benchmark['mean_latency_ms']:.2f}ms")
+    print(f"  Total neurons: {benchmark['neurons_total']}")
+    print(f"  Total parameters: {benchmark['parameters_total']:,}")
+    print(f"  Device: {benchmark['device']}")
 
     # Test STDP learning (with smaller batch to prevent memory issues)
     print("\n3. Testing STDP learning...")
@@ -559,20 +595,20 @@ def test_production_snn():
         for _ in range(3):  # Reduced from 10
             loss = snn_net.train_on_batch(inputs, targets)
             gc.collect()  # Clean up after each iteration
-        print(f"   Loss decreased from {loss_before:.4f} to {loss:.4f}")
+        print(f"  Loss decreased from {loss_before:.4f} to {loss:.4f}")
     except RuntimeError as e:
         if "backward" in str(e).lower():
-            print(f"   STDP training skipped (recurrent graph issue - separate bug)")
-            print(f"   Note: Core SNN inference works correctly!")
+            print("  STDP training skipped (recurrent graph issue - separate bug)")
+            print("  Note: Core SNN inference works correctly!")
         else:
             raise
 
     print("\n" + "=" * 60)
     print("Production SNN test complete!")
     print(
-        f"   Achieved <50ms latency target: {'YES' if benchmark['mean_latency_ms'] < 50 else 'NO'}"
+        f"  Achieved <50ms latency target: {'YES' if benchmark['mean_latency_ms'] < 50 else 'NO'}"
     )
-    print("   Research-grade implementation ready for academic review!")
+    print("  Research-grade implementation ready for academic review!")
 
 
 if __name__ == "__main__":

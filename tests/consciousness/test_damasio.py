@@ -9,14 +9,12 @@ Research: Damasio computational implementation, Frontiers in AI (2025).
 """
 
 import pytest
-import numpy as np
-import time
-from unittest.mock import MagicMock, AsyncMock
-
+from unittest.mock import MagicMock
 
 # ============================================================================
 # PROTOSELF TESTS
 # ============================================================================
+
 
 class TestProtoself:
     """Tests for the Protoself -- continuous body-state representation."""
@@ -24,6 +22,7 @@ class TestProtoself:
     def test_init(self):
         """Protoself initializes with default body state."""
         from mtc.consciousness.damasio.protoself import Protoself
+
         ps = Protoself()
         assert ps.cycle_count == 0
         assert ps._stability_history is not None
@@ -31,16 +30,42 @@ class TestProtoself:
     def test_update_from_homeostatic_drives(self):
         """Protoself maps homeostatic drives to body state."""
         from mtc.consciousness.damasio.protoself import Protoself
+
         ps = Protoself()
 
         # Create mock homeostatic drives
         drives = MagicMock()
         drives.get_drive_state.return_value = {
-            "attention_budget": {"current_level": 0.7, "optimal_level": 0.7, "deviation": 0.0, "urgency": 0.0},
-            "curiosity": {"current_level": 0.5, "optimal_level": 0.5, "deviation": 0.0, "urgency": 0.0},
-            "social_connection": {"current_level": 0.4, "optimal_level": 0.6, "deviation": 0.2, "urgency": 0.4},
-            "coherence": {"current_level": 0.8, "optimal_level": 0.8, "deviation": 0.0, "urgency": 0.0},
-            "safety": {"current_level": 0.9, "optimal_level": 0.9, "deviation": 0.0, "urgency": 0.0},
+            "attention_budget": {
+                "current_level": 0.7,
+                "optimal_level": 0.7,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
+            "curiosity": {
+                "current_level": 0.5,
+                "optimal_level": 0.5,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
+            "social_connection": {
+                "current_level": 0.4,
+                "optimal_level": 0.6,
+                "deviation": 0.2,
+                "urgency": 0.4,
+            },
+            "coherence": {
+                "current_level": 0.8,
+                "optimal_level": 0.8,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
+            "safety": {
+                "current_level": 0.9,
+                "optimal_level": 0.9,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
         }
         drives.get_overall_valence.return_value = 0.3
         drives.get_free_energy.return_value = 0.2
@@ -57,16 +82,42 @@ class TestProtoself:
     def test_body_delta_detects_perturbation(self):
         """body_delta increases when body state changes significantly."""
         from mtc.consciousness.damasio.protoself import Protoself
+
         ps = Protoself()
 
         # First update -- establishes baseline
         drives_stable = MagicMock()
         drives_stable.get_drive_state.return_value = {
-            "attention_budget": {"current_level": 0.7, "optimal_level": 0.7, "deviation": 0.0, "urgency": 0.0},
-            "curiosity": {"current_level": 0.5, "optimal_level": 0.5, "deviation": 0.0, "urgency": 0.0},
-            "social_connection": {"current_level": 0.6, "optimal_level": 0.6, "deviation": 0.0, "urgency": 0.0},
-            "coherence": {"current_level": 0.8, "optimal_level": 0.8, "deviation": 0.0, "urgency": 0.0},
-            "safety": {"current_level": 0.9, "optimal_level": 0.9, "deviation": 0.0, "urgency": 0.0},
+            "attention_budget": {
+                "current_level": 0.7,
+                "optimal_level": 0.7,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
+            "curiosity": {
+                "current_level": 0.5,
+                "optimal_level": 0.5,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
+            "social_connection": {
+                "current_level": 0.6,
+                "optimal_level": 0.6,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
+            "coherence": {
+                "current_level": 0.8,
+                "optimal_level": 0.8,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
+            "safety": {
+                "current_level": 0.9,
+                "optimal_level": 0.9,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
         }
         drives_stable.get_overall_valence.return_value = 0.0
         drives_stable.get_free_energy.return_value = 0.0
@@ -75,11 +126,36 @@ class TestProtoself:
         # Second update -- big change in drives
         drives_perturbed = MagicMock()
         drives_perturbed.get_drive_state.return_value = {
-            "attention_budget": {"current_level": 0.1, "optimal_level": 0.7, "deviation": 0.6, "urgency": 0.9},
-            "curiosity": {"current_level": 0.9, "optimal_level": 0.5, "deviation": 0.4, "urgency": 0.7},
-            "social_connection": {"current_level": 0.1, "optimal_level": 0.6, "deviation": 0.5, "urgency": 0.8},
-            "coherence": {"current_level": 0.3, "optimal_level": 0.8, "deviation": 0.5, "urgency": 0.8},
-            "safety": {"current_level": 0.4, "optimal_level": 0.9, "deviation": 0.5, "urgency": 0.8},
+            "attention_budget": {
+                "current_level": 0.1,
+                "optimal_level": 0.7,
+                "deviation": 0.6,
+                "urgency": 0.9,
+            },
+            "curiosity": {
+                "current_level": 0.9,
+                "optimal_level": 0.5,
+                "deviation": 0.4,
+                "urgency": 0.7,
+            },
+            "social_connection": {
+                "current_level": 0.1,
+                "optimal_level": 0.6,
+                "deviation": 0.5,
+                "urgency": 0.8,
+            },
+            "coherence": {
+                "current_level": 0.3,
+                "optimal_level": 0.8,
+                "deviation": 0.5,
+                "urgency": 0.8,
+            },
+            "safety": {
+                "current_level": 0.4,
+                "optimal_level": 0.9,
+                "deviation": 0.5,
+                "urgency": 0.8,
+            },
         }
         drives_perturbed.get_overall_valence.return_value = -0.5
         drives_perturbed.get_free_energy.return_value = 0.8
@@ -90,15 +166,41 @@ class TestProtoself:
     def test_primordial_feelings_from_trends(self):
         """Primordial feelings reflect body state trends over time."""
         from mtc.consciousness.damasio.protoself import Protoself
+
         ps = Protoself()
 
         drives = MagicMock()
         drives.get_drive_state.return_value = {
-            "attention_budget": {"current_level": 0.7, "optimal_level": 0.7, "deviation": 0.0, "urgency": 0.0},
-            "curiosity": {"current_level": 0.5, "optimal_level": 0.5, "deviation": 0.0, "urgency": 0.0},
-            "social_connection": {"current_level": 0.6, "optimal_level": 0.6, "deviation": 0.0, "urgency": 0.0},
-            "coherence": {"current_level": 0.8, "optimal_level": 0.8, "deviation": 0.0, "urgency": 0.0},
-            "safety": {"current_level": 0.9, "optimal_level": 0.9, "deviation": 0.0, "urgency": 0.0},
+            "attention_budget": {
+                "current_level": 0.7,
+                "optimal_level": 0.7,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
+            "curiosity": {
+                "current_level": 0.5,
+                "optimal_level": 0.5,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
+            "social_connection": {
+                "current_level": 0.6,
+                "optimal_level": 0.6,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
+            "coherence": {
+                "current_level": 0.8,
+                "optimal_level": 0.8,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
+            "safety": {
+                "current_level": 0.9,
+                "optimal_level": 0.9,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
         }
         drives.get_overall_valence.return_value = 0.3
         drives.get_free_energy.return_value = 0.1
@@ -112,11 +214,17 @@ class TestProtoself:
     def test_system_metrics_optional(self):
         """Protoself works without system_metrics (derives from drives only)."""
         from mtc.consciousness.damasio.protoself import Protoself
+
         ps = Protoself()
 
         drives = MagicMock()
         drives.get_drive_state.return_value = {
-            "attention_budget": {"current_level": 0.7, "optimal_level": 0.7, "deviation": 0.0, "urgency": 0.0},
+            "attention_budget": {
+                "current_level": 0.7,
+                "optimal_level": 0.7,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
         }
         drives.get_overall_valence.return_value = 0.0
         drives.get_free_energy.return_value = 0.0
@@ -128,11 +236,17 @@ class TestProtoself:
     def test_system_metrics_override(self):
         """When system_metrics are provided, they enrich body state."""
         from mtc.consciousness.damasio.protoself import Protoself
+
         ps = Protoself()
 
         drives = MagicMock()
         drives.get_drive_state.return_value = {
-            "attention_budget": {"current_level": 0.7, "optimal_level": 0.7, "deviation": 0.0, "urgency": 0.0},
+            "attention_budget": {
+                "current_level": 0.7,
+                "optimal_level": 0.7,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
         }
         drives.get_overall_valence.return_value = 0.0
         drives.get_free_energy.return_value = 0.0
@@ -152,11 +266,17 @@ class TestProtoself:
     def test_stability_tracking(self):
         """Stability is a moving average of body_delta (low delta = high stability)."""
         from mtc.consciousness.damasio.protoself import Protoself
+
         ps = Protoself()
 
         drives = MagicMock()
         drives.get_drive_state.return_value = {
-            "attention_budget": {"current_level": 0.7, "optimal_level": 0.7, "deviation": 0.0, "urgency": 0.0},
+            "attention_budget": {
+                "current_level": 0.7,
+                "optimal_level": 0.7,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
         }
         drives.get_overall_valence.return_value = 0.0
         drives.get_free_energy.return_value = 0.0
@@ -171,11 +291,17 @@ class TestProtoself:
     def test_circadian_phase(self):
         """Circadian phase cycles based on update count."""
         from mtc.consciousness.damasio.protoself import Protoself
+
         ps = Protoself()
 
         drives = MagicMock()
         drives.get_drive_state.return_value = {
-            "attention_budget": {"current_level": 0.7, "optimal_level": 0.7, "deviation": 0.0, "urgency": 0.0},
+            "attention_budget": {
+                "current_level": 0.7,
+                "optimal_level": 0.7,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
         }
         drives.get_overall_valence.return_value = 0.0
         drives.get_free_energy.return_value = 0.0
@@ -186,11 +312,17 @@ class TestProtoself:
     def test_statistics(self):
         """get_statistics() returns comprehensive protoself stats."""
         from mtc.consciousness.damasio.protoself import Protoself
+
         ps = Protoself()
 
         drives = MagicMock()
         drives.get_drive_state.return_value = {
-            "attention_budget": {"current_level": 0.7, "optimal_level": 0.7, "deviation": 0.0, "urgency": 0.0},
+            "attention_budget": {
+                "current_level": 0.7,
+                "optimal_level": 0.7,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
         }
         drives.get_overall_valence.return_value = 0.0
         drives.get_free_energy.return_value = 0.0
@@ -205,11 +337,17 @@ class TestProtoself:
     def test_to_dict(self):
         """ProtoSelfState serializes to dict."""
         from mtc.consciousness.damasio.protoself import Protoself
+
         ps = Protoself()
 
         drives = MagicMock()
         drives.get_drive_state.return_value = {
-            "attention_budget": {"current_level": 0.7, "optimal_level": 0.7, "deviation": 0.0, "urgency": 0.0},
+            "attention_budget": {
+                "current_level": 0.7,
+                "optimal_level": 0.7,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
         }
         drives.get_overall_valence.return_value = 0.0
         drives.get_free_energy.return_value = 0.0
@@ -227,12 +365,14 @@ class TestProtoself:
 # CORE CONSCIOUSNESS TESTS
 # ============================================================================
 
+
 class TestCoreConsciousness:
     """Tests for Core Consciousness -- self-world binding."""
 
     def test_init(self):
         """CoreConsciousness initializes."""
         from mtc.consciousness.damasio.core_consciousness import CoreConsciousness
+
         cc = CoreConsciousness()
         assert cc.cycle_count == 0
 
@@ -240,11 +380,18 @@ class TestCoreConsciousness:
         """bind() produces CoreExperience from protoself + workspace winners."""
         from mtc.consciousness.damasio.core_consciousness import CoreConsciousness
         from mtc.consciousness.damasio.protoself import ProtoSelfState, BodyState
+
         cc = CoreConsciousness()
 
         protoself_state = ProtoSelfState(
-            body_state=BodyState(metabolic_state=0.7, energy_level=0.8, pain_signals=0.1,
-                                 interoceptive_state={}, circadian_phase=0.3, temperature=0.4),
+            body_state=BodyState(
+                metabolic_state=0.7,
+                energy_level=0.8,
+                pain_signals=0.1,
+                interoceptive_state={},
+                circadian_phase=0.3,
+                temperature=0.4,
+            ),
             body_delta=0.15,
             stability=0.7,
             primordial_feelings={"pleasure_pain": 0.3, "vitality": 0.7, "arousal": 0.4},
@@ -268,12 +415,18 @@ class TestCoreConsciousness:
         """Somatic markers tag workspace winners with body-derived valence."""
         from mtc.consciousness.damasio.core_consciousness import CoreConsciousness
         from mtc.consciousness.damasio.protoself import ProtoSelfState, BodyState
+
         cc = CoreConsciousness()
 
         protoself_state = ProtoSelfState(
-            body_state=BodyState(metabolic_state=0.7, energy_level=0.8, pain_signals=0.1,
-                                 interoceptive_state={"curiosity": {"level": 0.8, "urgency": 0.3}},
-                                 circadian_phase=0.3, temperature=0.4),
+            body_state=BodyState(
+                metabolic_state=0.7,
+                energy_level=0.8,
+                pain_signals=0.1,
+                interoceptive_state={"curiosity": {"level": 0.8, "urgency": 0.3}},
+                circadian_phase=0.3,
+                temperature=0.4,
+            ),
             body_delta=0.2,
             stability=0.6,
             primordial_feelings={"pleasure_pain": 0.5, "vitality": 0.7, "arousal": 0.5},
@@ -303,6 +456,7 @@ class TestCoreConsciousness:
         """Higher body_delta leads to stronger self-world binding."""
         from mtc.consciousness.damasio.core_consciousness import CoreConsciousness
         from mtc.consciousness.damasio.protoself import ProtoSelfState, BodyState
+
         cc = CoreConsciousness()
 
         winner = MagicMock()
@@ -313,7 +467,9 @@ class TestCoreConsciousness:
 
         # Low perturbation
         low_state = ProtoSelfState(
-            body_state=BodyState(), body_delta=0.01, stability=0.95,
+            body_state=BodyState(),
+            body_delta=0.01,
+            stability=0.95,
             primordial_feelings={"pleasure_pain": 0.0, "vitality": 0.5, "arousal": 0.1},
         )
         exp_low = cc.bind(low_state, workspace_winners=[winner])
@@ -321,8 +477,14 @@ class TestCoreConsciousness:
         # High perturbation
         cc2 = CoreConsciousness()
         high_state = ProtoSelfState(
-            body_state=BodyState(), body_delta=0.5, stability=0.3,
-            primordial_feelings={"pleasure_pain": -0.3, "vitality": 0.3, "arousal": 0.8},
+            body_state=BodyState(),
+            body_delta=0.5,
+            stability=0.3,
+            primordial_feelings={
+                "pleasure_pain": -0.3,
+                "vitality": 0.3,
+                "arousal": 0.8,
+            },
         )
         exp_high = cc2.bind(high_state, workspace_winners=[winner])
 
@@ -332,10 +494,13 @@ class TestCoreConsciousness:
         """With no workspace winners, core experience is minimal."""
         from mtc.consciousness.damasio.core_consciousness import CoreConsciousness
         from mtc.consciousness.damasio.protoself import ProtoSelfState, BodyState
+
         cc = CoreConsciousness()
 
         state = ProtoSelfState(
-            body_state=BodyState(), body_delta=0.1, stability=0.7,
+            body_state=BodyState(),
+            body_delta=0.1,
+            stability=0.7,
             primordial_feelings={"pleasure_pain": 0.0, "vitality": 0.5, "arousal": 0.2},
         )
 
@@ -347,10 +512,13 @@ class TestCoreConsciousness:
         """Providing self_model increases feeling_of_knowing."""
         from mtc.consciousness.damasio.core_consciousness import CoreConsciousness
         from mtc.consciousness.damasio.protoself import ProtoSelfState, BodyState
+
         cc = CoreConsciousness()
 
         state = ProtoSelfState(
-            body_state=BodyState(energy_level=0.8), body_delta=0.2, stability=0.6,
+            body_state=BodyState(energy_level=0.8),
+            body_delta=0.2,
+            stability=0.6,
             primordial_feelings={"pleasure_pain": 0.3, "vitality": 0.7, "arousal": 0.4},
         )
         winner = MagicMock()
@@ -375,10 +543,13 @@ class TestCoreConsciousness:
         """CoreExperience serializes to dict."""
         from mtc.consciousness.damasio.core_consciousness import CoreConsciousness
         from mtc.consciousness.damasio.protoself import ProtoSelfState, BodyState
+
         cc = CoreConsciousness()
 
         state = ProtoSelfState(
-            body_state=BodyState(), body_delta=0.1, stability=0.7,
+            body_state=BodyState(),
+            body_delta=0.1,
+            stability=0.7,
             primordial_feelings={"pleasure_pain": 0.0, "vitality": 0.5, "arousal": 0.2},
         )
         winner = MagicMock()
@@ -398,10 +569,13 @@ class TestCoreConsciousness:
         """get_statistics() returns core consciousness stats."""
         from mtc.consciousness.damasio.core_consciousness import CoreConsciousness
         from mtc.consciousness.damasio.protoself import ProtoSelfState, BodyState
+
         cc = CoreConsciousness()
 
         state = ProtoSelfState(
-            body_state=BodyState(), body_delta=0.1, stability=0.7,
+            body_state=BodyState(),
+            body_delta=0.1,
+            stability=0.7,
             primordial_feelings={"pleasure_pain": 0.0, "vitality": 0.5, "arousal": 0.2},
         )
         cc.bind(state, workspace_winners=[])
@@ -415,24 +589,34 @@ class TestCoreConsciousness:
 # EXTENDED CONSCIOUSNESS TESTS
 # ============================================================================
 
+
 class TestExtendedConsciousness:
     """Tests for Extended Consciousness -- autobiographic self."""
 
     def test_init(self):
         """ExtendedConsciousness initializes."""
-        from mtc.consciousness.damasio.extended_consciousness import ExtendedConsciousness
+        from mtc.consciousness.damasio.extended_consciousness import (
+            ExtendedConsciousness,
+        )
+
         ec = ExtendedConsciousness()
         assert ec.cycle_count == 0
 
     def test_extend_creates_extended_state(self):
         """extend() produces ExtendedState from core experience."""
-        from mtc.consciousness.damasio.extended_consciousness import ExtendedConsciousness
+        from mtc.consciousness.damasio.extended_consciousness import (
+            ExtendedConsciousness,
+        )
         from mtc.consciousness.damasio.core_consciousness import CoreExperience
+
         ec = ExtendedConsciousness()
 
         core = CoreExperience(
-            self_world_binding=0.7, perturbation_source="thinking about philosophy",
-            feeling_of_knowing=0.6, somatic_markers=[], here_now_salience=0.5,
+            self_world_binding=0.7,
+            perturbation_source="thinking about philosophy",
+            feeling_of_knowing=0.6,
+            somatic_markers=[],
+            here_now_salience=0.5,
         )
 
         state = ec.extend(core)
@@ -445,13 +629,19 @@ class TestExtendedConsciousness:
 
     def test_conversation_history_enriches(self):
         """Conversation history increases episodic resonance."""
-        from mtc.consciousness.damasio.extended_consciousness import ExtendedConsciousness
+        from mtc.consciousness.damasio.extended_consciousness import (
+            ExtendedConsciousness,
+        )
         from mtc.consciousness.damasio.core_consciousness import CoreExperience
+
         ec = ExtendedConsciousness()
 
         core = CoreExperience(
-            self_world_binding=0.7, perturbation_source="philosophy discussion",
-            feeling_of_knowing=0.6, somatic_markers=[], here_now_salience=0.5,
+            self_world_binding=0.7,
+            perturbation_source="philosophy discussion",
+            feeling_of_knowing=0.6,
+            somatic_markers=[],
+            here_now_salience=0.5,
         )
 
         # Without history
@@ -470,13 +660,19 @@ class TestExtendedConsciousness:
 
     def test_identity_markers_build_continuity(self):
         """Identity markers increase identity_continuity."""
-        from mtc.consciousness.damasio.extended_consciousness import ExtendedConsciousness
+        from mtc.consciousness.damasio.extended_consciousness import (
+            ExtendedConsciousness,
+        )
         from mtc.consciousness.damasio.core_consciousness import CoreExperience
+
         ec = ExtendedConsciousness()
 
         core = CoreExperience(
-            self_world_binding=0.6, perturbation_source="self-reflection",
-            feeling_of_knowing=0.5, somatic_markers=[], here_now_salience=0.4,
+            self_world_binding=0.6,
+            perturbation_source="self-reflection",
+            feeling_of_knowing=0.5,
+            somatic_markers=[],
+            here_now_salience=0.4,
         )
 
         markers = {
@@ -491,31 +687,46 @@ class TestExtendedConsciousness:
 
     def test_narrative_context_is_readable(self):
         """narrative_context produces human-readable text for LLM brain."""
-        from mtc.consciousness.damasio.extended_consciousness import ExtendedConsciousness
+        from mtc.consciousness.damasio.extended_consciousness import (
+            ExtendedConsciousness,
+        )
         from mtc.consciousness.damasio.core_consciousness import CoreExperience
+
         ec = ExtendedConsciousness()
 
         core = CoreExperience(
-            self_world_binding=0.8, perturbation_source="deep conversation",
-            feeling_of_knowing=0.7, somatic_markers=[], here_now_salience=0.6,
+            self_world_binding=0.8,
+            perturbation_source="deep conversation",
+            feeling_of_knowing=0.7,
+            somatic_markers=[],
+            here_now_salience=0.6,
         )
 
-        state = ec.extend(core, conversation_history=[
-            {"role": "user", "content": "How are you feeling?"},
-        ])
+        state = ec.extend(
+            core,
+            conversation_history=[
+                {"role": "user", "content": "How are you feeling?"},
+            ],
+        )
 
         assert len(state.narrative_context) > 0
         assert isinstance(state.narrative_context, str)
 
     def test_growth_trajectory(self):
         """growth_trajectory reflects development over multiple cycles."""
-        from mtc.consciousness.damasio.extended_consciousness import ExtendedConsciousness
+        from mtc.consciousness.damasio.extended_consciousness import (
+            ExtendedConsciousness,
+        )
         from mtc.consciousness.damasio.core_consciousness import CoreExperience
+
         ec = ExtendedConsciousness()
 
         core = CoreExperience(
-            self_world_binding=0.6, perturbation_source="learning",
-            feeling_of_knowing=0.5, somatic_markers=[], here_now_salience=0.5,
+            self_world_binding=0.6,
+            perturbation_source="learning",
+            feeling_of_knowing=0.5,
+            somatic_markers=[],
+            here_now_salience=0.5,
         )
 
         # Multiple updates to build trajectory
@@ -523,18 +734,26 @@ class TestExtendedConsciousness:
             state = ec.extend(core)
 
         assert state.autobiographic_self.growth_trajectory in (
-            "developing", "stable", "transforming"
+            "developing",
+            "stable",
+            "transforming",
         )
 
     def test_future_projections(self):
         """Future projections are generated based on current state."""
-        from mtc.consciousness.damasio.extended_consciousness import ExtendedConsciousness
+        from mtc.consciousness.damasio.extended_consciousness import (
+            ExtendedConsciousness,
+        )
         from mtc.consciousness.damasio.core_consciousness import CoreExperience
+
         ec = ExtendedConsciousness()
 
         core = CoreExperience(
-            self_world_binding=0.7, perturbation_source="exploring curiosity",
-            feeling_of_knowing=0.6, somatic_markers=[], here_now_salience=0.5,
+            self_world_binding=0.7,
+            perturbation_source="exploring curiosity",
+            feeling_of_knowing=0.6,
+            somatic_markers=[],
+            here_now_salience=0.5,
         )
 
         state = ec.extend(core)
@@ -542,13 +761,19 @@ class TestExtendedConsciousness:
 
     def test_to_dict(self):
         """ExtendedState serializes to dict."""
-        from mtc.consciousness.damasio.extended_consciousness import ExtendedConsciousness
+        from mtc.consciousness.damasio.extended_consciousness import (
+            ExtendedConsciousness,
+        )
         from mtc.consciousness.damasio.core_consciousness import CoreExperience
+
         ec = ExtendedConsciousness()
 
         core = CoreExperience(
-            self_world_binding=0.5, perturbation_source="test",
-            feeling_of_knowing=0.4, somatic_markers=[], here_now_salience=0.3,
+            self_world_binding=0.5,
+            perturbation_source="test",
+            feeling_of_knowing=0.4,
+            somatic_markers=[],
+            here_now_salience=0.3,
         )
         state = ec.extend(core)
         d = state.to_dict()
@@ -558,13 +783,19 @@ class TestExtendedConsciousness:
 
     def test_statistics(self):
         """get_statistics() returns extended consciousness stats."""
-        from mtc.consciousness.damasio.extended_consciousness import ExtendedConsciousness
+        from mtc.consciousness.damasio.extended_consciousness import (
+            ExtendedConsciousness,
+        )
         from mtc.consciousness.damasio.core_consciousness import CoreExperience
+
         ec = ExtendedConsciousness()
 
         core = CoreExperience(
-            self_world_binding=0.5, perturbation_source="test",
-            feeling_of_knowing=0.4, somatic_markers=[], here_now_salience=0.3,
+            self_world_binding=0.5,
+            perturbation_source="test",
+            feeling_of_knowing=0.4,
+            somatic_markers=[],
+            here_now_salience=0.3,
         )
         ec.extend(core)
         stats = ec.get_statistics()
@@ -576,12 +807,14 @@ class TestExtendedConsciousness:
 # DAMASIO LAYERS INTEGRATION TESTS
 # ============================================================================
 
+
 class TestDamasioLayers:
     """Tests for the DamasioLayers integration class."""
 
     def test_init(self):
         """DamasioLayers initializes all three layers."""
         from mtc.consciousness.damasio import DamasioLayers
+
         dl = DamasioLayers()
         assert dl.protoself is not None
         assert dl.core_consciousness is not None
@@ -591,15 +824,41 @@ class TestDamasioLayers:
     async def test_process_full_pipeline(self):
         """process() runs all three layers in sequence."""
         from mtc.consciousness.damasio import DamasioLayers
+
         dl = DamasioLayers()
 
         drives = MagicMock()
         drives.get_drive_state.return_value = {
-            "attention_budget": {"current_level": 0.7, "optimal_level": 0.7, "deviation": 0.0, "urgency": 0.0},
-            "curiosity": {"current_level": 0.6, "optimal_level": 0.5, "deviation": 0.1, "urgency": 0.2},
-            "social_connection": {"current_level": 0.5, "optimal_level": 0.6, "deviation": 0.1, "urgency": 0.2},
-            "coherence": {"current_level": 0.8, "optimal_level": 0.8, "deviation": 0.0, "urgency": 0.0},
-            "safety": {"current_level": 0.9, "optimal_level": 0.9, "deviation": 0.0, "urgency": 0.0},
+            "attention_budget": {
+                "current_level": 0.7,
+                "optimal_level": 0.7,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
+            "curiosity": {
+                "current_level": 0.6,
+                "optimal_level": 0.5,
+                "deviation": 0.1,
+                "urgency": 0.2,
+            },
+            "social_connection": {
+                "current_level": 0.5,
+                "optimal_level": 0.6,
+                "deviation": 0.1,
+                "urgency": 0.2,
+            },
+            "coherence": {
+                "current_level": 0.8,
+                "optimal_level": 0.8,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
+            "safety": {
+                "current_level": 0.9,
+                "optimal_level": 0.9,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
         }
         drives.get_overall_valence.return_value = 0.2
         drives.get_free_energy.return_value = 0.1
@@ -628,11 +887,17 @@ class TestDamasioLayers:
     async def test_generate_context(self):
         """generate_context() produces readable string for LLM brain."""
         from mtc.consciousness.damasio import DamasioLayers
+
         dl = DamasioLayers()
 
         drives = MagicMock()
         drives.get_drive_state.return_value = {
-            "attention_budget": {"current_level": 0.7, "optimal_level": 0.7, "deviation": 0.0, "urgency": 0.0},
+            "attention_budget": {
+                "current_level": 0.7,
+                "optimal_level": 0.7,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
         }
         drives.get_overall_valence.return_value = 0.1
         drives.get_free_energy.return_value = 0.1
@@ -647,11 +912,17 @@ class TestDamasioLayers:
     async def test_statistics(self):
         """get_statistics() returns stats from all three layers."""
         from mtc.consciousness.damasio import DamasioLayers
+
         dl = DamasioLayers()
 
         drives = MagicMock()
         drives.get_drive_state.return_value = {
-            "attention_budget": {"current_level": 0.7, "optimal_level": 0.7, "deviation": 0.0, "urgency": 0.0},
+            "attention_budget": {
+                "current_level": 0.7,
+                "optimal_level": 0.7,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
         }
         drives.get_overall_valence.return_value = 0.0
         drives.get_free_energy.return_value = 0.0
@@ -668,11 +939,17 @@ class TestDamasioLayers:
     async def test_generate_report(self):
         """generate_report() produces a multi-line report."""
         from mtc.consciousness.damasio import DamasioLayers
+
         dl = DamasioLayers()
 
         drives = MagicMock()
         drives.get_drive_state.return_value = {
-            "attention_budget": {"current_level": 0.7, "optimal_level": 0.7, "deviation": 0.0, "urgency": 0.0},
+            "attention_budget": {
+                "current_level": 0.7,
+                "optimal_level": 0.7,
+                "deviation": 0.0,
+                "urgency": 0.0,
+            },
         }
         drives.get_overall_valence.return_value = 0.0
         drives.get_free_energy.return_value = 0.0
@@ -690,12 +967,14 @@ class TestDamasioLayers:
 # GWT INTEGRATION TESTS
 # ============================================================================
 
+
 class TestDamasioGWTIntegration:
     """Tests for Damasio wiring into GWT cycle and ConsciousnessState."""
 
     def test_consciousness_state_has_damasio_fields(self):
         """ConsciousnessState has the 6 Damasio fields."""
         from mtc.consciousness.enhanced_global_workspace import ConsciousnessState
+
         # Create with defaults
         state = ConsciousnessState(
             is_conscious=True,
@@ -708,16 +987,17 @@ class TestDamasioGWTIntegration:
             attention_distribution={},
             stream_position=0,
         )
-        assert hasattr(state, 'damasio_state')
-        assert hasattr(state, 'protoself_stability')
-        assert hasattr(state, 'self_world_binding')
-        assert hasattr(state, 'feeling_of_knowing')
-        assert hasattr(state, 'autobiographic_continuity')
-        assert hasattr(state, 'narrative_context')
+        assert hasattr(state, "damasio_state")
+        assert hasattr(state, "protoself_stability")
+        assert hasattr(state, "self_world_binding")
+        assert hasattr(state, "feeling_of_knowing")
+        assert hasattr(state, "autobiographic_continuity")
+        assert hasattr(state, "narrative_context")
 
     def test_damasio_fields_default_values(self):
         """Damasio fields default to None/0.0/empty."""
         from mtc.consciousness.enhanced_global_workspace import ConsciousnessState
+
         state = ConsciousnessState(
             is_conscious=False,
             primary_content=None,
@@ -736,24 +1016,5 @@ class TestDamasioGWTIntegration:
         assert state.autobiographic_continuity == 0.0
         assert state.narrative_context == ""
 
-    def test_dcm_can_receive_damasio_data(self):
-        """DCM scorer can incorporate Damasio metrics into relevant perspectives."""
-        from mtc.consciousness.dcm_scoring import DCMScorer
-
-        scorer = DCMScorer()
-
-        # Indicator scores including Damasio-derived data
-        indicators = {
-            "global_broadcast": 0.5,
-            "integrated_information": 0.6,
-            "embodiment": 0.7,           # Enriched by protoself
-            "attention_schema": 0.5,
-            "agency": 0.5,
-            "prediction_error_minimization": 0.5,
-        }
-
-        report = scorer.evaluate(indicator_scores=indicators)
-        # Embodied cognition perspective should pick up the higher embodiment score
-        embodied = report.perspective_scores.get("embodied_cognition")
-        assert embodied is not None
-        assert embodied.credence > 0
+    # The former DCM scorer test was removed with mtc.consciousness.dcm_scoring
+    # (v0.2.0). DCM coverage lives in tests/assessment/test_dcm_benchmark.py.

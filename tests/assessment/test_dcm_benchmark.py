@@ -1,13 +1,11 @@
 """Tests for the full DCM Benchmark implementation."""
 
+import importlib.util
 import json
 import pytest
 import tempfile
 import os
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 from datetime import datetime
-
 
 # Minimal mock spec matching the structure from
 # https://dcm.rethinkpriorities.org/schemes/133/json
@@ -133,6 +131,10 @@ class TestModelSpecManager:
         assert len(parsed.all_indicator_names) == 3
 
 
+@pytest.mark.skipif(
+    importlib.util.find_spec("pymc") is None,
+    reason="pymc not installed (install the 'assessment' extra)",
+)
 class TestBayesianEngine:
     """Tests for PyMC Bayesian inference engine."""
 

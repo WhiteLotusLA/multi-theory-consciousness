@@ -29,6 +29,8 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
@@ -68,6 +70,12 @@ dev = [
     "pytest-asyncio>=0.21",
     "black>=23.0",
     "flake8>=6.0",
+    "pytest-timeout>=2.3",
+]
+# iit: exact IIT 4.0 Phi via PyPhi. PyPhi is licensed GPLv3+ and is never
+# vendored or imported unless the user installs this extra themselves.
+iit = [
+    "pyphi @ git+https://github.com/wmayner/pyphi.git@46ca11273f676b0c91eb79860f34f4ee63dc7a6e ; python_version >= '3.12'",
 ]
 all = [
     "multi-theory-consciousness[neural,fep,databases,assessment,dev]",
@@ -75,7 +83,7 @@ all = [
 
 [project.urls]
 Repository = "https://github.com/WhiteLotusLA/multi-theory-consciousness"
-Documentation = "https://github.com/WhiteLotusLA/multi-theory-consciousness/tree/master/docs"
+Documentation = "https://github.com/WhiteLotusLA/multi-theory-consciousness/tree/main/docs"
 
 # Note: CLI entry point removed -- run assessment via:
 #   python scripts/run_assessment.py --full --report
@@ -92,7 +100,14 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+addopts = "--strict-markers"
+timeout = 900
+markers = [
+    "slow: wall-clock heavy or subprocess tests; deselect with -m 'not slow'",
+    "db: needs a running database; skipped when the store is absent",
+    "live: talks to a running stack; never run by default",
+    "gpu: needs MPS or CUDA",
+    "benchmark: performance measurement, not correctness",
+    "security: security-relevant behaviour",
+]
 
-[tool.flake8]
-max-line-length = 88
-extend-ignore = ["E203", "W503"]
