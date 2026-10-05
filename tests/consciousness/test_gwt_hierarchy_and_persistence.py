@@ -375,6 +375,117 @@ async def test_arousal_derived_from_emotional_state_unless_supplied():
     assert workspace.bottleneck.arousal == 1.0
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["caller", "emotional_state", "pad", "default"])
+async def test_arousal_source_recorded(source):
+    workspace = _workspace()
+    emotional_state = None
+    if source == "caller":
+        workspace.set_arousal(0.3)
+        emotional_state = {"arousal": 0.9}
+    elif source == "emotional_state":
+        emotional_state = {"arousal": 0.8}
+    elif source == "pad":
+        first = await workspace.process_consciousness_cycle([_candidate("first")])
+        assert first.arousal_source == "default"
+        first.pad_arousal = 0.9  # a caller records PAD arousal on the state
+
+    state = await workspace.process_consciousness_cycle(
+        [_candidate("percept")], emotional_state=emotional_state
+    )
+
+    assert state.arousal_source == source
+    expected = {"caller": 0.3, "emotional_state": 0.8, "pad": 0.9, "default": 0.5}
+    assert workspace.bottleneck.arousal == pytest.approx(expected[source])
+
+
+@pytest.mark.asyncio
+async def test_arousal_falls_through_unusable_sources():
+    workspace = _workspace()
+    first = await workspace.process_consciousness_cycle(
+        [_candidate("first")], emotional_state={"arousal": 0.9}
+    )
+    assert first.arousal_source == "emotional_state"
+    first.pad_arousal = 0.2
+
+    # A non-finite entry is skipped in favour of the recorded PAD arousal
+    second = await workspace.process_consciousness_cycle(
+        [_candidate("second")], emotional_state={"arousal": float("nan")}
+    )
+    assert second.arousal_source == "pad"
+    assert workspace.bottleneck.arousal == pytest.approx(0.2)
+
+    # With no source at all the gate returns to its neutral default instead of
+    # keeping the last cycle's value
+    third = await workspace.process_consciousness_cycle([_candidate("third")])
+    assert third.arousal_source == "default"
+    assert workspace.bottleneck.arousal == pytest.approx(0.5)
+
+    # A workspace without a gate has no arousal to source
+    ungated = _workspace(thalamic_gate_enabled=False)
+    state = await ungated.process_consciousness_cycle([_candidate("percept")])
+    assert state.arousal_source is None
+
+
+@pytest.mark.asyncio
+async def test_gate_rate_none_on_empty_cycle():
+    workspace = _workspace()
+    state = await workspace.process_consciousness_cycle([])
+    assert state.thalamic_gated_count == 0
+    assert state.thalamic_gate_rate is None  # 0 of 0 is not a rate
+
+    state = await workspace.process_consciousness_cycle([_candidate("a percept")])
+    assert state.thalamic_gate_rate == 0.0  # a real zero: one seen, none gated
+
+
+@pytest.mark.asyncio
+async def test_reset_clears_theory_interactions_and_gate_stats():
+    workspace = _workspace()
+    for i in range(3):
+        await workspace.process_consciousness_cycle(
+            [_candidate(f"percept {i}", activation=0.9)]
+        )
+    manager = workspace.theory_interactions
+    assert manager.get_status()["cycle_count"] == 3
+    assert workspace.bottleneck.thalamic_gate.stats.total_candidates > 0
+
+    workspace.reset()
+
+    status = workspace.theory_interactions.get_status()
+    assert status["cycle_count"] == 0
+    assert status["active_interactions"] == 0
+    assert all(value == 0.0 for value in status["modulations"].values())
+    stats = workspace.bottleneck.thalamic_gate.stats
+    assert stats.total_candidates == 0
+    assert stats.total_gated == 0
+    assert workspace.bottleneck.cross_theory_bias == 0.0
+    # The reset modules keep their configuration and stay persistable
+    assert workspace.theory_interactions.config is manager.config
+    assert "theory_interactions" in workspace._persisted_submodules()
+    assert "thalamic_gate" in workspace._persisted_submodules()
+
+    # The next cycle starts from a fresh arousal history
+    state = await workspace.process_consciousness_cycle([_candidate("after reset")])
+    assert state.arousal_source == "default"
+
+
+def test_attention_schema_kwargs_reach_the_owned_module():
+    workspace = _workspace(
+        attention_schema_kwargs={
+            "provenance_mode": "legacy_strength",
+            "voluntary_boost": 0.35,
+        }
+    )
+    assert workspace.attention_schema.provenance_mode == "legacy_strength"
+    assert workspace.attention_schema.schema.provenance_mode == "legacy_strength"
+    assert workspace.attention_schema.voluntary_boost == pytest.approx(0.35)
+
+    # Omitted, the construction is the module's own defaults
+    default = _workspace()
+    assert default.attention_schema.provenance_mode == "typed"
+    assert default.attention_schema.voluntary_boost == pytest.approx(0.2)
+
+
 # ============================================================================
 # Cross-theory bias
 # ============================================================================
@@ -468,6 +579,7 @@ def test_extended_state_slots_default_to_none():
         "cross_level_promotions",
         "thalamic_gate_rate",
         "thalamic_gated_count",
+        "arousal_source",
         "architectural_phi",
         "phi_warming_up",
         "rpt_deep_recurrence",
@@ -496,6 +608,50 @@ async def test_hierarchical_fields_filled_in_hierarchical_mode():
     assert flat_state.level_winner_counts is None
     assert flat_state.dominant_hierarchy_level is None
     assert flat_state.cross_level_promotions is None
+
+
+@pytest.mark.asyncio
+async def test_dominant_level_reflects_admitted_level():
+    """A winner promoted from level 0 to 1 counts under level 1, not 0."""
+    workspace = _workspace(thalamic_gate_enabled=False)
+    state = await workspace.process_consciousness_cycle(
+        [_candidate("a vivid percept", activation=0.9, emotional=0.5)]
+    )
+    (winner,) = state.workspace_contents
+    assert winner.candidate.hierarchy_level == 0  # its source level
+    assert winner.admitted_level == 1
+    assert state.cross_level_promotions == 1
+    assert state.dominant_hierarchy_level == 1
+    assert state.level_winner_counts == {0: 0, 1: 1, 2: 0}
+
+    # Promoted twice, it counts under the executive level
+    twice = _workspace(thalamic_gate_enabled=False)
+    state = await twice.process_consciousness_cycle(
+        [_candidate("a vivid percept", activation=1.0, emotional=0.8)]
+    )
+    assert state.dominant_hierarchy_level == 2
+    assert state.level_winner_counts == {0: 0, 1: 0, 2: 1}
+
+    # An unpromoted winner stays at its own level
+    plain = _workspace(thalamic_gate_enabled=False)
+    state = await plain.process_consciousness_cycle(
+        [_candidate("a quiet percept", activation=0.5, emotional=0.0)]
+    )
+    assert state.dominant_hierarchy_level == 0
+    assert state.level_winner_counts == {0: 1, 1: 0, 2: 0}
+
+
+@pytest.mark.asyncio
+async def test_admitted_level_survives_persistence():
+    workspace = _workspace(thalamic_gate_enabled=False)
+    await workspace.process_consciousness_cycle(
+        [_candidate("a vivid percept", activation=0.9, emotional=0.5)]
+    )
+    saved = workspace.to_state_dict()
+    saved["histories"] = json.loads(json.dumps(saved["histories"]))
+    restored = _workspace(thalamic_gate_enabled=False)
+    restored.from_state_dict(saved)
+    assert [c.admitted_level for c in restored.stream_of_consciousness] == [1]
 
 
 @pytest.mark.asyncio

@@ -91,6 +91,13 @@ COMPETITION_HIERARCHICAL = "hierarchical"
 COMPETITION_FLAT = "flat"  # the v0.4.0 single-pool competition
 COMPETITION_MODES = (COMPETITION_HIERARCHICAL, COMPETITION_FLAT)
 
+# Where the thalamic gate's arousal came from in a cycle
+AROUSAL_SOURCE_CALLER = "caller"
+AROUSAL_SOURCE_EMOTIONAL_STATE = "emotional_state"
+AROUSAL_SOURCE_PAD = "pad"
+AROUSAL_SOURCE_DEFAULT = "default"
+NEUTRAL_AROUSAL = 0.5
+
 # The geometry of the workspace's own active inference model when no
 # config is passed (the compact world model's dimensions)
 _WORKSPACE_FEP_GEOMETRY: Dict[str, int] = {
@@ -251,6 +258,9 @@ class WorkspaceContent:
     salience: float = 0.0  # Final computed salience
     competition_rank: int = 0  # Rank in competition (1 = winner)
     competing_count: int = 0  # How many candidates competed
+    # Hierarchy level the content was finally admitted at, after promotion
+    # (None outside hierarchical competition)
+    admitted_level: Optional[int] = None
 
     # Broadcast tracking
     entry_time: float = field(default_factory=time.time)
@@ -406,13 +416,18 @@ class ConsciousnessState:
     # The slots below stay None until a producer fills them.
 
     # Hierarchical competition (filled in hierarchical mode)
-    dominant_hierarchy_level: Optional[int] = None  # Level of the top winner
+    # Both describe the level each winner was finally admitted at (after
+    # promotion), not the level of its source
+    dominant_hierarchy_level: Optional[int] = None  # Admitted level of the top winner
     level_winner_counts: Optional[Dict[int, int]] = None
     cross_level_promotions: Optional[int] = None
 
     # Thalamic gate (filled when the gate is enabled)
     thalamic_gate_rate: Optional[float] = None  # Share filtered this cycle
     thalamic_gated_count: Optional[int] = None  # Candidates filtered this cycle
+    # Where the gate's arousal came from this cycle: "caller", "emotional_state",
+    # "pad" or "default"; None when the gate is off
+    arousal_source: Optional[str] = None
 
     # IIT: integrated information from an attached PhiTracker
     architectural_phi: Optional[float] = None
@@ -847,6 +862,11 @@ class AttentionBottleneck:
                     salience=salience,
                     competition_rank=0,
                     competing_count=len(candidates),
+                    admitted_level=(
+                        candidate.hierarchy_level
+                        if candidate.hierarchy_level in levels
+                        else HIERARCHY_LEVELS["integrative"]
+                    ),
                     entry_time=time.time(),
                 )
             )
@@ -870,7 +890,11 @@ class AttentionBottleneck:
                     break
                 if winner.candidate.id in seen_ids:
                     continue
-                final_winners.append(best_copy[winner.candidate.id])
+                admitted = best_copy[winner.candidate.id]
+                # Merging goes from the highest level down, so the first slot
+                # a candidate takes is its highest: the level it was admitted at
+                admitted.admitted_level = level_idx
+                final_winners.append(admitted)
                 seen_ids.add(winner.candidate.id)
 
         # Re-rank by salience
@@ -1629,6 +1653,7 @@ class EnhancedGlobalWorkspace:
         thalamic_gate_config: Optional[ThalamicGateConfig] = None,
         theory_interaction_config: Optional[TheoryInteractionConfig] = None,
         phi_tracker: Optional[Any] = None,
+        attention_schema_kwargs: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize the Enhanced Global Workspace.
@@ -1668,6 +1693,8 @@ class EnhancedGlobalWorkspace:
             theory_interaction_config: Constants of the theory interactions.
             phi_tracker: Optional PhiTracker. Each cycle the final state is
                 recorded into it and its latest Phi fills architectural_phi.
+            attention_schema_kwargs: Keyword arguments for the workspace's
+                AttentionSchemaModule; None builds it with its defaults.
         """
         if competition_mode not in COMPETITION_MODES:
             raise ValueError(
@@ -1718,6 +1745,9 @@ class EnhancedGlobalWorkspace:
         # Duration of the last full cycle in milliseconds, the protoself's
         # response latency; None until a cycle has completed
         self._last_cycle_duration_ms: Optional[float] = None
+        # The previous cycle's final state; a caller that records PAD arousal
+        # on it gives the next cycle's gate its arousal
+        self._previous_state: Optional[ConsciousnessState] = None
 
         # Cross-cycle FEP feedback is stored on the bottleneck (see
         # AttentionBottleneck._prior_prediction_error) and updated
@@ -1725,7 +1755,7 @@ class EnhancedGlobalWorkspace:
 
         # Attention Schema (AST) - the system's self-model of attention
         # This allows the system to report on and voluntarily control its attention
-        self.attention_schema = AttentionSchemaModule()
+        self.attention_schema = AttentionSchemaModule(**(attention_schema_kwargs or {}))
 
         # Metacognition (HOT) - Thoughts about thoughts
         # This enables the system to think about its own thinking processes
@@ -1910,8 +1940,9 @@ class EnhancedGlobalWorkspace:
 
         # Step 2: Competition - who wins access to consciousness?
         gate = self.bottleneck.thalamic_gate
+        arousal_source: Optional[str] = None
         if gate is not None:
-            self._derive_arousal(emotional_state)
+            arousal_source = self._derive_arousal(emotional_state)
             gate_candidates_before = gate.stats.total_candidates
             gate_gated_before = gate.stats.total_gated
         if self.competition_mode == COMPETITION_HIERARCHICAL:
@@ -1925,7 +1956,8 @@ class EnhancedGlobalWorkspace:
         if gate is not None:
             seen = gate.stats.total_candidates - gate_candidates_before
             thalamic_gated_count = gate.stats.total_gated - gate_gated_before
-            thalamic_gate_rate = thalamic_gated_count / seen if seen > 0 else 0.0
+            # A cycle the gate saw nothing in has no rate (0 of 0)
+            thalamic_gate_rate = thalamic_gated_count / seen if seen > 0 else None
 
         # Track losers in unconscious buffer
         winner_ids = {w.candidate.id for w in winners}
@@ -2230,12 +2262,12 @@ class EnhancedGlobalWorkspace:
         cross_level_promotions: Optional[int] = None
         if self.competition_mode == COMPETITION_HIERARCHICAL:
             if winners and winners[0].candidate is not None:
-                dominant_hierarchy_level = winners[0].candidate.hierarchy_level
+                dominant_hierarchy_level = self._admitted_level(winners[0])
             level_winner_counts = {
                 level: sum(
                     1
                     for w in winners
-                    if w.candidate is not None and w.candidate.hierarchy_level == level
+                    if w.candidate is not None and self._admitted_level(w) == level
                 )
                 for level in sorted(AttentionBottleneck.LEVEL_CAPACITY)
             }
@@ -2303,8 +2335,10 @@ class EnhancedGlobalWorkspace:
             cross_level_promotions=cross_level_promotions,
             thalamic_gate_rate=thalamic_gate_rate,
             thalamic_gated_count=thalamic_gated_count,
+            arousal_source=arousal_source,
             timestamp=time.time(),
         )
+        self._previous_state = state
 
         # IIT: record this cycle into the PhiTracker and read its Phi
         if self.phi_tracker is not None:
@@ -2356,16 +2390,41 @@ class EnhancedGlobalWorkspace:
 
         return state
 
-    def _derive_arousal(self, emotional_state: Optional[Dict[str, float]]) -> None:
-        """Take the gate's arousal from the emotional state's "arousal" entry.
+    @staticmethod
+    def _admitted_level(winner: WorkspaceContent) -> Optional[int]:
+        """The level a winner was finally admitted at, after promotion.
 
-        Skipped once a caller has supplied arousal through set_arousal; a
-        missing or non-finite entry leaves the current arousal in place.
+        Falls back to the candidate's own level for content that did not come
+        through hierarchical competition.
         """
-        if self.bottleneck.arousal_supplied or not emotional_state:
-            return
-        if "arousal" in emotional_state:
-            self.bottleneck._apply_arousal(emotional_state["arousal"])
+        if winner.admitted_level is not None:
+            return winner.admitted_level
+        return winner.candidate.hierarchy_level if winner.candidate else None
+
+    def _derive_arousal(self, emotional_state: Optional[Dict[str, float]]) -> str:
+        """Set the gate's arousal for this cycle and return where it came from.
+
+        A caller that supplied arousal through set_arousal owns it
+        ("caller"). Otherwise the emotional state's "arousal" entry is used
+        ("emotional_state"), then the PAD arousal a caller recorded on the
+        previous cycle's state ("pad"), then the gate's neutral default
+        ("default"). A missing or non-finite value falls through to the next
+        source.
+        """
+        bottleneck = self.bottleneck
+        if bottleneck.arousal_supplied:
+            return AROUSAL_SOURCE_CALLER
+        if emotional_state and bottleneck._apply_arousal(
+            emotional_state.get("arousal")
+        ):
+            return AROUSAL_SOURCE_EMOTIONAL_STATE
+        previous = self._previous_state
+        if previous is not None and bottleneck._apply_arousal(
+            getattr(previous, "pad_arousal", None)
+        ):
+            return AROUSAL_SOURCE_PAD
+        bottleneck._apply_arousal(NEUTRAL_AROUSAL)
+        return AROUSAL_SOURCE_DEFAULT
 
     def _update_phi(self, state: ConsciousnessState) -> None:
         """Record the state into the PhiTracker and fill the Phi slots."""
@@ -2928,7 +2987,20 @@ class EnhancedGlobalWorkspace:
         self._last_ignition_time_ms = -1000.0
         self._simulated_time_ms = 0.0
         self._last_cycle_duration_ms = None
+        self._previous_state = None
         self.bottleneck.cross_theory_bias = 0.0
+        # The theory interactions (smoothed signals, cycle count) and the
+        # thalamic gate (statistics, habituation window) restart as new
+        # objects built from the same constants
+        if self.theory_interactions is not None:
+            self.theory_interactions = TheoryInteractionManager(
+                self.theory_interactions.config,
+                phi_normalizer=self._phi_normalizer(),
+            )
+        if self.bottleneck.thalamic_gate is not None:
+            self.bottleneck.thalamic_gate = ThalamicGate(
+                self.bottleneck.thalamic_gate.config
+            )
         logger.info("Global Workspace reset to initial state")
 
     # =========================================================================
@@ -3183,6 +3255,13 @@ def _int_or(value: Any, default: int) -> int:
         return default
 
 
+def _optional_int(value: Any) -> Optional[int]:
+    try:
+        return None if value is None else int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _stable_digest(text: str) -> str:
     """A digest of novelty content that is stable across processes."""
     return hashlib.blake2b(
@@ -3269,6 +3348,9 @@ def _content_to_record(content: WorkspaceContent) -> Dict[str, Any]:
         "salience": _finite_or(content.salience, 0.0),
         "competition_rank": int(content.competition_rank),
         "competing_count": int(content.competing_count),
+        "admitted_level": (
+            None if content.admitted_level is None else int(content.admitted_level)
+        ),
         "entry_time": _finite_or(content.entry_time, 0.0),
         "broadcast_complete": bool(content.broadcast_complete),
         "broadcast_recipients": [str(r) for r in content.broadcast_recipients],
@@ -3286,6 +3368,7 @@ def _content_from_record(record: Dict[str, Any]) -> WorkspaceContent:
         salience=float(record.get("salience", 0.0)),
         competition_rank=int(record.get("competition_rank", 0)),
         competing_count=int(record.get("competing_count", 0)),
+        admitted_level=_optional_int(record.get("admitted_level")),
         entry_time=float(record.get("entry_time", time.time())),
         broadcast_complete=bool(record.get("broadcast_complete", False)),
         broadcast_recipients=[str(r) for r in record.get("broadcast_recipients", [])],

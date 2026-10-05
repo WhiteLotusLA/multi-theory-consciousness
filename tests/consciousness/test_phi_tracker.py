@@ -560,3 +560,20 @@ class TestPersistence:
         np.testing.assert_array_equal(
             restored.transition_counts, tracker.transition_counts
         )
+
+
+class TestStructureCounts:
+    def test_structure_counts_none_when_result_lacks_them(self):
+        # A system irreducibility result carries no distinctions or relations
+        bare = SimpleNamespace(phi=0.4, intrinsic_differentiation={"cause": 0.1})
+        assert PhiTracker._phi_structure_counts(bare) == (None, None)
+        # One of the two is not enough
+        only_distinctions = SimpleNamespace(distinctions=[1, 2, 3])
+        assert PhiTracker._phi_structure_counts(only_distinctions) == (None, None)
+        # Exposed but not countable
+        uncountable = SimpleNamespace(distinctions=object(), relations=object())
+        assert PhiTracker._phi_structure_counts(uncountable) == (None, None)
+
+    def test_structure_counts_read_a_result_that_exposes_them(self):
+        structure = SimpleNamespace(distinctions=[1, 2, 3], relations=[1, 2])
+        assert PhiTracker._phi_structure_counts(structure) == (3, 2)

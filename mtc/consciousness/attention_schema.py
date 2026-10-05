@@ -1264,6 +1264,9 @@ Response:"""
                 "capacity_used": schema.attention_capacity_used,
                 "prediction_confidence": schema.prediction_confidence,
                 "state_duration": schema.state_duration_seconds,
+                # Whether the schema reports updates to its module; the
+                # legacy provenance mode drops the back-reference
+                "owner_set": schema._owner is not None,
                 "current_focus": focus.summary if focus else "",
                 "focus_intensity": focus.attention_strength if focus else 0.0,
             },
@@ -1322,7 +1325,9 @@ Response:"""
             uncertain_shifts=int(s.get("uncertain_shifts", 0)),
             provenance_mode=self.provenance_mode,
         )
-        self.schema._owner = self
+        # States saved before owner_set existed always had an owner
+        if bool(s.get("owner_set", True)):
+            self.schema._owner = self
 
         self.prediction_accuracy_history = [
             bool(x) for x in h.get("prediction_accuracy_history", [])

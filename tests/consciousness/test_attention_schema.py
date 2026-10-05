@@ -873,6 +873,30 @@ class TestPersistence:
         assert target.shift_type is None
         assert restored.schema.current_focus is None
 
+    @pytest.mark.asyncio
+    async def test_restore_keeps_owner_unset_when_it_was_unset(self):
+        # The legacy provenance mode drops the schema's owner on every update
+        legacy = AttentionSchemaModule(provenance_mode="legacy_strength")
+        await legacy.update_schema(self._state_with("a legacy topic", 0.7))
+        assert legacy.schema._owner is None
+        saved = legacy.to_state_dict()
+        assert saved["scalars"]["owner_set"] is False
+
+        restored = AttentionSchemaModule(provenance_mode="legacy_strength")
+        restored.from_state_dict(saved)
+        assert restored.schema._owner is None
+
+        # A schema that had its owner gets it back, as does a state saved
+        # before the owner_set scalar existed
+        typed = await self._populated_module()
+        saved = typed.to_state_dict()
+        assert saved["scalars"]["owner_set"] is True
+        for scalars in (saved["scalars"], {}):
+            fresh = AttentionSchemaModule()
+            fresh.schema._owner = None
+            fresh.from_state_dict({"scalars": scalars, "histories": {}})
+            assert fresh.schema._owner is fresh
+
 
 # ============================================================================
 # RUN TESTS

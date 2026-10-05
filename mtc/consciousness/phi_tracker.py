@@ -607,20 +607,20 @@ class PhiTracker:
 
     @staticmethod
     def _phi_structure_counts(sia_result: Any) -> Tuple[Optional[int], Optional[int]]:
-        """Distinction and relation counts when the SIA carries them."""
-        structure = getattr(sia_result, "intrinsic_differentiation", None)
-        if structure is None:
+        """Distinction and relation counts, or (None, None) without them.
+
+        A system irreducibility result does not carry a phi structure; only
+        a result type that exposes both ``distinctions`` and ``relations``
+        (the installed PyPhi's ``PhiStructure``) yields counts.
+        """
+        distinctions = getattr(sia_result, "distinctions", None)
+        relations = getattr(sia_result, "relations", None)
+        if distinctions is None or relations is None:
             return None, None
-        distinctions = None
-        relations = None
         try:
-            if hasattr(structure, "distinctions"):
-                distinctions = len(structure.distinctions)
-            if hasattr(structure, "relations"):
-                relations = len(structure.relations)
-        except Exception:  # structure present but not countable
+            return len(distinctions), len(relations)
+        except TypeError:  # exposed but not countable
             return None, None
-        return distinctions, relations
 
     # ========================================================================
     # Persistence
