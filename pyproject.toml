@@ -40,6 +40,7 @@ dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -65,6 +66,9 @@ assessment = [
     "anthropic>=0.50",
     "requests>=2.28",
 ]
+embeddings = [
+    "sentence-transformers>=2.2",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
@@ -78,7 +82,7 @@ iit = [
     "pyphi @ git+https://github.com/wmayner/pyphi.git@46ca11273f676b0c91eb79860f34f4ee63dc7a6e ; python_version >= '3.12'",
 ]
 all = [
-    "multi-theory-consciousness[neural,fep,databases,assessment,dev]",
+    "multi-theory-consciousness[neural,fep,databases,assessment,embeddings,dev]",
 ]
 
 [project.urls]
