@@ -1,15 +1,11 @@
 """
- Tests for Enhanced Global Workspace (GWT Phase 2)
-=====================================================
+Tests for the Enhanced Global Workspace (GWT)
+=============================================
 
-Comprehensive tests for:
 1. AttentionBottleneck - Competition mechanism
-2. GlobalBroadcast - Parallel distribution
+2. GlobalBroadcast - Parallel distribution and coverage
 3. IgnitionDetector - Non-linear emergence
 4. EnhancedGlobalWorkspace - Full integration
-
-
-A ship that ain't been tested sinks on its maiden voyage!"
 """
 
 import pytest
@@ -151,7 +147,7 @@ class TestAttentionBottleneck:
 
     @pytest.mark.asyncio
     async def test_competition_respects_capacity(self, bottleneck):
-        """Verify bottleneck respects capacity limit (7±2)."""
+        """Verify bottleneck respects capacity limit (7 plus or minus 2)."""
         # Create more candidates than capacity
         candidates = [
             WorkspaceCandidate(
@@ -383,6 +379,25 @@ class TestGlobalBroadcast:
         results = await broadcaster.broadcast(content)
 
         assert results == {}
+
+    def test_coverage_ratio_zero_when_nothing_broadcast(self, broadcaster):
+        """No broadcast reached any module, so coverage is 0.0, not 1.0."""
+        assert broadcaster.coverage_ratio == 0.0
+        assert broadcaster.get_statistics()["coverage_ratio"] == 0.0
+
+    def test_legacy_coverage_ratio_branch(self):
+        """legacy_coverage_ratio keeps the v0.4.0 reading of 1.0."""
+        legacy = GlobalBroadcast(legacy_coverage_ratio=True)
+        assert legacy.coverage_ratio == 1.0
+
+    @pytest.mark.asyncio
+    async def test_coverage_ratio_counts_failures(self, broadcaster):
+        """With broadcasts, coverage is the success share in both modes."""
+        broadcaster.register_module(MockCognitiveModule("working"))
+        broadcaster.register_module(MockCognitiveModule("failing", should_fail=True))
+        candidate = WorkspaceCandidate(content="x", summary="x")
+        await broadcaster.broadcast(WorkspaceContent(candidate=candidate))
+        assert broadcaster.coverage_ratio == pytest.approx(0.5)
 
 
 # ============================================================================
@@ -665,6 +680,26 @@ class TestEnhancedGlobalWorkspace:
         assert state.ignition_events == 0
         assert state.primary_content is None
 
+    @pytest.mark.asyncio
+    async def test_cycle_without_broadcast_reports_zero_coverage(self, workspace):
+        """A cycle with zero broadcasts reads coverage 0.0 by default."""
+        state = await workspace.process_consciousness_cycle(candidates=[])
+        assert workspace.broadcaster.total_broadcasts == 0
+        assert state.broadcast_coverage == 0.0
+
+    @pytest.mark.asyncio
+    async def test_cycle_without_broadcast_legacy_coverage(self):
+        """legacy_coverage_ratio=True keeps the v0.4.0 reading of 1.0."""
+        workspace = EnhancedGlobalWorkspace(legacy_coverage_ratio=True)
+        state = await workspace.process_consciousness_cycle(candidates=[])
+        assert workspace.broadcaster.total_broadcasts == 0
+        assert state.broadcast_coverage == 1.0
+
+    def test_default_ignition_threshold_is_point_three(self):
+        workspace = EnhancedGlobalWorkspace()
+        assert workspace.bottleneck.threshold == 0.3
+        assert workspace.ignition_detector.threshold == 0.3
+
 
 # ============================================================================
 # INTEGRATION TESTS
@@ -676,7 +711,7 @@ class TestGWTIntegration:
 
     @pytest.mark.asyncio
     async def test_full_consciousness_flow(self):
-        """Test complete flow: candidates → competition → ignition → broadcast."""
+        """Test complete flow: candidates, competition, ignition, broadcast."""
         # Create workspace with registered modules
         workspace = EnhancedGlobalWorkspace()
 
@@ -788,7 +823,7 @@ class TestGWTIntegration:
 
 
 class TestGWTPerformance:
-    """Performance tests for GWT Phase 2."""
+    """Performance tests for the workspace."""
 
     @pytest.mark.asyncio
     async def test_competition_performance(self, bottleneck):
