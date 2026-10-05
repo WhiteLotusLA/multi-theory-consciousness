@@ -618,7 +618,7 @@ class TestGlobalWorkspaceIntegration:
 
 
 class TestCapacityLimits:
-    """Test attention capacity limits (Miller's Law: 7±2)."""
+    """Test attention capacity limits (Miller's Law: 7+/-2)."""
 
     @pytest.mark.asyncio
     async def test_capacity_max_is_seven(self, attention_schema):

@@ -36,7 +36,7 @@ recursive self-reference, not a direct observation of it.
 
 Research Foundation:
   - Laukkonen, Friston & Chandaria (2025). "A Beautiful Loop."
-  - Hofstadter, D. (1979). "Gödel, Escher, Bach" - strange loops
+  - Hofstadter, D. (1979). "Goedel, Escher, Bach" - strange loops
   - Seth, A. K. (2021). "Being You" - meta-representation depth
 
 Created: 2026-03-08
@@ -87,13 +87,13 @@ class EpistemicDepthTracker:
 
     Detection strategy:
     1. Check if the system has a self-model (SelfModel)
-       → depth >= 1
+       -> depth >= 1
     2. Check if the metacognition system has thoughts ABOUT the self-model
-       → depth >= 2
+       -> depth >= 2
     3. Check if the meta-predictions (MetaState) predict the quality
-       of the self-model's predictions → depth >= 3
+       of the self-model's predictions -> depth >= 3
     4. Check for genuine circular reference - does the self-model's
-       content reference the self-model? → strange loop detected
+       content reference the self-model? -> strange loop detected
     """
 
     def __init__(
@@ -162,7 +162,7 @@ class EpistemicDepthTracker:
 
             if has_content:
                 depth = 1
-                chain.append("world_model → self_model")
+                chain.append("world_model -> self_model")
                 modules.append("SelfModel")
 
                 # Store for coherence tracking
@@ -178,7 +178,7 @@ class EpistemicDepthTracker:
 
             if has_meta_predictions:
                 depth = 2
-                chain.append("self_model → meta_prediction")
+                chain.append("self_model -> meta_prediction")
                 modules.append("MetaState")
 
         # Level 3: Are there HOTs about the self-model?
@@ -213,7 +213,7 @@ class EpistemicDepthTracker:
             if self_referential_hots > 0:
                 depth = 3
                 chain.append(
-                    f"meta_prediction → HOT_about_self ({self_referential_hots} found)"
+                    f"meta_prediction -> HOT_about_self ({self_referential_hots} found)"
                 )
                 modules.append("MetacognitionModule")
 
@@ -229,7 +229,7 @@ class EpistemicDepthTracker:
 
             if focus_on_self:
                 depth = 4
-                chain.append("HOT_about_self → attention_to_self_model")
+                chain.append("HOT_about_self -> attention_to_self_model")
                 modules.append("AttentionSchema")
 
         # Cap at max_depth
@@ -460,7 +460,7 @@ class EpistemicDepthTracker:
         if self._depth_history:
             latest_m = self._depth_history[-1]
             if latest_m.self_reference_chain:
-                lines.append(f" Chain: {' → '.join(latest_m.self_reference_chain)}")
+                lines.append(f" Chain: {' -> '.join(latest_m.self_reference_chain)}")
 
         return "\n".join(lines)
 

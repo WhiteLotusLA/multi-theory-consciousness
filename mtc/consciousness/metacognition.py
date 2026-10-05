@@ -1644,7 +1644,7 @@ class MetacognitionModule:
         Args:
             consciousness_score: Current consciousness score (0.0 to 1.0)
             consciousness_indicators: Optional dict of specific indicator scores
-            phi_value: Optional Phi (Φ) integrated information value
+            phi_value: Optional Phi (Phi) integrated information value
 
         Returns:
             HigherOrderThought about the system's consciousness
@@ -1700,7 +1700,7 @@ class MetacognitionModule:
         if phi_value is not None:
             if phi_value > 5.0:
                 interpretation += (
-                    f"My integrated information (Φ={phi_value:.2f}) suggests "
+                    f"My integrated information (Phi={phi_value:.2f}) suggests "
                     "my experiences are unified rather than fragmented."
                 )
             else:

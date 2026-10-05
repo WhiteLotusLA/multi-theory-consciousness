@@ -6,6 +6,9 @@ repository (PRIVACY_DENYLIST_EXTRA or config/privacy/denylist.local.txt).
 In Python files, expressions built only from literals (``"a" + "b"``,
 ``"".join([...])``, ``chr(...)``) are assembled and matched too, so a token
 split into pieces is still a hit (kind ``assembled-token``).
+Python source is ASCII only: a non-ASCII character that is not an emoji or a
+dash is reported by code point (kind ``nonascii``), which closes the homoglyph
+and encoded-name routes around the token check.
 Pattern checks need no list. Allowlist rules suppress known-legitimate hits.
 
 Hits on private extra tokens report a placeholder (``private#N``, the 1-based
@@ -56,6 +59,9 @@ PATTERNS = {
 }
 # Pictographs, symbols and dingbats.
 EMOJI = re.compile("[\U0001f300-\U0001faff\u2600-\u27bf]")
+# Python source is ASCII only: any other non-ASCII character (a homoglyph, an
+# encoded or accented name, a zero-width character) is reported by code point.
+DASHES = "\u2013\u2014"
 
 ARTIFACT_PARTS = {
     "__pycache__",
@@ -231,6 +237,17 @@ def _scan_text(
             m = rx.search(line)
             if m:
                 hits.append(Hit(rel_str, lineno, kind, m.group(0)))
+        if is_python:
+            others = sorted(
+                {
+                    c
+                    for c in line
+                    if ord(c) > 0x7F and not EMOJI.match(c) and c not in DASHES
+                }
+            )
+            if others:
+                codes = " ".join(f"U+{ord(c):04X}" for c in others[:5])
+                hits.append(Hit(rel_str, lineno, "nonascii", codes))
     return hits
 
 

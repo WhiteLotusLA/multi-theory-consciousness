@@ -33,16 +33,16 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
-    # ── 1. Initialize consciousness modules ──────────────────────────
+    # -- 1. Initialize consciousness modules --------------------------
     workspace = EnhancedGlobalWorkspace(capacity=7, ignition_threshold=0.3)
     attention = AttentionSchemaModule()
     metacognition = MetacognitionModule()
     active_inference = ActiveInferenceModule()
 
-    # ── 2. Create the assessment framework ───────────────────────────
+    # -- 2. Create the assessment framework ---------------------------
     assessment = ConsciousnessAssessment()
 
-    # ── 3. Run the full assessment ───────────────────────────────────
+    # -- 3. Run the full assessment -----------------------------------
     #   On a fresh system most scores will be low because no cycles
     #   have been run yet.  Running consciousness cycles first (see
     #   multi_theory_pipeline.py) will raise scores significantly.
@@ -53,7 +53,7 @@ async def main():
         active_inference=active_inference,
     )
 
-    # ── 4. Print results ─────────────────────────────────────────────
+    # -- 4. Print results ---------------------------------------------
     print("\n" + "=" * 60)
     print("  CONSCIOUSNESS ASSESSMENT REPORT")
     print("=" * 60)

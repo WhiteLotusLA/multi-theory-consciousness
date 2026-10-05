@@ -59,9 +59,9 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # 1.  Initialize all theory modules
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     workspace = EnhancedGlobalWorkspace(capacity=7, ignition_threshold=0.3)
     attention = AttentionSchemaModule()
     metacognition = MetacognitionModule()
@@ -73,9 +73,9 @@ async def main():
     print("  MULTI-THEORY CONSCIOUSNESS PIPELINE")
     print("=" * 64)
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # 2.  Create a stimulus to process
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     candidates = [
         WorkspaceCandidate(
             content="novel pattern detected in input stream",
@@ -106,11 +106,11 @@ async def main():
         ),
     ]
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # 3.  Run the GWT consciousness cycle (steps 1-8 internally)
     #     This also triggers AST, HOT, FEP, Beautiful Loop, and Damasio
     #     if they are wired into the workspace.
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     print("\n  Step 1: Running GWT consciousness cycle ...")
     state = await workspace.process_consciousness_cycle(candidates)
     print(f"    Conscious: {state.is_conscious}")
@@ -118,9 +118,9 @@ async def main():
     if state.primary_content:
         print(f"    Winner:    {state.primary_content.candidate.summary}")
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # 4.  AST: Update the attention schema
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     print("\n  Step 2: Updating Attention Schema (AST) ...")
     if state.primary_content:
         target = AttentionTarget(
@@ -136,9 +136,9 @@ async def main():
     report = await attention.report_attention()
     print(f"    Attention report: {report}")
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # 5.  HOT: Generate higher-order thoughts about workspace content
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     print("\n  Step 3: Generating Higher-Order Thoughts (HOT) ...")
     if state.primary_content:
         first_order = metacognition.register_first_order_state(
@@ -157,9 +157,9 @@ async def main():
             print(f"    HOT generated: {hot.summary}")
             print(f"    Meta-level:    {hot.meta_level.name}")
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # 6.  FEP: Run active inference on an observation
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     print("\n  Step 4: Running Active Inference (FEP) ...")
     observation = np.random.dirichlet(np.ones(5))  # 5 observation channels
     inference_result = await active_inference.infer_and_act(observation)
@@ -168,9 +168,9 @@ async def main():
     print(f"    Selected action:   {inference_result.selected_action}")
     print(f"    Action confidence: {inference_result.action_confidence:.3f}")
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # 7.  Beautiful Loop: Measure recursive self-reference
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     print("\n  Step 5: Processing Beautiful Loop (BLT) ...")
     moment = await beautiful_loop.process_conscious_moment(
         workspace_winners=state.workspace_contents,
@@ -181,9 +181,9 @@ async def main():
     print(f"    Binding quality:    {moment.binding_quality:.3f}")
     print(f"    Field-evidencing:   {moment.is_field_evidencing}")
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # 8.  Damasio: Three-layer consciousness enrichment
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     print("\n  Step 6: Running Damasio Three-Layer Model ...")
     homeostatic_drives = active_inference.homeostatic_drives
     damasio_state = await damasio.process(
@@ -198,9 +198,9 @@ async def main():
         f"{damasio_state['autobiographic_continuity']:.3f}"
     )
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # 9.  Run the full consciousness assessment
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     print("\n  Step 7: Running consciousness assessment ...")
     assessment = ConsciousnessAssessment()
     report = await assessment.run_full_assessment(

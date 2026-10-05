@@ -92,7 +92,7 @@ class HyperModel:
     predictive processing framework.
 
     The key computation is a Bayesian update on precision beliefs:
-      precision(level) ∝ 1 / variance(prediction_errors at level)
+      precision(level) proportional to 1 / variance(prediction_errors at level)
 
     Levels that consistently produce small prediction errors get high
     precision (the system trusts them). Levels with noisy, variable
@@ -117,7 +117,7 @@ class HyperModel:
         # Per-level precision beliefs - start at moderate confidence
         self.precision_beliefs = np.ones(num_levels) * 1.0
 
-        # Context-dependent precision: context_key → precision_weights
+        # Context-dependent precision: context_key -> precision_weights
         # Allows the system to learn that e.g. "social" contexts make
         # level 2 (abstract) more reliable than level 0 (sensory)
         self.context_precision_map: Dict[str, np.ndarray] = {}
@@ -400,7 +400,7 @@ class HyperModel:
         )
 
     def get_global_precision_state(self) -> Dict[int, float]:
-        """Get simple dict of level → precision for external consumers."""
+        """Get simple dict of level -> precision for external consumers."""
         return {i: float(self.precision_beliefs[i]) for i in range(self.num_levels)}
 
     def get_precision_trend(self) -> Dict[int, str]:
@@ -438,7 +438,7 @@ class HyperModel:
         lines = ["Precision allocation across predictive hierarchy:"]
         for level, precision in state.level_precisions.items():
             name = level_names.get(level, f"level_{level}")
-            bar = "█" * int(precision * 5)
+            bar = "#" * int(precision * 5)
             lines.append(f" {name}: {precision:.3f} {bar}")
 
         lines.append(

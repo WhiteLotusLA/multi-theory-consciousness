@@ -95,7 +95,7 @@ def test_non_utf8_text_file_is_flagged_and_still_scanned(tmp_path):
     p = tmp_path / "latin1.py"
     p.write_bytes(f"# caf\xe9 for {PLANTED}\n".encode("latin-1"))
     kinds = sorted(h.kind for h in run_audit([p], denylist=[PLANTED], allowlist=[]))
-    assert kinds == ["encoding", "token"]
+    assert kinds == ["encoding", "nonascii", "token"]
 
 
 def test_utf16_text_file_is_flagged_and_still_scanned(tmp_path):
@@ -186,3 +186,33 @@ def test_whole_literal_is_not_double_reported(tmp_path):
     f = write(tmp_path, "m.py", 'x = "Plantedname" + "!"\n')
     hits = run_audit([f], denylist=[PLANTED], allowlist=[])
     assert [h.kind for h in hits] == ["token"]
+
+
+def test_non_ascii_in_python_is_reported_by_code_point(tmp_path):
+    f = write(tmp_path, "m.py", 'x = "caf\u00e9"\n')
+    hits = run_audit([f], denylist=[], allowlist=[])
+    assert [(h.kind, h.line, h.match) for h in hits] == [("nonascii", 1, "U+00E9")]
+
+
+def test_homoglyph_in_identifier_is_reported(tmp_path):
+    # Cyrillic small a inside an otherwise Latin name
+    f = write(tmp_path, "m.py", "n\u0430me = 1\n")
+    hits = run_audit([f], denylist=[], allowlist=[])
+    assert [(h.kind, h.match) for h in hits] == [("nonascii", "U+0430")]
+
+
+def test_zero_width_character_is_reported(tmp_path):
+    f = write(tmp_path, "m.py", 'x = "a\u200bb"\n')
+    hits = run_audit([f], denylist=[], allowlist=[])
+    assert [(h.kind, h.match) for h in hits] == [("nonascii", "U+200B")]
+
+
+def test_non_ascii_outside_python_is_not_a_hit(tmp_path):
+    f = write(tmp_path, "m.md", "caf\u00e9 and n\u0430me\n")
+    assert run_audit([f], denylist=[], allowlist=[]) == []
+
+
+def test_dash_and_emoji_keep_their_own_kinds_in_python(tmp_path):
+    f = write(tmp_path, "m.py", f"a = 1  # {EM_DASH}\nb = 2  # \U0001f600\n")
+    kinds = [(h.kind, h.line) for h in run_audit([f], denylist=[], allowlist=[])]
+    assert kinds == [("dash", 1), ("emoji", 2)]

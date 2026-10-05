@@ -17,7 +17,6 @@ Usage:
 
 import asyncio
 import logging
-import numpy as np
 
 from mtc.consciousness.enhanced_global_workspace import (
     EnhancedGlobalWorkspace,
@@ -30,14 +29,14 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
-    # ── 1. Create a Global Workspace ─────────────────────────────────
+    # -- 1. Create a Global Workspace ---------------------------------
     workspace = EnhancedGlobalWorkspace(
-        capacity=7,               # 7 +/- 2 items (Miller's law)
-        ignition_threshold=0.3,   # Salience needed to ignite
-        amplification_factor=2.0, # Post-ignition boost
+        capacity=7,  # 7 +/- 2 items (Miller's law)
+        ignition_threshold=0.3,  # Salience needed to ignite
+        amplification_factor=2.0,  # Post-ignition boost
     )
 
-    # ── 2. Build candidates competing for conscious access ───────────
+    # -- 2. Build candidates competing for conscious access -----------
     candidates = [
         WorkspaceCandidate(
             content="visual scene of a sunset",
@@ -77,10 +76,10 @@ async def main():
         ),
     ]
 
-    # ── 3. Run a consciousness cycle ─────────────────────────────────
+    # -- 3. Run a consciousness cycle ---------------------------------
     state = await workspace.process_consciousness_cycle(candidates)
 
-    # ── 4. Inspect results ───────────────────────────────────────────
+    # -- 4. Inspect results -------------------------------------------
     print("\n" + "=" * 60)
     print("  GLOBAL WORKSPACE: CONSCIOUSNESS CYCLE RESULT")
     print("=" * 60)
@@ -92,7 +91,7 @@ async def main():
 
     if state.primary_content:
         pc = state.primary_content
-        print(f"\n  Primary content:")
+        print("\n  Primary content:")
         print(f"    Summary:   {pc.candidate.summary}")
         print(f"    Source:    {pc.candidate.source.value}")
         print(f"    Salience:  {pc.salience:.3f}")

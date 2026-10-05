@@ -61,11 +61,11 @@ class TestHyperModel:
     def test_update_precision_beliefs_low_error(self, hyper_model):
         """Low prediction errors increase precision (more trust)."""
         initial = hyper_model.precision_beliefs.copy()
-        # Very low errors → system should increase precision
+        # Very low errors -> system should increase precision
         for _ in range(10):
             hyper_model.update_precision_beliefs([0.01, 0.01, 0.01])
 
-        # Precision should increase (low error → high reliability)
+        # Precision should increase (low error -> high reliability)
         for i in range(3):
             assert hyper_model.precision_beliefs[i] >= initial[i]
 
@@ -76,7 +76,7 @@ class TestHyperModel:
             hyper_model.update_precision_beliefs([0.5, 0.5, 0.5])
         mid_precision = hyper_model.precision_beliefs.copy()
 
-        # Deterministically high AND variable errors → variance-based precision drops.
+        # Deterministically high AND variable errors -> variance-based precision drops.
         # Alternating between extremes guarantees high variance across the window.
         high_var_patterns = [
             [0.1, 0.1, 0.1],
@@ -93,7 +93,7 @@ class TestHyperModel:
         for errors in high_var_patterns:
             hyper_model.update_precision_beliefs(errors)
 
-        # Precision should decrease (noisy errors → low reliability)
+        # Precision should decrease (noisy errors -> low reliability)
         for i in range(3):
             assert hyper_model.precision_beliefs[i] < mid_precision[i]
 
@@ -136,7 +136,7 @@ class TestHyperModel:
         assert level2.precision == pytest.approx(2.0)
 
     def test_get_global_precision_state(self, hyper_model):
-        """Global precision state returns dict of level → precision."""
+        """Global precision state returns dict of level -> precision."""
         state = hyper_model.get_global_precision_state()
         assert isinstance(state, dict)
         assert len(state) == 3
@@ -244,7 +244,7 @@ class TestBayesianBinding:
             self._make_inference("c", [0.51, 0.29, 0.20], salience=0.6),
         ]
         percept = binding.bind_inferences(infs, prior_uncertainty=0.5)
-        # More evidence → less uncertainty
+        # More evidence -> less uncertainty
         assert percept.total_uncertainty_reduction >= 0.0
 
     def test_max_bound_inferences_respected(self, binding):
@@ -303,12 +303,12 @@ class TestEpistemicDepthTracker:
         return EpistemicDepthTracker(max_depth=5)
 
     def test_no_modules_depth_zero(self, tracker):
-        """No modules → depth 0."""
+        """No modules -> depth 0."""
         depth = tracker.measure_depth()
         assert depth == 0
 
     def test_self_model_depth_one(self, tracker):
-        """Active self-model → depth 1."""
+        """Active self-model -> depth 1."""
         mock_self_model = Mock()
         mock_self_model.update_count = 5
         mock_self_model.current_focus = "conversation"
@@ -319,7 +319,7 @@ class TestEpistemicDepthTracker:
         assert depth >= 1
 
     def test_meta_state_depth_two(self, tracker):
-        """Active self-model + meta predictions → depth 2."""
+        """Active self-model + meta predictions -> depth 2."""
         mock_self_model = Mock()
         mock_self_model.update_count = 5
         mock_self_model.current_focus = "thinking"
@@ -339,7 +339,7 @@ class TestEpistemicDepthTracker:
         assert depth >= 2
 
     def test_hots_about_self_depth_three(self, tracker):
-        """HOTs about self-model → depth 3."""
+        """HOTs about self-model -> depth 3."""
         mock_self_model = Mock()
         mock_self_model.update_count = 5
         mock_self_model.current_focus = "reflection"
@@ -363,7 +363,7 @@ class TestEpistemicDepthTracker:
         assert depth >= 3
 
     def test_attention_to_self_depth_four(self, tracker):
-        """Attention focused on self-model → depth 4."""
+        """Attention focused on self-model -> depth 4."""
         mock_self_model = Mock()
         mock_self_model.update_count = 5
         mock_self_model.current_focus = "self"

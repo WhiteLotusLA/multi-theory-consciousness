@@ -262,9 +262,9 @@ class BayesianBinding:
         self._binding_quality_history.append(binding_quality)
 
         logger.debug(
-            f"Binding: {len(candidates)} candidates → "
+            f"Binding: {len(candidates)} candidates -> "
             f"{len(bound)} bound, quality={binding_quality:.3f}, "
-            f"ΔU={uncertainty_reduction:.3f}"
+            f"DeltaU={uncertainty_reduction:.3f}"
         )
 
         return percept
@@ -357,7 +357,7 @@ class BayesianBinding:
 
         MI is approximated from the belief vectors: two inferences
         with similar belief distributions share more information.
-        Specifically, MI(A;B) ≈ H(A) + H(B) - H(A,B), estimated
+        Specifically, MI(A;B) ~ H(A) + H(B) - H(A,B), estimated
         from the belief vector correlation and entropies.
         """
         n = len(candidates)
@@ -401,7 +401,7 @@ class BayesianBinding:
         correlation captures the linear dependence which is a good
         approximation for our purposes.
 
-        MI ≈ -0.5 * ln(1 - ρ²), where ρ is the correlation.
+        MI ~ -0.5 * ln(1 - rho^2), where rho is the correlation.
         This is the exact MI for jointly Gaussian variables.
         """
         # Normalize to same length
@@ -418,7 +418,7 @@ class BayesianBinding:
         if np.isnan(correlation):
             return 0.0
 
-        # MI for Gaussian: -0.5 * ln(1 - ρ²)
+        # MI for Gaussian: -0.5 * ln(1 - rho^2)
         rho_sq = correlation**2
         rho_sq = min(rho_sq, 0.999)  # Avoid log(0)
         mi = -0.5 * np.log(1.0 - rho_sq)
@@ -533,7 +533,7 @@ class BayesianBinding:
         # Average uncertainty, reduced by the number of bound inferences
         # (more evidence = less uncertainty)
         avg_uncertainty = np.mean([inf.uncertainty for inf in bound])
-        reduction_factor = 1.0 / np.sqrt(len(bound))  # √N reduction
+        reduction_factor = 1.0 / np.sqrt(len(bound))  # sqrtN reduction
         return float(avg_uncertainty * reduction_factor)
 
     def _empty_percept(self) -> BoundPercept:

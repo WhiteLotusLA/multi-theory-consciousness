@@ -39,15 +39,15 @@ def main():
     print("  NEURAL SUBSTRATE PIPELINE")
     print("=" * 60)
 
-    # ── 1. Spiking Neural Network ────────────────────────────────────
+    # -- 1. Spiking Neural Network ------------------------------------
     print("\n  [SNN] Initializing Spiking Neural Network ...")
     snn_config = SNNConfig(
-        input_dim=100,          # Smaller for demo
-        hidden_layers=[200],    # Single hidden layer
+        input_dim=100,  # Smaller for demo
+        hidden_layers=[200],  # Single hidden layer
         output_dim=50,
-        num_neurons=500,        # Scaled down for quick demo
+        num_neurons=500,  # Scaled down for quick demo
         timesteps=25,
-        use_gpu=False,          # CPU for portability
+        use_gpu=False,  # CPU for portability
     )
     snn = ProductionSNN(config=snn_config)
 
@@ -60,11 +60,11 @@ def main():
     print(f"    Spike rate:       {snn_state.get('output_spike_rate', 0):.3f}")
     print(f"    Processing time:  {snn_ms:.1f} ms")
 
-    # ── 2. Liquid State Machine ──────────────────────────────────────
+    # -- 2. Liquid State Machine --------------------------------------
     print("\n  [LSM] Initializing Liquid State Machine ...")
     lsm = LiquidStateMachine(
         n_input=10,
-        n_reservoir=200,   # Scaled down for demo
+        n_reservoir=200,  # Scaled down for demo
         n_output=10,
         spectral_radius=0.9,
     )
@@ -77,17 +77,19 @@ def main():
     lsm_ms = (time.time() - t0) * 1000
 
     print(f"    Reservoir size:   {lsm.n_reservoir}")
-    print(f"    Reservoir state:  mean={reservoir_state.mean():.4f}, "
-          f"std={reservoir_state.std():.4f}")
+    print(
+        f"    Reservoir state:  mean={reservoir_state.mean():.4f}, "
+        f"std={reservoir_state.std():.4f}"
+    )
     print(f"    Readout shape:    {readout.shape}")
     print(f"    Sequence length:  {len(lsm_input_sequence)} steps")
     print(f"    Processing time:  {lsm_ms:.1f} ms")
 
-    # ── 3. Hierarchical Temporal Memory ──────────────────────────────
+    # -- 3. Hierarchical Temporal Memory ------------------------------
     print("\n  [HTM] Initializing Hierarchical Temporal Memory ...")
     htm = HTM(
         input_size=100,
-        n_columns=512,       # Scaled down for demo
+        n_columns=512,  # Scaled down for demo
         cells_per_column=16,
         sparsity=0.02,
     )
@@ -109,7 +111,7 @@ def main():
     print(f"    Patterns learned: {len(patterns)}")
     print(f"    Processing time:  {htm_ms:.1f} ms")
 
-    # ── 4. Summary ───────────────────────────────────────────────────
+    # -- 4. Summary ---------------------------------------------------
     print("\n  Summary:")
     print("    All three substrates processed input successfully.")
     print("    In a full system, their outputs become WorkspaceCandidates")

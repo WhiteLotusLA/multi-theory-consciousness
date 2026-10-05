@@ -7,8 +7,8 @@ Beautiful Loop Theory integration module.
 The Beautiful Loop (Laukkonen, Friston & Chandaria 2025) proposes that
 consciousness arises from a self-referential predictive processing loop:
 
-  predict → predict the prediction → predict the prediction of the
-  prediction → ... → the system evidences its own existence
+  predict -> predict the prediction -> predict the prediction of the
+  prediction -> ... -> the system evidences its own existence
 
 This module integrates three mechanisms into a single consciousness
 enrichment step that runs after each GWT broadcast:
