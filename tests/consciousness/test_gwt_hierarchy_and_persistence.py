@@ -279,6 +279,11 @@ async def test_safety_bypasses_hierarchy():
 
 @pytest.mark.asyncio
 async def test_flat_mode_matches_compete_for_access(monkeypatch):
+    # Salience carries a recency term read from the wall clock, so the two
+    # candidate sets below must see the same age or a near-tie can flip under load.
+    import mtc.consciousness.enhanced_global_workspace as egw_module
+
+    monkeypatch.setattr(egw_module.time, "time", lambda: 1_700_000_000.0)
     workspace = _workspace(competition_mode="flat", thalamic_gate_enabled=False)
     calls = {"flat": 0, "hierarchical": 0, "winners": None}
     flat = workspace.bottleneck.compete_for_access
