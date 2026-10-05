@@ -32,6 +32,16 @@ the v0.4.0 baseline (`tests/fixtures/baseline_v040_experiment.txt`) was
 captured. `tests/test_legacy_preset.py` checks that the preset still lands on
 that baseline.
 
+The Phase 3 part of the preset adds an `[assessment]` block (`indicator_formulas`,
+`missing_signal_policy`, `irreducibility_method`, `causal_emergence_threshold`,
+`phi_source`) and three new tables: `[pad]` (`coherence_method = "v04_variance"`),
+`[causal_emergence]` (`tpm_row_order = "little_endian"`) and `[rpt]`
+(`stdp_plasticity_enabled = false`). `assessment.phi_normalization`,
+`assessment.phi_fixed_reference`, `pad.coherence_window` and
+`pad.coherence_min_history` have no preset value: the first two default to the
+v0.4.0 divide-by-5.0 behaviour and the PAD tuning keys are inert under
+`v04_variance`.
+
 ## Adding a preset
 
 1. Copy an existing preset to `experiments/presets/<name>.toml`.

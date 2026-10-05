@@ -202,3 +202,61 @@ class TestParamOverrides:
         assert result["fep"]["legacy_double_decay"] is True
         assert result["blt"]["loop_quality_formula"] == "v04"
         assert result["damasio"]["circadian"] == "v04_sawtooth"
+
+    def test_phase3_switches_validate(self, tmp_path):
+        """The preset loads its Phase 3 values and each string switch rejects
+        a bad choice."""
+        from pathlib import Path
+
+        from mtc.core.param_overrides import load_layered_overrides, load_overrides
+
+        root = Path(__file__).resolve().parents[2]
+        schema = str(root / "experiments" / "param_schema.toml")
+        preset = load_layered_overrides(
+            str(root / "experiments" / "params.toml"), schema, preset="legacy_v04"
+        )
+        assert preset["assessment"]["indicator_formulas"] == "v04"
+        assert preset["assessment"]["missing_signal_policy"] == "v04_constants"
+        assert preset["assessment"]["irreducibility_method"] == "spectral_entropy"
+        assert preset["assessment"]["causal_emergence_threshold"] == 0.0
+        assert preset["assessment"]["phi_source"] == "calculator"
+        assert preset["pad"]["coherence_method"] == "v04_variance"
+        assert preset["causal_emergence"]["tpm_row_order"] == "little_endian"
+        assert preset["rpt"]["stdp_plasticity_enabled"] is False
+
+        for section, key in (
+            ("assessment", "indicator_formulas"),
+            ("assessment", "missing_signal_policy"),
+            ("assessment", "irreducibility_method"),
+            ("assessment", "phi_source"),
+            ("assessment", "phi_normalization"),
+            ("pad", "coherence_method"),
+            ("causal_emergence", "tpm_row_order"),
+        ):
+            bad = self._write_toml(
+                tmp_path, f"bad_{key}.toml", f'[{section}]\n{key} = "bogus"\n'
+            )
+            with pytest.raises(ValueError, match="not one of"):
+                load_overrides(bad, schema)
+
+        for section, key, value in (
+            ("assessment", "causal_emergence_threshold", 1.5),
+            ("assessment", "phi_fixed_reference", 0.0),
+            ("pad", "coherence_window", 2),
+            ("pad", "coherence_min_history", 100),
+        ):
+            bad = self._write_toml(
+                tmp_path, f"range_{key}.toml", f"[{section}]\n{key} = {value}\n"
+            )
+            with pytest.raises(ValueError, match="out of bounds"):
+                load_overrides(bad, schema)
+
+        good = self._write_toml(
+            tmp_path,
+            "good.toml",
+            '[assessment]\nphi_normalization = "percentile"\n'
+            "[rpt]\nstdp_plasticity_enabled = true\n",
+        )
+        assert load_overrides(good, schema)["assessment"]["phi_normalization"] == (
+            "percentile"
+        )

@@ -12,6 +12,9 @@ Modes:
     --report    Print a detailed Markdown-formatted report
     --ablation  Run ablation study (disable one component at a time)
     --json      Write results to a JSON file in results/
+    --json-path Write the JSON report to this path instead (implies --json)
+    --seed      Seed random, numpy and torch before any module is built (42)
+    --state-dir Restore persisted module state from this directory, then assess
 
 Usage:
     python scripts/run_assessment.py
@@ -21,6 +24,23 @@ Usage:
     python scripts/run_assessment.py --preset legacy_v04 --full  # v0.4.0 behaviour
     python scripts/run_assessment.py --params my.toml            # parameter overrides
 
+State directory (--state-dir): the modules are built, registered with the
+ConsciousnessStateManager under six names, restored with restore_all() and then
+assessed, using the workspace's own attention schema, metacognition, active
+inference and beautiful loop as the AST, HOT, FEP and BLT inputs. Later phases
+persist under the same six names:
+
+    gwt                    the EnhancedGlobalWorkspace (and its owned modules)
+    rpt                    RPTMeasurement
+    phi                    PhiTracker
+    causal_emergence       CausalEmergenceAnalyzer
+    pad_affect             PADAffectModel
+    oscillatory_binding    OscillatoryBinding
+
+Without --state-dir, RPT, PAD, the causal emergence analyzer and neural states
+are not built and report absent; scripts/run_experiment.py is the synthetic
+testbed and --state-dir is the path for real runs.
+
 Overrides are optional here: with neither --preset nor --params the modules
 run on their defaults. --preset NAME loads experiments/presets/NAME.toml on
 top of the defaults, and --params PATH loads on top of the preset.
@@ -28,8 +48,10 @@ top of the defaults, and --params PATH loads on top of the preset.
 
 import argparse
 import asyncio
+import inspect
 import json
 import logging
+import random
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -37,14 +59,12 @@ from pathlib import Path
 import numpy as np
 
 from mtc.consciousness.enhanced_global_workspace import (
-    EnhancedGlobalWorkspace,
     WorkspaceCandidate,
     WorkspaceCandidateSource,
 )
 from mtc.consciousness.attention_schema import (
     AttentionSchemaModule,
     AttentionTarget,
-    AttentionShiftType,
 )
 from mtc.consciousness.metacognition import (
     MetacognitionModule,
@@ -56,9 +76,20 @@ from mtc.consciousness.active_inference import (
     ActiveInferenceModule,
 )
 from mtc.consciousness.beautiful_loop import BeautifulLoop
+from mtc.consciousness.pad_affect import PADAffectModel
 from mtc.consciousness.phi_tracker import PhiTracker
+from mtc.consciousness.state_persistence import ConsciousnessStateManager
+from mtc.neural.oscillatory_binding import OscillatoryBinding
 from mtc.assessment.assessment import ConsciousnessAssessment
+from mtc.assessment.causal_emergence import CausalEmergenceAnalyzer
+from mtc.assessment.rpt_measurement import RPTMeasurement
 from mtc.core.param_overrides import deep_merge, load_overrides, preset_path
+from mtc.core.runner_support import (
+    WARMUP_PROFILE_V05,
+    attention_shift_type,
+    build_phi_tracker,
+    build_workspace,
+)
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -70,33 +101,18 @@ ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = ROOT / "experiments" / "param_schema.toml"
 PRESETS_DIR = ROOT / "experiments" / "presets"
 
-# fep.* behaviour switches forwarded to the workspace's own inference module.
-# The generative-model geometry and learning rates stay as the workspace sets
-# them; the runner's separate module takes every fep.* key.
-_FEP_BEHAVIOUR_SWITCHES = (
-    "hpp_hidden_dim_multiplier",
-    "hierarchy_observation",
-    "meta_accuracy_method",
-    "drive_model",
-    "drive_decay_floor",
-    "legacy_double_decay",
+_DEFAULT_WARMUP_PROFILE = WARMUP_PROFILE_V05
+_DEFAULT_SEED = 42
+
+# The PhiTracker reports no Phi before this many transitions. The CLI keeps the
+# tracker's own default: a short warmup leaves it warming up, and only a
+# restored long-lived tracker (--state-dir) reports.
+_PHI_MIN_TRANSITIONS = (
+    inspect.signature(PhiTracker).parameters["min_transitions"].default
 )
 
-# gwt.* behaviour switches that are EnhancedGlobalWorkspace constructor fields.
-_GWT_SWITCHES = (
-    "competition_mode",
-    "thalamic_gate_enabled",
-    "theory_interactions_enabled",
-    "legacy_coverage_ratio",
-    "body_metrics_enabled",
-    "precision_feedback_enabled",
-    "self_prediction_enabled",
-)
 
-_DEFAULT_WARMUP_PROFILE = "v05"
-
-
-# ── helpers ──────────────────────────────────────────────────────────
+# -- helpers -----------------------------------------------------
 
 
 def _make_candidates():
@@ -113,22 +129,6 @@ def _make_candidates():
         )
         for i in range(5)
     ]
-
-
-def _attention_shift_type(profile, cycle_idx):
-    """Shift type the warmup assigns to the attention focus on a cycle.
-
-    v04 only ever reported captured shifts. v05 alternates chosen and pulled
-    shifts, every second chosen one goal-driven, so typed provenance has real
-    chosen shifts to count.
-    """
-    if profile == "v04":
-        return AttentionShiftType.CAPTURED
-    if cycle_idx % 2 == 1:
-        return AttentionShiftType.CAPTURED
-    if cycle_idx % 4 == 2:
-        return AttentionShiftType.GOAL_DRIVEN
-    return AttentionShiftType.VOLUNTARY
 
 
 async def warmup(
@@ -158,7 +158,7 @@ async def warmup(
                 source_module="global_workspace",
                 attention_strength=state.primary_content.salience,
                 salience=state.primary_content.salience,
-                shift_type=_attention_shift_type(profile, i),
+                shift_type=attention_shift_type(i, profile),
             )
             attention.schema.current_focus = target
 
@@ -179,7 +179,7 @@ async def warmup(
     print(" Warmup complete.\n")
 
 
-# ── assessment runners ───────────────────────────────────────────────
+# -- assessment runners -----------------------------------------
 
 
 async def run_standard(
@@ -189,8 +189,13 @@ async def run_standard(
     active_inference,
     beautiful_loop,
     assessment_kwargs=None,
+    extra_modules=None,
 ):
-    """Run a single assessment and return the report."""
+    """Run a single assessment and return the report.
+
+    ``extra_modules`` are further run_full_assessment keywords (phi_tracker,
+    rpt_measurement, pad_affect_model, causal_emergence_analyzer).
+    """
     assessment = ConsciousnessAssessment(**(assessment_kwargs or {}))
     return await assessment.run_full_assessment(
         global_workspace=workspace,
@@ -198,6 +203,7 @@ async def run_standard(
         metacognition=metacognition,
         active_inference=active_inference,
         beautiful_loop=beautiful_loop,
+        **(extra_modules or {}),
     )
 
 
@@ -208,9 +214,15 @@ async def run_ablation(
     active_inference,
     beautiful_loop,
     assessment_kwargs=None,
+    extra_modules=None,
 ):
-    """Disable one module at a time and compare scores."""
+    """Disable one module at a time and compare scores.
+
+    The workspace's PhiTracker only has data through the workspace, so
+    ablating gwt also withholds it.
+    """
     assessment = ConsciousnessAssessment(**(assessment_kwargs or {}))
+    extra = dict(extra_modules or {})
 
     components = ["gwt", "ast", "hot", "fep", "beautiful_loop"]
     results = {}
@@ -222,12 +234,16 @@ async def run_ablation(
         metacognition=metacognition,
         active_inference=active_inference,
         beautiful_loop=beautiful_loop,
+        **extra,
     )
     results["baseline"] = baseline.overall_score
 
     for component in components:
         config = {c: True for c in components}
         config[component] = False
+        kwargs = dict(extra)
+        if component == "gwt":
+            kwargs.pop("phi_tracker", None)
         report = await assessment.run_full_assessment(
             global_workspace=workspace if config["gwt"] else None,
             attention_schema=attention if config["ast"] else None,
@@ -235,13 +251,23 @@ async def run_ablation(
             active_inference=active_inference if config["fep"] else None,
             beautiful_loop=beautiful_loop if config["beautiful_loop"] else None,
             ablation_config=config,
+            **kwargs,
         )
         results[f"without_{component}"] = report.overall_score
 
     return results
 
 
-# ── display helpers ──────────────────────────────────────────────────
+# -- display helpers --------------------------------------------
+
+
+def _fmt(score, spec=".3f"):
+    """A score, or insufficient_data when the assessment has none."""
+    return "insufficient_data" if score is None else format(score, spec)
+
+
+def _indicator_score(result):
+    return None if result.status == "insufficient_data" else result.score
 
 
 def print_report(report, markdown=False):
@@ -252,9 +278,13 @@ def print_report(report, markdown=False):
     print(sep)
     print(f" Session:            {report.session_id}")
     print(f" Timestamp:          {report.timestamp.isoformat()}")
-    print(f" Overall score:      {report.overall_score:.3f}")
+    print(f" Overall score:      {_fmt(report.overall_score)}")
+    print(f" Status:             {report.status}")
+    print(f" Coverage:           {report.coverage:.3f}")
     print(f" Architecture OK:    {report.architecture_functional}")
     print(f" Passing indicators: {report.passing_count}/{report.total_indicators}")
+    if report.insufficient_indicators:
+        print(f" Insufficient data:  {', '.join(report.insufficient_indicators)}")
     print(f" Processing time:    {report.processing_time_ms:.1f} ms")
 
     if markdown:
@@ -269,7 +299,12 @@ def print_report(report, markdown=False):
         print("|-----------|-------|-----------|--------|")
         for name, r in report.indicator_results.items():
             status = "PASS" if r.passes_threshold else "FAIL"
-            print(f"| {name} | {r.score:.3f} | {r.threshold:.2f} | {status} |")
+            if r.status == "insufficient_data":
+                status = "INSUFFICIENT"
+            print(
+                f"| {name} | {_fmt(_indicator_score(r))} | {r.threshold:.2f} "
+                f"| {status} |"
+            )
     else:
         print("\n  Theory Scores:")
         for theory, score in sorted(report.theory_scores.items()):
@@ -279,7 +314,12 @@ def print_report(report, markdown=False):
         print(f"\n  Indicators ({report.passing_count}/{report.total_indicators}):")
         for name, r in report.indicator_results.items():
             tag = "PASS" if r.passes_threshold else "FAIL"
-            print(f"   [{tag}] {name:<30s}  {r.score:.3f} / {r.threshold:.2f}")
+            if r.status == "insufficient_data":
+                tag = "NODATA"
+            print(
+                f"   [{tag}] {name:<30s}  {_fmt(_indicator_score(r))} "
+                f"/ {r.threshold:.2f}"
+            )
 
     print(f"\n{sep}\n")
 
@@ -289,10 +329,13 @@ def print_ablation(results):
     print("\n" + "=" * 64)
     print(" ABLATION STUDY")
     print("=" * 64)
-    baseline = results.get("baseline", 0)
-    print(f"\n  Baseline (all modules):  {baseline:.3f}\n")
+    baseline = results.get("baseline")
+    print(f"\n  Baseline (all modules):  {_fmt(baseline)}\n")
     for key, score in results.items():
         if key == "baseline":
+            continue
+        if score is None or baseline is None:
+            print(f"   {key:<28s}  {_fmt(score)}")
             continue
         delta = score - baseline
         direction = "+" if delta >= 0 else ""
@@ -300,7 +343,7 @@ def print_ablation(results):
     print("\n" + "=" * 64 + "\n")
 
 
-# ── main ─────────────────────────────────────────────────────────────
+# -- main ---------------------------------------------------------
 
 
 def _load_overrides(params, preset):
@@ -314,14 +357,74 @@ def _load_overrides(params, preset):
     return overrides
 
 
-def _build_phi_tracker(phi_ov):
-    """PhiTracker from the phi.* keys (scale, warmup_reference)."""
-    kwargs = {}
-    if "scale" in phi_ov:
-        kwargs["phi_scale"] = phi_ov["scale"]
-    if "warmup_reference" in phi_ov:
-        kwargs["phi_warmup_reference"] = phi_ov["warmup_reference"]
-    return PhiTracker(**kwargs)
+def _seed_everything(seed):
+    """Seed random, numpy and torch (when installed) before any module exists."""
+    random.seed(seed)
+    np.random.seed(seed)
+    try:
+        import torch
+
+        torch.manual_seed(seed)
+    except ImportError:
+        pass
+
+
+def _build_workspace(overrides):
+    """The workspace with its PhiTracker, built from the layered overrides.
+
+    Machine metrics and the previous cycle's duration reach the protoself when
+    body metrics are on, so the seeded CLI pins them off unless
+    gwt.body_metrics_enabled is set.
+    """
+    tracker = build_phi_tracker(overrides.get("phi", {}), _PHI_MIN_TRANSITIONS)
+    return build_workspace(overrides, tracker, body_metrics_default=False)
+
+
+def _build_standalone_modules(overrides):
+    """Workspace plus the separate AST, HOT, FEP and BLT modules.
+
+    The workspace builds its own inference, beautiful loop, damasio,
+    metacognition and attention schema modules; the matching overrides reach
+    them through its constructor so a preset switches every instance.
+    """
+    fep_ov = {k: v for k, v in overrides.get("fep", {}).items() if k != "drives"}
+    workspace = _build_workspace(overrides)
+    attention = AttentionSchemaModule(**overrides.get("ast", {}))
+    metacognition = MetacognitionModule(**overrides.get("hot", {}))
+    active_inference = ActiveInferenceModule(
+        config=ActiveInferenceConfig(**fep_ov) if fep_ov else None
+    )
+    beautiful_loop = BeautifulLoop(**{"num_levels": 3, **overrides.get("blt", {})})
+    return workspace, attention, metacognition, active_inference, beautiful_loop
+
+
+def _build_persisted_modules(overrides):
+    """Every module a state directory can hold, keyed by its persistence name."""
+    workspace = _build_workspace(overrides)
+    rpt = RPTMeasurement(**overrides.get("rpt", {}))
+    oscillatory = OscillatoryBinding(**overrides.get("oscillatory", {}))
+    rpt.attach_oscillatory_binding(oscillatory)
+    return {
+        "gwt": workspace,
+        "rpt": rpt,
+        "phi": workspace.phi_tracker,
+        "causal_emergence": CausalEmergenceAnalyzer(
+            **overrides.get("causal_emergence", {})
+        ),
+        "pad_affect": PADAffectModel(**overrides.get("pad", {})),
+        "oscillatory_binding": oscillatory,
+    }
+
+
+def _restore_state(state_dir, persisted):
+    """Register the six modules, restore them and print which came back."""
+    hub = ConsciousnessStateManager(state_dir, dict(persisted))
+    restored = hub.restore_all()
+    print(f" Restoring state from {state_dir}")
+    for name in persisted:
+        print(f"   {name:<22s} {'restored' if restored.get(name) else 'fresh'}")
+    print()
+    return restored
 
 
 async def main():
@@ -347,6 +450,26 @@ async def main():
         "--json",
         action="store_true",
         help="Write results to results/ as JSON",
+    )
+    parser.add_argument(
+        "--json-path",
+        type=str,
+        default=None,
+        help="Write the JSON report to this file instead of a timestamped file "
+        "under results/ (implies --json)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=_DEFAULT_SEED,
+        help=f"Seed for random, numpy and torch (default: {_DEFAULT_SEED})",
+    )
+    parser.add_argument(
+        "--state-dir",
+        type=str,
+        default=None,
+        help="Restore persisted module state (gwt, rpt, phi, causal_emergence, "
+        "pad_affect, oscillatory_binding) from this directory, then assess",
     )
     parser.add_argument(
         "--warmup-cycles",
@@ -376,30 +499,35 @@ async def main():
         print(f"PARAM ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    # Initialize modules. The workspace builds its own inference, beautiful
-    # loop, damasio and metacognition modules; the matching overrides reach
-    # them through its constructor so a preset switches every instance.
-    fep_ov = {k: v for k, v in overrides.get("fep", {}).items() if k != "drives"}
-    gwt_ov = overrides.get("gwt", {})
-    fep_forward = {k: v for k, v in fep_ov.items() if k in _FEP_BEHAVIOUR_SWITCHES}
-    workspace = EnhancedGlobalWorkspace(
-        capacity=gwt_ov.get("capacity", 7),
-        ignition_threshold=gwt_ov.get("ignition_threshold", 0.3),
-        active_inference_config=(
-            EnhancedGlobalWorkspace.default_active_inference_config(**fep_forward)
-        ),
-        beautiful_loop_kwargs=overrides.get("blt", {}),
-        damasio_kwargs=overrides.get("damasio", {}),
-        metacognition_kwargs=overrides.get("hot", {}),
-        phi_tracker=_build_phi_tracker(overrides.get("phi", {})),
-        **{k: gwt_ov[k] for k in _GWT_SWITCHES if k in gwt_ov},
-    )
-    attention = AttentionSchemaModule(**overrides.get("ast", {}))
-    metacognition_mod = MetacognitionModule(**overrides.get("hot", {}))
-    active_inference = ActiveInferenceModule(
-        config=ActiveInferenceConfig(**fep_ov) if fep_ov else None
-    )
-    beautiful_loop = BeautifulLoop(**{"num_levels": 3, **overrides.get("blt", {})})
+    # Seed before any module is built: the modules draw from these streams
+    _seed_everything(args.seed)
+
+    extra_modules = {}
+    if args.state_dir:
+        persisted = _build_persisted_modules(overrides)
+        _restore_state(args.state_dir, persisted)
+        workspace = persisted["gwt"]
+        # The workspace's own modules are the AST, HOT, FEP and BLT inputs
+        attention = workspace.attention_schema
+        metacognition_mod = workspace.metacognition
+        active_inference = workspace.active_inference
+        beautiful_loop = workspace.beautiful_loop
+        extra_modules = {
+            "phi_tracker": persisted["phi"],
+            "rpt_measurement": persisted["rpt"],
+            "pad_affect_model": persisted["pad_affect"],
+            "causal_emergence_analyzer": persisted["causal_emergence"],
+        }
+    else:
+        (
+            workspace,
+            attention,
+            metacognition_mod,
+            active_inference,
+            beautiful_loop,
+        ) = _build_standalone_modules(overrides)
+        if args.full:
+            extra_modules = {"phi_tracker": workspace.phi_tracker}
     profile = overrides.get("runner", {}).get("warmup_profile", _DEFAULT_WARMUP_PROFILE)
 
     if args.full:
@@ -420,6 +548,7 @@ async def main():
             active_inference,
             beautiful_loop,
             assessment_kwargs=overrides.get("assessment", {}),
+            extra_modules=extra_modules,
         )
         print_ablation(results)
         return
@@ -431,14 +560,18 @@ async def main():
         active_inference,
         beautiful_loop,
         assessment_kwargs=overrides.get("assessment", {}),
+        extra_modules=extra_modules,
     )
     print_report(report, markdown=args.report)
 
-    if args.json:
-        out_dir = Path("results/consciousness_assessments")
-        out_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_path = out_dir / f"assessment_{ts}.json"
+    if args.json or args.json_path:
+        if args.json_path:
+            out_path = Path(args.json_path)
+        else:
+            out_dir = Path("results/consciousness_assessments")
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_path = out_dir / f"assessment_{ts}.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "w") as f:
             json.dump(report.to_dict(), f, indent=2)
         print(f" Results written to {out_path}")

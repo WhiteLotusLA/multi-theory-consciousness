@@ -691,3 +691,82 @@ default = 0.1
 min = 0.0
 max = 0.5
 description = "Minimum headroom (1.0 minus the noise baseline) an indicator must leave before its normalized score counts; below it the indicator scores 0.0 as uninformative (v0.4.0: 0.0, no guard)"
+
+[assessment.indicator_formulas]
+type = "str"
+default = "v05"
+choices = ["v05", "v04"]
+description = "Indicator arithmetic: v05 reads the statistics the producers emit and scores quality; v04 runs the v0.4.0 formulas verbatim"
+
+[assessment.missing_signal_policy]
+type = "str"
+default = "insufficient_data"
+choices = ["insufficient_data", "v04_constants"]
+description = "What a present module with no evidence yet scores: insufficient_data reports it by name and leaves it out of the averages; v04_constants substitutes the v0.4.0 stand-in numbers"
+
+[assessment.irreducibility_method]
+type = "str"
+default = "weighted_fiedler"
+choices = ["weighted_fiedler", "spectral_entropy"]
+description = "Irreducibility of the supplied connectivity: weighted_fiedler (default) or the v0.4.0 spectral_entropy"
+
+[assessment.causal_emergence_threshold]
+type = "float"
+default = 0.5
+min = 0.0
+max = 1.0
+description = "Causal emergence value above which the causal_emergence indicator passes its emergence check (v0.4.0: 0.0)"
+
+[assessment.phi_source]
+type = "str"
+default = "tracker_preferred"
+choices = ["tracker_preferred", "calculator"]
+description = "Where integrated_information reads Phi: tracker_preferred uses the supplied PhiTracker when it has a result and falls back to the calculator; calculator never reads the tracker (v0.4.0)"
+
+[assessment.phi_normalization]
+type = "str"
+default = "fixed"
+choices = ["fixed", "percentile"]
+description = "How the calculator maps Phi to 0-1: fixed divides by phi_fixed_reference (the v0.4.0 behaviour); percentile divides by the rolling 95th percentile of recent values once 20 exist, so the score is relative"
+
+[assessment.phi_fixed_reference]
+type = "float"
+default = 5.0
+min = 0.1
+max = 50.0
+description = "Phi value that maps to 1.0 under fixed normalization (a display calibration, not a measurement)"
+
+# -----------------------------------------------------------------------------
+# PAD coherence, causal emergence, RPT plasticity
+# -----------------------------------------------------------------------------
+
+[pad.coherence_method]
+type = "str"
+default = "temporal_structure"
+choices = ["temporal_structure", "v04_variance"]
+description = "Affect coherence: temporal_structure rewards smooth structured history and scores noise low; v04_variance is the v0.4.0 variance-based value"
+
+[pad.coherence_window]
+type = "int"
+default = 20
+min = 5
+max = 100
+description = "Number of recent affect states the temporal_structure coherence reads (inert under v04_variance)"
+
+[pad.coherence_min_history]
+type = "int"
+default = 10
+min = 3
+max = 50
+description = "Affect states needed before a coherence is reported; fewer reports none (inert under v04_variance)"
+
+[causal_emergence.tpm_row_order]
+type = "str"
+default = "big_endian"
+choices = ["big_endian", "little_endian"]
+description = "Row order of the transition matrix the analyzer reads: big_endian matches the PhiTracker; little_endian is the v0.4.0 reading"
+
+[rpt.stdp_plasticity_enabled]
+type = "bool"
+default = true
+description = "Let RPT recurrence strengthen through spike-timing plasticity across measurements (false is v0.4.0)"

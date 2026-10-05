@@ -43,3 +43,17 @@ circadian = "v04_sawtooth"
 
 [assessment]
 saturated_baseline_min_range = 0.0
+indicator_formulas = "v04"
+missing_signal_policy = "v04_constants"
+irreducibility_method = "spectral_entropy"
+causal_emergence_threshold = 0.0
+phi_source = "calculator"
+
+[pad]
+coherence_method = "v04_variance"
+
+[causal_emergence]
+tpm_row_order = "little_endian"
+
+[rpt]
+stdp_plasticity_enabled = false

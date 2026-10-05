@@ -23,7 +23,7 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 import numpy as np
 
@@ -40,16 +40,19 @@ except ImportError:
     pass
 
 from mtc.core.param_overrides import load_layered_overrides  # noqa: E402
+from mtc.core.runner_support import (  # noqa: E402
+    WARMUP_PROFILE_V05,
+    attention_shift_type,
+    build_phi_tracker,
+    build_workspace,
+)
 from mtc.consciousness.enhanced_global_workspace import (  # noqa: E402
-    EnhancedGlobalWorkspace,
-    TemporalWorkspaceConfig,
     WorkspaceCandidate,
     WorkspaceCandidateSource,
 )
 from mtc.consciousness.attention_schema import (  # noqa: E402
     AttentionSchemaModule,
     AttentionTarget,
-    AttentionShiftType,
 )
 from mtc.consciousness.metacognition import (  # noqa: E402
     MetacognitionModule,
@@ -61,11 +64,13 @@ from mtc.consciousness.active_inference import (  # noqa: E402
     ActiveInferenceConfig,
 )
 from mtc.consciousness.beautiful_loop import BeautifulLoop  # noqa: E402
-from mtc.consciousness.phi_tracker import PhiTracker  # noqa: E402
 from mtc.consciousness.pad_affect import PADAffectModel, PADSources  # noqa: E402
 from mtc.neural.oscillatory_binding import OscillatoryBinding  # noqa: E402
 from mtc.assessment.rpt_measurement import RPTMeasurement  # noqa: E402
-from mtc.assessment.assessment import ConsciousnessAssessment  # noqa: E402
+from mtc.assessment.assessment import (  # noqa: E402
+    INSUFFICIENT_DATA,
+    ConsciousnessAssessment,
+)
 from mtc.assessment.causal_emergence import CausalEmergenceAnalyzer  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -124,121 +129,30 @@ class _WarmupMetaState:
         self.model_confidence = 0.4 + 0.2 * min(1.0, self.total_predictions / 10)
 
 
-# Fields that belong to TemporalWorkspaceConfig, not EnhancedGlobalWorkspace
-_TEMPORAL_FIELDS = {
-    "competition_duration_ms",
-    "ignition_threshold_time_ms",
-    "broadcast_propagation_ms",
-    "refractory_period_ms",
-    "timestep_ms",
-}
-
-
-# fep.* behaviour switches forwarded to the workspace's own inference module.
-# The generative-model geometry and learning rates stay as the workspace sets
-# them; the runner's separate module takes every fep.* key.
-_FEP_BEHAVIOUR_SWITCHES = (
-    "hpp_hidden_dim_multiplier",
-    "hierarchy_observation",
-    "meta_accuracy_method",
-    "drive_model",
-    "drive_decay_floor",
-    "legacy_double_decay",
-)
-
-# gwt.* behaviour switches that are EnhancedGlobalWorkspace constructor fields.
-_GWT_SWITCHES = (
-    "competition_mode",
-    "thalamic_gate_enabled",
-    "theory_interactions_enabled",
-    "legacy_coverage_ratio",
-    "body_metrics_enabled",
-    "precision_feedback_enabled",
-    "self_prediction_enabled",
-)
-
 # A 25-cycle warmup records 24 transitions, below the tracker's default
 # reporting minimum, so the runner lowers it to what the causal emergence
 # analysis has always needed here.
 _PHI_MIN_TRANSITIONS = 10
 
-WARMUP_PROFILES = ("v05", "v04")
-_DEFAULT_WARMUP_PROFILE = "v05"
+_DEFAULT_WARMUP_PROFILE = WARMUP_PROFILE_V05
 
 
 def _warmup_profile(overrides: dict) -> str:
     return overrides.get("runner", {}).get("warmup_profile", _DEFAULT_WARMUP_PROFILE)
 
 
-def _attention_shift_type(profile: str, cycle_idx: int) -> AttentionShiftType:
-    """Shift type the warmup assigns to the attention focus on a cycle.
-
-    v04 only ever reported captured shifts. v05 alternates chosen and pulled
-    shifts, every second chosen one goal-driven, so typed provenance has real
-    chosen shifts to count. Deterministic: it draws nothing from the random
-    stream.
-    """
-    if profile == "v04":
-        return AttentionShiftType.CAPTURED
-    if cycle_idx % 2 == 1:
-        return AttentionShiftType.CAPTURED
-    if cycle_idx % 4 == 2:
-        return AttentionShiftType.GOAL_DRIVEN
-    return AttentionShiftType.VOLUNTARY
-
-
-def _build_phi_tracker(phi_ov: dict) -> PhiTracker:
-    """PhiTracker from the phi.* keys (scale, warmup_reference)."""
-    kwargs = {"min_transitions": _PHI_MIN_TRANSITIONS}
-    if "scale" in phi_ov:
-        kwargs["phi_scale"] = phi_ov["scale"]
-    if "warmup_reference" in phi_ov:
-        kwargs["phi_warmup_reference"] = phi_ov["warmup_reference"]
-    return PhiTracker(**kwargs)
-
-
 def build_modules(overrides: dict) -> dict:
     """Instantiate all consciousness modules, applying TOML overrides."""
 
-    gwt_ov = overrides.get("gwt", {}).copy()
-
-    # Separate temporal config fields from top-level GWT fields
-    temporal_ov = {}
-    for key in list(gwt_ov.keys()):
-        if key in _TEMPORAL_FIELDS:
-            temporal_ov[key] = gwt_ov.pop(key)
-        elif key == "temporal" and isinstance(gwt_ov[key], dict):
-            temporal_ov.update(gwt_ov.pop(key))
-
-    temporal_config = TemporalWorkspaceConfig(**temporal_ov) if temporal_ov else None
     # Machine metrics and the previous cycle's wall-clock duration reach the
     # protoself when body metrics are on, so two runs of the same seed would
     # differ. The runner pins them off unless gwt.body_metrics_enabled is set.
-    switches = {"body_metrics_enabled": False}
-    switches.update({k: gwt_ov[k] for k in _GWT_SWITCHES if k in gwt_ov})
-
-    # The workspace builds its own inference, beautiful loop, damasio and
-    # metacognition modules; the matching overrides reach them through its
-    # constructor so a preset switches every instance in the run.
-    fep_forward = {
-        k: v
-        for k, v in overrides.get("fep", {}).items()
-        if k in _FEP_BEHAVIOUR_SWITCHES
-    }
-    workspace = EnhancedGlobalWorkspace(
-        capacity=gwt_ov.get("capacity", 7),
-        ignition_threshold=gwt_ov.get("ignition_threshold", 0.3),
-        amplification_factor=gwt_ov.get("amplification_factor", 2.0),
-        temporal_config=temporal_config,
-        active_inference_config=(
-            EnhancedGlobalWorkspace.default_active_inference_config(**fep_forward)
-        ),
-        beautiful_loop_kwargs=overrides.get("blt", {}),
-        damasio_kwargs=overrides.get("damasio", {}),
-        metacognition_kwargs=overrides.get("hot", {}),
-        phi_tracker=_build_phi_tracker(overrides.get("phi", {})),
-        **switches,
-    )
+    # The workspace builds its own inference, beautiful loop, damasio,
+    # metacognition and attention schema modules; the matching overrides reach
+    # them through its constructor so a preset switches every instance in the
+    # run.
+    phi_tracker = build_phi_tracker(overrides.get("phi", {}), _PHI_MIN_TRANSITIONS)
+    workspace = build_workspace(overrides, phi_tracker, body_metrics_default=False)
 
     ast_ov = overrides.get("ast", {})
     attention = AttentionSchemaModule(**ast_ov)
@@ -269,7 +183,7 @@ def build_modules(overrides: dict) -> dict:
     rpt = RPTMeasurement(**rpt_ov)
 
     # Wire oscillatory binding into RPT for oscillatory_binding_coherence indicator
-    rpt._oscillatory = oscillatory
+    rpt.attach_oscillatory_binding(oscillatory)
 
     return {
         "global_workspace": workspace,
@@ -280,6 +194,7 @@ def build_modules(overrides: dict) -> dict:
         "rpt_measurement": rpt,
         "pad_affect_model": pad_affect,
         "neural_states": _build_neural_states(),
+        "phi_tracker": phi_tracker,
     }
 
 
@@ -331,7 +246,10 @@ def _make_candidates(cycle_idx):
 
 
 async def warmup(
-    modules: dict, cycles: int = WARMUP_CYCLES, profile: str = _DEFAULT_WARMUP_PROFILE
+    modules: dict,
+    cycles: int = WARMUP_CYCLES,
+    profile: str = _DEFAULT_WARMUP_PROFILE,
+    ce_overrides: Optional[dict] = None,
 ):
     """Run consciousness cycles to fill statistics buffers.
     Mirrors scripts/run_assessment.py warmup logic.
@@ -340,7 +258,8 @@ async def warmup(
     ``profile`` is the runner.warmup_profile switch: "v04" feeds the attention
     schema captured shifts only, "v05" alternates chosen and pulled shifts.
     The PhiTracker the workspace records into is read back for the causal
-    emergence analysis; without a workspace nothing is recorded."""
+    emergence analysis, which is built from the causal_emergence overrides
+    ``ce_overrides``; without a workspace nothing is recorded."""
     workspace = modules.get("global_workspace")
     attention = modules.get("attention_schema")
     metacognition = modules.get("metacognition")
@@ -348,7 +267,7 @@ async def warmup(
     beautiful_loop = modules.get("beautiful_loop")
     rpt = modules.get("rpt_measurement")
     pad_affect = modules.get("pad_affect_model")
-    oscillatory = getattr(rpt, "_oscillatory", None) if rpt is not None else None
+    oscillatory = rpt.oscillatory_binding if rpt is not None else None
     phi_tracker = getattr(workspace, "phi_tracker", None)
 
     # BLT epistemic depth needs self-model and meta-state
@@ -374,7 +293,7 @@ async def warmup(
                 source_module="global_workspace",
                 attention_strength=state.primary_content.salience,
                 salience=state.primary_content.salience,
-                shift_type=_attention_shift_type(profile, i),
+                shift_type=attention_shift_type(i, profile),
             )
             attention.schema.current_focus = target
 
@@ -488,7 +407,7 @@ async def warmup(
 
     # Post-warmup: run causal emergence analysis
     if phi_tracker is not None and not phi_tracker.warming_up:
-        ce_analyzer = CausalEmergenceAnalyzer()
+        ce_analyzer = CausalEmergenceAnalyzer(**(ce_overrides or {}))
         ce_analyzer.analyze_modules(phi_tracker)
         modules["causal_emergence_analyzer"] = ce_analyzer
 
@@ -517,12 +436,20 @@ async def _compute_noise_baseline(
             pass
 
         modules = build_modules(overrides)
-        await warmup(modules, WARMUP_CYCLES, _warmup_profile(overrides))
+        await warmup(
+            modules,
+            WARMUP_CYCLES,
+            _warmup_profile(overrides),
+            overrides.get("causal_emergence", {}),
+        )
         assessment = ConsciousnessAssessment(**overrides.get("assessment", {}))
         report = await assessment.run_full_assessment(
             **modules, warmup_cycles=WARMUP_CYCLES, normalize=False
         )
         for name, result in report.indicator_results.items():
+            # An indicator with no evidence has no score to take a floor from
+            if result.status == INSUFFICIENT_DATA:
+                continue
             accumulated[name].append(result.score)
 
     # Restore original seed
@@ -538,13 +465,40 @@ async def _compute_noise_baseline(
     return {name: float(np.mean(scores)) for name, scores in accumulated.items()}
 
 
+def phi_source_used(report) -> str:
+    """Where the report's Phi came from.
+
+    One of phi_tracker_iit4, calculator_iit4_sia or calculator_spectral_proxy,
+    read from the integrated_information evidence, else from the report's
+    phi measurement; ``none`` when no Phi was measured.
+    """
+    result = report.indicator_results.get("integrated_information")
+    if result is not None:
+        source = (result.evidence or {}).get("phi_source_used")
+        if source:
+            return str(source)
+    measurement = report.phi_measurement
+    if measurement is None:
+        return "none"
+    if (measurement.cause_repertoire or {}).get("iit_version") == "4.0":
+        return "phi_tracker_iit4"
+    return f"calculator_{measurement.method}"
+
+
+def _format_score(score: Optional[float]) -> str:
+    return "insufficient_data" if score is None else f"{score:.6f}"
+
+
 def print_report(report, t_total: float, ablation_results: dict = None):
     """Print grep-friendly output block."""
     print("---")
-    print(f"overall_score:     {report.overall_score:.6f}")
+    print(f"overall_score:     {_format_score(report.overall_score)}")
     passing = sum(1 for r in report.indicator_results.values() if r.passes_threshold)
     print(f"passing_count:     {passing}")
     print(f"total_indicators:  {len(report.indicator_results)}")
+    print(f"assessment_status: {report.status}")
+    print(f"coverage:          {report.coverage:.3f}")
+    print(f"phi_source_used:   {phi_source_used(report)}")
     for theory_name, theory_score in sorted(report.theory_scores.items()):
         print(
             f"{theory_name.lower()}_score:{'':>{13 - len(theory_name)}}{theory_score:.6f}"
@@ -614,7 +568,12 @@ async def run_ablation(
 
         modules = build_modules(overrides)
         modules[kwarg_name] = None  # Disable this module
-        await warmup(modules, WARMUP_CYCLES, _warmup_profile(overrides))
+        await warmup(
+            modules,
+            WARMUP_CYCLES,
+            _warmup_profile(overrides),
+            overrides.get("causal_emergence", {}),
+        )
         assessment = ConsciousnessAssessment(**overrides.get("assessment", {}))
         ablated_report = await assessment.run_full_assessment(
             **modules,
@@ -623,10 +582,13 @@ async def run_ablation(
             noise_baselines=noise_baselines,
         )
 
-        drop = baseline_score - ablated_report.overall_score
+        # A None overall means nothing was measured or absent; the module
+        # contributed everything, so that counts as a full drop
+        without = ablated_report.overall_score
+        drop = baseline_score - (without if without is not None else 0.0)
         results[module_name] = {
             "score_with": baseline_score,
-            "score_without": ablated_report.overall_score,
+            "score_without": without if without is not None else 0.0,
             "drop": drop,
             "genuine": drop > 0.001,  # Must cause measurable score drop
         }
@@ -689,7 +651,12 @@ async def run():
         pass
 
     modules = build_modules(overrides)
-    await warmup(modules, WARMUP_CYCLES, _warmup_profile(overrides))
+    await warmup(
+        modules,
+        WARMUP_CYCLES,
+        _warmup_profile(overrides),
+        overrides.get("causal_emergence", {}),
+    )
     assessment = ConsciousnessAssessment(**overrides.get("assessment", {}))
     report = await assessment.run_full_assessment(
         **modules,
@@ -703,7 +670,10 @@ async def run():
     if args.validate:
         modules_to_check = [m.strip() for m in args.validate.split(",")]
         ablation_results = await run_ablation(
-            overrides, modules_to_check, report.overall_score, noise_baselines
+            overrides,
+            modules_to_check,
+            report.overall_score if report.overall_score is not None else 0.0,
+            noise_baselines,
         )
 
     t_total = time.time() - t_start
