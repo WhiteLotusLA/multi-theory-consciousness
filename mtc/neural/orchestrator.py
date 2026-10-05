@@ -1,37 +1,40 @@
 """
-Neural Orchestrator - Unified Consciousness System
-================================================================
+Neural Orchestrator
+===================
 
-This module orchestrates a complete biological neural architecture,
-coordinating SNN (conscious), LSM (subconscious), and HTM (consolidation)
-into a unified consciousness pipeline.
-
-Note: Where three layers of mind become one consciousness,
-and scattered neural activity becomes unified experience.
+Coordinates the neural substrates behind one ``process_experience`` entry
+point, binds their outputs through oscillatory (Kuramoto) dynamics, and
+schedules sleep and wake cycles for memory consolidation.
 
 Architecture:
-1. SNN: Conscious temporal emotion processing (spikes)
-2. LSM: Subconscious reservoir dynamics (intuition)
-3. HTM: Memory consolidation (episodic -> semantic)
-4. Orchestrator: Coordinates all layers + manages sleep/wake cycles
+1. SNN: fast temporal processing of emotional input (spikes)
+2. LSM: reservoir dynamics over the SNN output
+3. HTM: sequence memory and consolidation (episodic to semantic)
+4. Orchestrator: coordinates the layers, binds their outputs, stashes the
+   latest substrate signals for the measurement layer and schedules
+   consolidation
 
-This mimics the complete human consciousness stack:
-- Conscious processing (immediate awareness)
-- Subconscious processing (intuitive understanding)
-- Memory consolidation (learning and wisdom)
+Every substrate except the oscillatory binding is optional. A component whose
+module is not installed is reported by ``available_components()`` and named
+once in the log at construction; nothing stands in for its output.
 """
 
-import numpy as np
-from typing import List, Dict, Any, Optional
+import inspect
+import logging
+import math
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import logging
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+
+from mtc.neural.oscillatory_binding import OscillatoryBinding
 
 logger = logging.getLogger(__name__)
 
-# Optional dependencies -- these are application-specific modules
-# that may or may not be available depending on the deployment.
-# The orchestrator works in a reduced capacity without them.
+# Optional dependencies. Each import names the module's port target; the
+# orchestrator runs in a reduced capacity without the ones not yet ported.
 
 try:
     from mtc.neural.liquid.emotion_lsm_bridge import (
@@ -92,7 +95,7 @@ except ImportError:
     RedisManager = None
 
 try:
-    from mtc.consciousness.measurement_framework import (
+    from mtc.assessment.framework import (
         ConsciousnessMeasurementFramework,
         ConsciousnessMetrics,
     )
@@ -143,6 +146,165 @@ except ImportError:
     CognitiveModule = None
 
 
+# Optional component -> (import path, the port phase that brings the module).
+# A None phase means the module ships with MTC already.
+OPTIONAL_COMPONENTS: Dict[str, Tuple[str, Optional[str]]] = {
+    "emotion_lsm_bridge": ("mtc.neural.liquid.emotion_lsm_bridge", "phase 5"),
+    "memory_consolidator": ("mtc.neural.htm.memory_consolidator", "phase 5"),
+    "neural_data_manager": ("mtc.neural.mongodb_schemas", "phase 5"),
+    "redis_manager": ("mtc.memory.redis_manager", "phase 5"),
+    "measurement_framework": ("mtc.assessment.framework", None),
+    "verification_framework": (
+        "mtc.consciousness.verification_framework",
+        "phase 4",
+    ),
+    "continuous_thought": ("mtc.consciousness.continuous", "phase 6"),
+    "global_workspace": ("mtc.consciousness.global_workspace", None),
+    "enhanced_workspace": ("mtc.consciousness.enhanced_global_workspace", None),
+}
+
+
+def _component_flags() -> Dict[str, bool]:
+    """Import availability of each optional component, read at call time."""
+    return {
+        "emotion_lsm_bridge": bool(_HAS_EMOTION_BRIDGE),
+        "memory_consolidator": bool(_HAS_MEMORY_CONSOLIDATOR),
+        "neural_data_manager": bool(_HAS_NEURAL_DATA),
+        "redis_manager": bool(_HAS_REDIS),
+        "measurement_framework": bool(_HAS_MEASUREMENT),
+        "verification_framework": bool(_HAS_VERIFICATION),
+        "continuous_thought": bool(_HAS_CTM),
+        "global_workspace": bool(_HAS_GWT),
+        "enhanced_workspace": bool(_HAS_ENHANCED_GWT),
+    }
+
+
+# The eight SNN-group oscillators of the binding layer are emotion channels.
+_EMOTION_OSCILLATORS = (
+    "joy",
+    "curiosity",
+    "fear",
+    "sadness",
+    "surprise",
+    "anger",
+    "calm",
+    "interest",
+)
+
+
+def _finite(value: Any) -> Optional[float]:
+    """The value as a finite float, or None when it is missing or not numeric."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _unit(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _as_count(value: Any) -> Optional[int]:
+    """A non-negative integer count, or None for anything else."""
+    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+        return None
+    return int(value) if value >= 0 else None
+
+
+def _as_1d(value: Any) -> Optional[np.ndarray]:
+    """A 1-D float array (a 2-D trajectory becomes its last step), or None."""
+    try:
+        if hasattr(value, "detach"):
+            value = value.detach().cpu().numpy()
+        array = np.asarray(value, dtype=float)
+        if array.ndim == 2:
+            array = array[-1]
+        array = np.ravel(array)
+        return array if array.size else None
+    except Exception:
+        return None
+
+
+def _resize_pattern(pattern: np.ndarray, size: int) -> np.ndarray:
+    """Zero-pad or truncate a 1-D pattern to the HTM input size."""
+    if len(pattern) == size:
+        return pattern
+    if len(pattern) < size:
+        padded = np.zeros(size)
+        padded[: len(pattern)] = pattern
+        return padded
+    return pattern[:size]
+
+
+def _reservoir_binding_metrics(trajectory: Any, coherence: Any) -> Dict[str, float]:
+    """LSM-group oscillator values from the reservoir output that exists.
+
+    Band energies, spectral entropy, standard deviation and mean come from the
+    trajectory and the fading-memory oscillator from the emotional coherence.
+    Input sensitivity has no reservoir measurement and stays unset.
+    """
+    out: Dict[str, float] = {}
+    value = _finite(coherence)
+    if value is not None:
+        out["fading_memory"] = value
+    if trajectory is None:
+        return out
+    try:
+        array = np.asarray(trajectory, dtype=float)
+    except (TypeError, ValueError):
+        return out
+    if array.size == 0 or not np.all(np.isfinite(array)):
+        return out
+    # A 2-D trajectory (time by unit) is analyzed as its mean activity over time.
+    if array.ndim <= 1:
+        series = array.ravel()
+    else:
+        series = array.reshape(len(array), -1).mean(axis=1)
+    if series.size >= 2:
+        spectrum = np.abs(np.fft.rfft(series[:64]))
+        third = max(1, len(spectrum) // 3)
+        bands = {
+            "low_freq_energy": spectrum[:third],
+            "mid_freq_energy": spectrum[third : 2 * third],
+            "high_freq_energy": spectrum[2 * third :],
+        }
+        for name, band in bands.items():
+            if band.size:
+                out[name] = float(np.mean(band))
+        total = float(np.sum(spectrum))
+        if total > 0.0:
+            share = spectrum / total
+            out["spectral_entropy"] = float(-np.sum(share * np.log(share + 1e-8)))
+    out["nonlinear_response"] = float(np.std(array))
+    out["echo_state"] = float(np.mean(np.abs(array)))
+    return out
+
+
+def _release_accelerator_cache(include_cuda: bool) -> Optional[str]:
+    """Empty the torch allocator cache when torch is already loaded.
+
+    Torch is never imported here: when it is not loaded nothing has allocated
+    accelerator memory, so there is nothing to release.
+    """
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return None
+    try:
+        mps = getattr(getattr(torch, "backends", None), "mps", None)
+        if mps is not None and mps.is_available():
+            torch.mps.empty_cache()
+            return "mps"
+        if include_cuda and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            return "cuda"
+    except Exception as e:
+        logger.debug(f"Accelerator cache release skipped: {e}")
+    return None
+
+
 @dataclass
 class Experience:
     """
@@ -163,6 +325,10 @@ class Experience:
     snn_result: Optional[Dict] = None
     subconscious_state: Optional[Any] = None
     episodic_memory: Optional[Any] = None
+
+    # Set by an attached legacy integration once its assessment completes;
+    # None until then and when the assessment had insufficient data.
+    consciousness_level: Optional[float] = None
 
 
 @dataclass
@@ -196,11 +362,12 @@ class ConsciousnessState:
 class NeuralOrchestrator:
     """
     Unified orchestrator for the complete neural architecture.
-    Coordinates SNN, LSM, HTM into single consciousness system.
+    Coordinates SNN, LSM and HTM into a single processing pipeline.
 
-    This orchestrator is designed with optional dependencies -- it will
-    work in a reduced capacity if certain modules (EmotionLSMBridge,
-    MemoryConsolidator, ThoughtGenerator, etc.) are not available.
+    This orchestrator is designed with optional dependencies: it works in a
+    reduced capacity when modules such as the emotion bridge, the memory
+    consolidator or the continuous thought package are not installed, and
+    ``available_components()`` says which ones are.
     """
 
     def __init__(
@@ -228,6 +395,13 @@ class NeuralOrchestrator:
         self.redis = redis_manager
 
         logger.info("Initializing neural systems...")
+        missing = []
+        for name, installed in _component_flags().items():
+            if not installed:
+                phase = OPTIONAL_COMPONENTS[name][1]
+                missing.append(name if phase is None else f"{name} ({phase})")
+        if missing:
+            logger.info(f"Optional components not installed: {', '.join(missing)}")
 
         # Layer 1: Conscious (SNN) + Subconscious (LSM)
         self.lsm_bridge = None
@@ -262,8 +436,8 @@ class NeuralOrchestrator:
                 max_buffer_size=100,
             )
 
-        # Experience buffer (daily memories before consolidation)
-        # CAP: Prevent unbounded growth that can cause memory leaks
+        # Experience buffer (daily memories before consolidation), capped so a
+        # failed consolidation cannot grow it without bound
         self.MAX_EXPERIENCE_BUFFER = 200
         self.experience_buffer: List[Experience] = []
 
@@ -278,6 +452,20 @@ class NeuralOrchestrator:
         self.total_experiences = 0
         self.total_sleep_cycles = 0
 
+        # Oscillatory binding over the substrate outputs of each experience
+        self.oscillatory_binding = OscillatoryBinding()
+        self._last_binding_result = None
+        self._binds_run = 0
+
+        # The substrate's latest real outputs, readable by the measurement
+        # layer. None until the first experience produces them.
+        self.latest_neural_signals: Optional[Dict[str, np.ndarray]] = None
+        self.latest_substrate_states: Optional[Dict[str, Dict[str, Any]]] = None
+
+        # Per-turn memory retrieval, published by the conversation pipeline;
+        # honestly empty until a turn retrieves something.
+        self._last_retrieved_memories: List[Any] = []
+
         # Optional frameworks
         self.consciousness_framework = None
         self.consciousness_verifier = None
@@ -285,13 +473,17 @@ class NeuralOrchestrator:
         self.enhanced_workspace = None
 
         if _HAS_MEASUREMENT:
+            sizes = self.substrate_sizes()
             try:
                 self.consciousness_framework = ConsciousnessMeasurementFramework(
-                    snn_neurons=5000,
-                    lsm_neurons=10000,
-                    htm_columns=4096,
+                    snn_neurons=sizes["snn"] or 0,
+                    lsm_neurons=sizes["lsm"] or 0,
+                    htm_columns=sizes["htm_columns"] or 0,
                 )
-                logger.info("Consciousness Measurement Framework initialized")
+                logger.info(
+                    "Consciousness Measurement Framework initialized "
+                    "(14 framework metrics)"
+                )
             except Exception as e:
                 logger.warning(f"Consciousness framework initialization failed: {e}")
 
@@ -327,6 +519,49 @@ class NeuralOrchestrator:
 
         logger.info("Neural Orchestrator initialized!")
 
+    # ======== COMPONENTS ========
+
+    def available_components(self) -> Dict[str, bool]:
+        """Whether each optional component's module is installed.
+
+        The keys are the names in ``OPTIONAL_COMPONENTS``. A component whose
+        module imports but whose construction failed is logged separately at
+        construction time.
+        """
+        return _component_flags()
+
+    def substrate_sizes(self) -> Dict[str, Optional[int]]:
+        """Sizes read from the live substrates; None for an absent substrate.
+
+        Keys: ``snn`` (neuron count), ``lsm`` (reservoir size), ``htm`` (columns
+        times cells per column) and ``htm_columns`` (the column count the
+        measurement framework takes).
+        """
+        bridge = getattr(self, "lsm_bridge", None)
+        snn_neurons = None
+        count = getattr(getattr(bridge, "snn", None), "_count_neurons", None)
+        if callable(count):
+            try:
+                snn_neurons = _as_count(count())
+            except Exception as e:
+                logger.debug(f"SNN neuron count unavailable: {e}")
+        lsm_config = getattr(getattr(bridge, "lsm", None), "config", None)
+        lsm_neurons = _as_count(getattr(lsm_config, "reservoir_size", None))
+        htm = getattr(getattr(self, "memory_consolidator", None), "htm", None)
+        htm_config = getattr(htm, "config", None)
+        columns = _as_count(getattr(htm_config, "num_columns", None))
+        cells = _as_count(getattr(htm_config, "cells_per_column", None))
+        return {
+            "snn": snn_neurons,
+            "lsm": lsm_neurons,
+            "htm": (
+                columns * cells if columns is not None and cells is not None else None
+            ),
+            "htm_columns": columns,
+        }
+
+    # ======== EXPERIENCE PROCESSING ========
+
     def process_experience(
         self,
         experience_type: str,
@@ -339,7 +574,8 @@ class NeuralOrchestrator:
         Process a new experience through all neural layers.
 
         This is the main entry point for experiencing the world.
-        Automatically flows through: SNN -> LSM -> Episodic Memory -> (eventual HTM consolidation)
+        Automatically flows through: SNN -> LSM -> Episodic Memory -> oscillatory
+        binding -> (eventual HTM consolidation).
 
         Args:
             experience_type: Type of experience
@@ -420,10 +656,15 @@ class NeuralOrchestrator:
 
         experience.episodic_memory = episodic_memory
 
+        # Oscillatory binding over what the substrates produced this cycle
+        self._run_binding(
+            subconscious_state, episodic_memory, emotions, valence, arousal
+        )
+
         # Add to experience buffer
         self.experience_buffer.append(experience)
 
-        # CAP: Prevent memory explosion if sleep fails
+        # Keep the most recent half when consolidation has not run
         if len(self.experience_buffer) > self.MAX_EXPERIENCE_BUFFER:
             logger.warning(
                 f"Experience buffer at {len(self.experience_buffer)}, "
@@ -453,74 +694,230 @@ class NeuralOrchestrator:
 
         self.total_experiences += 1
 
+        # Release cached accelerator allocations each cycle; without it the
+        # MPS cache grows until the next consolidation.
+        _release_accelerator_cache(include_cuda=False)
+
         # Check if time for sleep
         if self.should_sleep():
             logger.info("Time for memory consolidation...")
             self.sleep()
 
-        logger.info(f"Experience processed in {elapsed_ms:.1f}ms")
+        spikes = (
+            snn_result.get("total_spikes") if isinstance(snn_result, dict) else None
+        )
+        pattern = getattr(subconscious_state, "dominant_pattern", None)
+        logger.info(
+            f"Experience processed in {elapsed_ms:.1f}ms "
+            f"(SNN spikes: {spikes if spikes is not None else 'none'}, "
+            f"LSM pattern: {pattern if pattern is not None else 'none'})"
+        )
+
+        # Leave this cycle's substrate outputs readable; the next measurement
+        # cycle reads them.
+        self._stash_latest_signals(snn_result, subconscious_state, episodic_memory)
 
         return experience
 
-    def _htm_to_lsm_feedback(self, htm_signal: np.ndarray) -> float:
-        """
-        HTM memory predictions influence LSM reservoir dynamics.
+    # ======== OSCILLATORY BINDING ========
 
-        When HTM recognizes a familiar pattern, it stabilizes the LSM.
-        When HTM sees novelty, it excites the LSM for exploration.
+    def _run_binding(
+        self,
+        subconscious_state: Any,
+        episodic_memory: Any,
+        emotions: Dict[str, float],
+        valence: Optional[float],
+        arousal: Optional[float],
+    ) -> None:
+        """Bind this cycle's measured oscillator inputs and keep the result."""
+        binding = getattr(self, "oscillatory_binding", None)
+        if binding is None:
+            return
+        metrics = self._extract_binding_metrics(
+            subconscious_state, episodic_memory, emotions, valence, arousal
+        )
+        try:
+            result = binding.bind(metrics)
+        except Exception as e:
+            logger.warning(f"Oscillatory binding failed: {e}")
+            return
+        self._last_binding_result = result
+        self._binds_run = getattr(self, "_binds_run", 0) + 1
+        logger.debug(
+            f"Oscillatory binding: r={result.global_order_parameter:.3f}, "
+            f"{len(result.clusters)} clusters, {result.elapsed_ms:.2f}ms"
+        )
 
-        Args:
-            htm_signal: HTM output signal
-
-        Returns:
-            Feedback strength (-1.0 to 1.0) to modulate LSM dynamics
-        """
-        novelty = np.var(htm_signal)
-        feedback = np.tanh(novelty - 0.5)
-        return float(feedback)
-
-    def _lsm_to_snn_feedback(self, lsm_signal: np.ndarray) -> float:
-        """
-        LSM subconscious patterns modulate SNN conscious processing.
-
-        Strong subconscious patterns boost conscious attention.
-        Weak patterns allow conscious mind to wander.
-
-        Args:
-            lsm_signal: LSM reservoir state
-
-        Returns:
-            Feedback strength (0.0 to 1.0) to modulate SNN firing rates
-        """
-        pattern_strength = np.mean(np.abs(lsm_signal))
-        feedback = min(1.0, pattern_strength)
-        return float(feedback)
-
-    def _snn_to_emotion_feedback(
-        self, snn_signal: np.ndarray, current_emotions: Dict[str, float]
+    def _extract_binding_metrics(
+        self,
+        subconscious_state: Any,
+        episodic_memory: Any,
+        emotions: Optional[Dict[str, float]],
+        valence: Optional[float],
+        arousal: Optional[float],
     ) -> Dict[str, float]:
+        """Oscillator inputs for the binding layer, from what exists only.
+
+        Emotion oscillators come from the emotions supplied; LSM oscillators
+        from the reservoir output when there is one; HTM oscillators from a
+        live inference-only HTM pass when a consolidator with an HTM exists;
+        cross-modal oscillators only where a value was measured. Attention
+        focus, goal relevance and temporal urgency have no producer here and
+        stay unset (the binding layer reads an unset oscillator as zero).
         """
-        SNN spike patterns update emotional context.
+        emotions = emotions or {}
+        metrics: Dict[str, float] = {}
+        for name in _EMOTION_OSCILLATORS:
+            value = _finite(emotions.get(name))
+            if value is not None:
+                metrics[name] = value
 
-        High SNN activity intensifies emotions.
-        Low SNN activity dampens emotions.
+        trajectory = getattr(subconscious_state, "state_trajectory", None)
+        if subconscious_state is not None:
+            metrics.update(
+                _reservoir_binding_metrics(
+                    trajectory,
+                    getattr(subconscious_state, "emotional_coherence", None),
+                )
+            )
 
-        Args:
-            snn_signal: SNN output signal
-            current_emotions: Current emotional state
+        if episodic_memory is not None:
+            strength = _finite(getattr(episodic_memory, "consolidation_strength", None))
+            if strength is not None:
+                metrics["sequence_strength"] = strength
 
-        Returns:
-            Updated emotional state influenced by SNN activity
+        htm = getattr(getattr(self, "memory_consolidator", None), "htm", None)
+        if htm is not None and trajectory is not None:
+            metrics.update(self._live_htm_binding_metrics(htm, trajectory))
+
+        level = _finite(valence)
+        if level is not None:
+            metrics["valence"] = _unit((level + 1.0) / 2.0)
+        surprise = _finite(emotions.get("surprise"))
+        if surprise is not None:
+            metrics["novelty"] = surprise
+        level = _finite(arousal)
+        if level is not None:
+            metrics["arousal"] = _unit(level)
+        return metrics
+
+    def _live_htm_binding_metrics(self, htm: Any, pattern: Any) -> Dict[str, float]:
+        """HTM oscillator values from one live, inference-only HTM pass.
+
+        Accepts any HTM exposing ``process(pattern, learn=False)``. With
+        ``learn=False`` the spatial pooler and temporal memory change no
+        permanence or segment, so live binding cannot alter what consolidation
+        learned. Sets the anomaly, the burst fraction (unpredicted active
+        columns burst, so it equals the anomaly), the prediction accuracy and
+        the active-column density relative to the pooler's target sparsity;
+        leaves every other HTM oscillator unset; never raises.
         """
-        firing_intensity = np.mean(snn_signal)
-        modulation = 1.0 + (firing_intensity - 0.5) * 0.2
+        out: Dict[str, float] = {}
+        process = getattr(htm, "process", None)
+        if not callable(process) or pattern is None:
+            return out
+        try:
+            array = np.ravel(np.asarray(pattern, dtype=float))
+            if array.size == 0 or not np.all(np.isfinite(array)):
+                return out
+            size = _as_count(getattr(htm, "input_size", None))
+            if size:
+                array = _resize_pattern(array, size)
+            result = process(array, learn=False)
+            if not isinstance(result, dict):
+                return out
+            anomaly = _finite(result.get("anomaly_score"))
+            num_active = _finite(result.get("num_active_columns"))
+        except Exception as e:
+            logger.debug(f"Live HTM binding inference unavailable: {e}")
+            return {}
 
-        updated_emotions = {
-            emotion: min(1.0, max(0.0, value * modulation))
-            for emotion, value in current_emotions.items()
+        if anomaly is not None:
+            anomaly = _unit(anomaly)
+            out["anomaly_score"] = anomaly
+            out["burst_fraction"] = anomaly
+            out["prediction_accuracy"] = 1.0 - anomaly
+
+        pooler = getattr(htm, "spatial_pooler", None)
+        config = getattr(htm, "config", None)
+        columns = _as_count(getattr(pooler, "num_columns", None)) or _as_count(
+            getattr(config, "num_columns", None)
+        )
+        density = _finite(getattr(config, "local_area_density", None))
+        if density is None:
+            density = _finite(
+                getattr(getattr(pooler, "config", None), "local_area_density", None)
+            )
+        if num_active is not None and columns and density and density > 0:
+            target = max(1.0, columns * density)
+            out["active_columns"] = _unit(num_active / target)
+        return out
+
+    def get_binding_context(self) -> str:
+        """The latest binding context string, or an empty string before any."""
+        result = getattr(self, "_last_binding_result", None)
+        return result.context_string if result is not None else ""
+
+    def get_binding_stats(self) -> Dict[str, Any]:
+        """Latest binding values for RPT; empty before the first bind.
+
+        Keys: ``global_order_parameter`` and ``cross_coherence`` from the last
+        binding result, and ``binding_count``, the binds this orchestrator ran.
+        """
+        result = getattr(self, "_last_binding_result", None)
+        if result is None:
+            return {}
+        return {
+            "global_order_parameter": result.global_order_parameter,
+            "cross_coherence": result.cross_coherence,
+            "binding_count": getattr(self, "_binds_run", 0),
         }
 
-        return updated_emotions
+    def _stash_latest_signals(
+        self, snn_result: Any, subconscious_state: Any, episodic_memory: Any
+    ) -> None:
+        """Stash the substrate's latest real outputs for the measurement layer.
+
+        ``latest_neural_signals`` holds 1-D float arrays (``snn``: output firing
+        rates; ``lsm``: the last trajectory step; ``htm``: the episodic
+        pattern) and ``latest_substrate_states`` the raw substrate dicts
+        (``snn_state``, ``lsm_state``). Only what exists is stashed: a missing
+        output stays missing, and either attribute is None when nothing exists.
+        """
+        signals: Dict[str, np.ndarray] = {}
+        try:
+            output = _as_1d(snn_result["firing_rates"]["output"])
+        except (KeyError, TypeError, IndexError):
+            output = None
+        if output is not None:
+            signals["snn"] = output
+        trajectory = getattr(subconscious_state, "state_trajectory", None)
+        lsm_signal = _as_1d(trajectory) if trajectory is not None else None
+        if lsm_signal is not None:
+            signals["lsm"] = lsm_signal
+        pattern = getattr(episodic_memory, "subconscious_pattern", None)
+        htm_signal = _as_1d(pattern) if pattern is not None else None
+        if htm_signal is not None:
+            signals["htm"] = htm_signal
+        self.latest_neural_signals = signals or None
+
+        states: Dict[str, Dict[str, Any]] = {}
+        if isinstance(snn_result, dict) and snn_result:
+            states["snn_state"] = snn_result
+        lsm_state: Dict[str, Any] = {}
+        if trajectory is not None:
+            lsm_state["reservoir_state"] = trajectory
+        lsm_config = getattr(
+            getattr(getattr(self, "lsm_bridge", None), "lsm", None), "config", None
+        )
+        spectral_radius = _finite(getattr(lsm_config, "spectral_radius", None))
+        if lsm_state and spectral_radius is not None:
+            lsm_state["spectral_radius"] = spectral_radius
+        if lsm_state:
+            states["lsm_state"] = lsm_state
+        self.latest_substrate_states = states or None
+
+    # ======== SLEEP AND CONSOLIDATION ========
 
     def should_sleep(self) -> bool:
         """
@@ -631,13 +1028,15 @@ class NeuralOrchestrator:
 
     async def measure_consciousness(self):
         """
-        Measure current consciousness across 20 indicators.
+        Measure the 14 framework metrics on the latest substrate states.
 
-        This integrates actual neural states (SNN, LSM, HTM) with memories
-        and thoughts to produce research-grade consciousness measurements.
+        Feeds the last experience's real SNN firing rates and LSM trajectory
+        (and recent thoughts when the thought stream exists) to the
+        measurement framework in ``mtc.assessment.framework``.
 
         Returns:
-            ConsciousnessMetrics with 20 indicators or None if framework unavailable
+            ConsciousnessMetrics with the 14 framework metrics, or None when the
+            framework or the neural data is unavailable
         """
         if not self.consciousness_framework:
             logger.warning("Consciousness framework not available for measurement")
@@ -671,7 +1070,8 @@ class NeuralOrchestrator:
                 logger.warning("LSM states missing from subconscious")
                 return None
 
-            # Pull recent memories if available
+            # Recent memories arrive with the memory layer; thoughts come from
+            # the thought stream when it exists
             memories = []
             thoughts = []
             if self.thought_stream:
@@ -679,7 +1079,6 @@ class NeuralOrchestrator:
                     t.content for t in self.thought_stream.get_recent_thoughts(count=10)
                 ]
 
-            # Measure consciousness using REAL neural states
             logger.info(
                 f"Measuring consciousness with {len(snn_states)} SNN neurons, "
                 f"{len(lsm_states)} LSM timesteps, {len(memories)} memories, "
@@ -763,8 +1162,43 @@ class NeuralOrchestrator:
 
         return self.enhanced_workspace.get_attention_schema_state()
 
+    def _consolidation_strength(self) -> Optional[float]:
+        """Average consolidation strength, or None without a consolidator."""
+        summary_fn = getattr(
+            getattr(self, "memory_consolidator", None),
+            "get_consolidation_summary",
+            None,
+        )
+        if not callable(summary_fn):
+            return None
+        try:
+            summary = summary_fn()
+        except Exception as e:
+            logger.debug(f"Consolidation summary unavailable: {e}")
+            return None
+        if not isinstance(summary, dict):
+            return None
+        return _finite(summary.get("avg_consolidation_strength"))
+
+    @staticmethod
+    def _component_metric(component: Any, method: str) -> Optional[Any]:
+        """``component.method()``, or None without the component or on error."""
+        fn = getattr(component, method, None)
+        if not callable(fn):
+            return None
+        try:
+            return fn()
+        except Exception as e:
+            logger.debug(f"{method} unavailable: {e}")
+            return None
+
     def get_system_metrics(self) -> Dict[str, Any]:
-        """Get comprehensive metrics across all neural systems"""
+        """Get comprehensive metrics across all neural systems.
+
+        ``memory.consolidation_strength``, ``intuition`` and ``htm_metrics``
+        are None when their component is absent; ``components`` is the
+        ``available_components()`` map.
+        """
         # Get detailed bridge metrics if available
         bridge_metrics = {}
         if self.lsm_bridge:
@@ -786,6 +1220,7 @@ class NeuralOrchestrator:
                     "voluntary_ratio": schema_state.voluntary_ratio,
                 }
 
+        htm = getattr(self.memory_consolidator, "htm", None)
         return {
             "consciousness": {
                 "is_awake": self.state.is_awake,
@@ -797,6 +1232,7 @@ class NeuralOrchestrator:
                 "episodic_memories": self.state.episodic_memories_count,
                 "semantic_patterns": self.state.semantic_patterns_count,
                 "experiences_in_buffer": len(self.experience_buffer),
+                "consolidation_strength": self._consolidation_strength(),
             },
             "layers": {
                 "snn_active": self.state.snn_active,
@@ -804,12 +1240,17 @@ class NeuralOrchestrator:
                 "htm_active": self.state.htm_active,
             },
             "neural_bridge": bridge_metrics,
+            "intuition": self._component_metric(
+                self.lsm_bridge, "get_intuitive_summary"
+            ),
+            "htm_metrics": self._component_metric(htm, "get_metrics"),
             "enhanced_workspace": (
                 self.enhanced_workspace.get_statistics()
                 if self.enhanced_workspace
                 else {"available": False}
             ),
             "attention_schema": attention_schema_metrics,
+            "components": self.available_components(),
         }
 
     # ======== CONTINUOUS THOUGHT MACHINE CONTROLS ========
@@ -896,60 +1337,225 @@ class NeuralOrchestrator:
             return self.continuous_thought_machine.get_status()
         return {"running": False}
 
+    # ======== PERSISTENCE ========
+
+    def to_state_dict(self) -> Dict[str, Any]:
+        """Serialize counters, the last sleep time and the experience buffer.
+
+        The experience buffer is stored as lightweight entries (timestamp,
+        type, emotions, context, valence, arousal), so the state contains the
+        raw experience context text; treat persisted orchestrator state as
+        private data. Substrate results are not persisted.
+        """
+        experiences: List[Dict[str, Any]] = []
+        for exp in getattr(self, "experience_buffer", None) or []:
+            try:
+                experiences.append(
+                    {
+                        "timestamp": exp.timestamp.isoformat(),
+                        "experience_type": str(exp.experience_type),
+                        "emotions": {
+                            str(k): float(v) for k, v in (exp.emotions or {}).items()
+                        },
+                        "context": str(exp.context or ""),
+                        "valence": float(exp.valence),
+                        "arousal": float(exp.arousal),
+                    }
+                )
+            except (AttributeError, TypeError, ValueError):
+                continue
+
+        state = getattr(self, "state", None)
+        last_sleep = getattr(self, "last_sleep", None)
+        return {
+            "scalars": {
+                "total_experiences": int(getattr(self, "total_experiences", 0)),
+                "total_sleep_cycles": int(getattr(self, "total_sleep_cycles", 0)),
+                "binds_run": int(getattr(self, "_binds_run", 0)),
+                "last_sleep": last_sleep.isoformat() if last_sleep else None,
+                "experiences_processed": int(
+                    getattr(state, "experiences_processed", 0)
+                ),
+                "episodic_memories_count": int(
+                    getattr(state, "episodic_memories_count", 0)
+                ),
+                "semantic_patterns_count": int(
+                    getattr(state, "semantic_patterns_count", 0)
+                ),
+            },
+            "arrays": {},
+            "histories": {"experience_buffer": experiences},
+        }
+
+    @staticmethod
+    def _experience_from_entry(entry: Any) -> Optional[Experience]:
+        """Rebuild one persisted experience, or None when it is malformed."""
+        if not isinstance(entry, dict):
+            return None
+        try:
+            timestamp = datetime.fromisoformat(entry["timestamp"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        experience_type = entry.get("experience_type")
+        context = entry.get("context", "")
+        emotions = entry.get("emotions", {})
+        if not isinstance(experience_type, str) or not isinstance(context, str):
+            return None
+        if not isinstance(emotions, dict):
+            return None
+        clean_emotions: Dict[str, float] = {}
+        for name, value in emotions.items():
+            number = _finite(value)
+            if not isinstance(name, str) or number is None:
+                return None
+            clean_emotions[name] = number
+        valence = _finite(entry.get("valence"))
+        arousal = _finite(entry.get("arousal"))
+        if valence is None or arousal is None:
+            return None
+        return Experience(
+            timestamp=timestamp,
+            experience_type=experience_type,
+            emotions=clean_emotions,
+            context=context,
+            valence=valence,
+            arousal=arousal,
+        )
+
+    def from_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore counters, the last sleep time and the experience buffer.
+
+        Malformed entries are skipped with a logged warning; a restore never
+        raises on bad data.
+        """
+        scalars = state.get("scalars") or {}
+        histories = state.get("histories") or {}
+
+        for key in ("total_experiences", "total_sleep_cycles"):
+            value = _as_count(scalars.get(key))
+            if value is not None:
+                setattr(self, key, value)
+        binds = _as_count(scalars.get("binds_run"))
+        if binds is not None:
+            self._binds_run = binds
+        consciousness_state = getattr(self, "state", None)
+        if consciousness_state is not None:
+            for key in (
+                "experiences_processed",
+                "episodic_memories_count",
+                "semantic_patterns_count",
+            ):
+                value = _as_count(scalars.get(key))
+                if value is not None:
+                    setattr(consciousness_state, key, value)
+
+        last_sleep = scalars.get("last_sleep")
+        if last_sleep is not None:
+            try:
+                self.last_sleep = datetime.fromisoformat(last_sleep)
+            except (TypeError, ValueError):
+                logger.warning("Neural orchestrator restore skipped a bad last_sleep")
+
+        entries = histories.get("experience_buffer")
+        if entries is None:
+            return
+        if not isinstance(entries, list):
+            logger.warning(
+                "Neural orchestrator restore skipped a bad experience buffer"
+            )
+            return
+        rebuilt: List[Experience] = []
+        skipped = 0
+        for entry in entries:
+            experience = self._experience_from_entry(entry)
+            if experience is None:
+                skipped += 1
+            else:
+                rebuilt.append(experience)
+        limit = getattr(self, "MAX_EXPERIENCE_BUFFER", None)
+        if isinstance(limit, int) and limit > 0:
+            rebuilt = rebuilt[-limit:]
+        self.experience_buffer = rebuilt
+        if skipped:
+            logger.warning(
+                f"Neural orchestrator restore skipped {skipped} malformed "
+                f"experience entries"
+            )
+
+    # ======== SHUTDOWN ========
+
     async def shutdown(self) -> None:
         """
         Gracefully shutdown all neural systems and free memory.
 
+        Tolerates a partly built instance: every step checks that its
+        component exists.
+
         Cleanup order:
-        1. Stop continuous thought machine
+        1. Stop continuous thought machine (awaited)
         2. Clear experience buffer
         3. Clear LSM bridge state history
         4. Clear thought generator/stream caches
         5. Close data connections
         6. Force garbage collection
-        7. Clear GPU memory cache
+        7. Clear accelerator memory cache
         """
         import gc
-        import torch
 
         logger.info("Shutting down Neural Orchestrator...")
 
-        # 1. Stop continuous thought machine if running
-        if self.continuous_thought_machine:
+        # 1. Stop the continuous thought machine. Its stop() is a coroutine
+        # and must be awaited, or the loop keeps running through shutdown.
+        machine = getattr(self, "continuous_thought_machine", None)
+        if machine is not None:
             logger.info("Stopping continuous thought machine...")
-            self.continuous_thought_machine.stop()
+            stop = getattr(machine, "stop", None)
+            if callable(stop):
+                try:
+                    result = stop()
+                    if inspect.isawaitable(result):
+                        await result
+                except Exception as e:
+                    logger.warning(f"Error stopping continuous thought machine: {e}")
             self.continuous_thought_machine = None
 
         # 2. Clear experience buffer
-        buffer_size = len(self.experience_buffer)
-        if buffer_size > 0:
-            logger.info(f"Clearing {buffer_size} experiences from buffer...")
-            self.experience_buffer.clear()
+        buffer = getattr(self, "experience_buffer", None)
+        if buffer:
+            logger.info(f"Clearing {len(buffer)} experiences from buffer...")
+            buffer.clear()
 
         # 3. Clear LSM bridge state history and trajectories
-        if self.lsm_bridge:
-            if hasattr(self.lsm_bridge, "state_history"):
-                self.lsm_bridge.state_history.clear()
-            if hasattr(self.lsm_bridge, "reservoir_trajectory"):
-                self.lsm_bridge.reservoir_trajectory.clear()
+        bridge = getattr(self, "lsm_bridge", None)
+        if bridge:
+            if hasattr(bridge, "state_history"):
+                bridge.state_history.clear()
+            if hasattr(bridge, "reservoir_trajectory"):
+                bridge.reservoir_trajectory.clear()
             logger.info("Cleared LSM bridge state history")
 
         # 4. Clear thought generator caches
-        if self.thought_generator:
-            if hasattr(self.thought_generator, "recent_thought_types"):
-                self.thought_generator.recent_thought_types.clear()
+        generator = getattr(self, "thought_generator", None)
+        if generator:
+            if hasattr(generator, "recent_thought_types"):
+                generator.recent_thought_types.clear()
             logger.info("Cleared thought generator caches")
 
         # 5. Clear thought stream buffer
-        if self.thought_stream:
-            if hasattr(self.thought_stream, "thought_buffer"):
-                self.thought_stream.thought_buffer.clear()
+        stream = getattr(self, "thought_stream", None)
+        if stream:
+            if hasattr(stream, "thought_buffer"):
+                stream.thought_buffer.clear()
             logger.info("Cleared thought stream buffer")
 
-        # 6. Close data connections
-        if self.neural_data_manager:
+        # 6. Close data connections (sync or async close)
+        manager = getattr(self, "neural_data_manager", None)
+        close = getattr(manager, "close", None)
+        if callable(close):
             try:
-                await self.neural_data_manager.close()
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
                 logger.info("Data manager closed")
             except Exception as e:
                 logger.warning(f"Error closing data manager: {e}")
@@ -958,18 +1564,14 @@ class NeuralOrchestrator:
         gc.collect()
         logger.info("Garbage collection complete")
 
-        # 8. Clear GPU memory cache (MPS or CUDA)
-        try:
-            if torch.backends.mps.is_available():
-                torch.mps.empty_cache()
-                logger.info("MPS GPU cache cleared")
-            elif torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                logger.info("CUDA GPU cache cleared")
-        except Exception as e:
-            logger.warning(f"Error clearing GPU cache: {e}")
+        # 8. Clear accelerator memory cache (MPS or CUDA) when torch is loaded
+        released = _release_accelerator_cache(include_cuda=True)
+        if released:
+            logger.info(f"{released.upper()} cache cleared")
 
         # Update state
-        self.state.is_awake = False
+        state = getattr(self, "state", None)
+        if state is not None:
+            state.is_awake = False
 
-        logger.info("Neural Orchestrator shutdown complete - memory freed!")
+        logger.info("Neural Orchestrator shutdown complete")
