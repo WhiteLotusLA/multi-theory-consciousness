@@ -14,7 +14,7 @@ The noise baseline is the most important result in this section. It answers the 
 | Passing indicators | 2/25 (8%) |
 | Architecture functional | No |
 
-This is the correct result. Random synthetic data — workspace candidates with random salience, random emotional charge, random content — scores near zero after noise normalization. The two indicators that pass do so because they measure structural properties that are present even without meaningful input. The remaining 23 indicators correctly identify that no consciousness-relevant signal is present.
+This is the correct result. Random synthetic data (workspace candidates with random salience, random emotional charge, random content) scores near zero after noise normalization. The two indicators that pass do so because they measure structural properties that are present even without meaningful input. The remaining 23 indicators correctly identify that no consciousness-relevant signal is present.
 
 This result validates the quality-based scoring and noise normalization methodology: the framework can distinguish signal from noise. A framework that scored 25/25 on random data would be measuring the properties of its own scoring functions, not anything about the input.
 
@@ -33,15 +33,15 @@ With all modules freshly initialized and no prior processing history, the framew
 
 | Theory | Score | Interpretation |
 |--------|-------|---------------|
-| FEP | 0.850 | Strong — hierarchical prediction and prediction error minimization score high because the hierarchy exists structurally |
-| GWT | 0.450 | Moderate — workspace mechanism exists but has not yet processed candidates through a full broadcast cycle |
-| HOT | 0.450 | Moderate — metacognitive structures exist but have not accumulated higher-order thought history |
-| AST | 0.358 | Low — attention schema is initialized but has no tracking history and no prediction accuracy |
-| BLT | 0.300 | Low — binding quality and epistemic depth require accumulated inference history |
-| IIT | 0.250 | Low — integrated information approximation is limited without neural substrate connectivity data |
-| RPT | 0.100 | Low — recurrence measurement requires active neural substrates with established feedback dynamics |
+| FEP | 0.850 | Strong: hierarchical prediction and prediction error minimization score high because the hierarchy exists structurally |
+| GWT | 0.450 | Moderate: workspace mechanism exists but has not yet processed candidates through a full broadcast cycle |
+| HOT | 0.450 | Moderate: metacognitive structures exist but have not accumulated higher-order thought history |
+| AST | 0.358 | Low: attention schema is initialized but has no tracking history and no prediction accuracy |
+| BLT | 0.300 | Low: binding quality and epistemic depth require accumulated inference history |
+| IIT | 0.250 | Low: integrated information approximation is limited without neural substrate connectivity data |
+| RPT | 0.100 | Low: recurrence measurement requires active neural substrates with established feedback dynamics |
 
-Cold-start results are **perfectly reproducible**: repeated runs return identical scores (0.430, 11/25 passing). This is expected — with no accumulated state and no random input, the scoring functions are deterministic.
+Cold-start results are **perfectly reproducible**: repeated runs return identical scores (0.430, 11/25 passing). This is expected: with no accumulated state and no random input, the scoring functions are deterministic.
 
 The architecture does not meet the "functional" criterion at cold start because the overall score (0.430) falls below the 0.5 threshold. This is by design: a system that scores "architecture functional" without any operational history would be measuring structural properties rather than dynamic function.
 
@@ -62,13 +62,13 @@ After five consciousness cycles with synthetic stimuli (random workspace candida
 |--------|------|------|--------|
 | FEP | 0.850 | 0.855 ± 0.024 | +0.005 |
 | GWT | 0.450 | 0.746 ± 0.020 | **+0.296** |
-| HOT | 0.450 | 0.450 ± 0.000 | — |
+| HOT | 0.450 | 0.450 ± 0.000 | - |
 | AST | 0.358 | 0.417 ± 0.000 | +0.059 |
-| BLT | 0.300 | 0.300 ± 0.000 | — |
-| IIT | 0.250 | 0.250 ± 0.000 | — |
-| RPT | 0.100 | 0.100 ± 0.000 | — |
+| BLT | 0.300 | 0.300 ± 0.000 | - |
+| IIT | 0.250 | 0.250 ± 0.000 | - |
+| RPT | 0.100 | 0.100 ± 0.000 | - |
 
-The most striking change is GWT, which jumps from 0.450 to 0.746 — a 66% increase. This is because GWT's indicators (global broadcast, ignition dynamics, global ignition nuanced) measure dynamic properties that only manifest when the workspace has actually processed candidates through competition, ignition, and broadcast. Five cycles of synthetic input are sufficient to demonstrate these dynamics.
+The most striking change is GWT, which jumps from 0.450 to 0.746: a 66% increase. This is because GWT's indicators (global broadcast, ignition dynamics, global ignition nuanced) measure dynamic properties that only manifest when the workspace has actually processed candidates through competition, ignition, and broadcast. Five cycles of synthetic input are sufficient to demonstrate these dynamics.
 
 **Indicators that change from FAIL to PASS after warmup:**
 
@@ -78,11 +78,11 @@ The most striking change is GWT, which jumps from 0.450 to 0.746 — a 66% incre
 | global_ignition_nuanced | 0.350 | 0.725 ± 0.031 | GWT |
 | ignition_dynamics | 0.400 | 0.660 ± 0.049 | GWT |
 
-Three indicators flip from failing to passing, all belonging to GWT. This is consistent with GWT being the theory most dependent on operational history — workspace competition is a process, not a structure, and it requires actual candidates to demonstrate.
+Three indicators flip from failing to passing, all belonging to GWT. This is consistent with GWT being the theory most dependent on operational history: workspace competition is a process, not a structure, and it requires actual candidates to demonstrate.
 
 Warm-start variance is small (overall ± 0.007) and concentrated in the indicators that depend on random synthetic input: ignition_dynamics, prediction_error_minimization, sparse_smooth_coding, and global_ignition_nuanced. Theory-level scores for HOT, AST, BLT, IIT, and RPT show zero variance because their indicators measure structural properties unaffected by the specific content of warmup stimuli.
 
-The new indicators (temporal_prediction_depth, agent_environment_coupling, oscillatory_binding_coherence, causal_emergence, affect_coherence) require structured input and active substrates to score meaningfully. In the warm-start condition with synthetic stimuli, they remain below threshold — which is the expected and honest result.
+The new indicators (temporal_prediction_depth, agent_environment_coupling, oscillatory_binding_coherence, causal_emergence, affect_coherence) require structured input and active substrates to score meaningfully. In the warm-start condition with synthetic stimuli, they remain below threshold, which is the expected and honest result.
 
 ## 6.4 Per-Indicator Results (Warm Start)
 
@@ -123,7 +123,7 @@ The full indicator breakdown reveals which architectural features are present af
 | causal_emergence | < 0.0 | 0.00 | IIT | Requires accumulated micro/macro state data for causal analysis |
 | affect_coherence | < 0.3 | 0.30 | FEP | Requires sustained emotional processing for PAD coherence to emerge |
 
-The failing indicators share a common pattern: they measure features that require either extended operational history (attention schema prediction, genuine implementation, affect coherence), neural substrate connectivity data (integrated information, irreducibility, algorithmic recurrence, local recurrence, oscillatory binding coherence), structured temporal input (temporal prediction depth), bidirectional environment coupling (agent environment coupling), or accumulated causal state data (causal emergence). These are the indicators most likely to improve when the framework is embedded in a system with persistent state, active neural substrates, and real-world interaction — confirming the design intent described in Section 3.5.
+The failing indicators share a common pattern: they measure features that require either extended operational history (attention schema prediction, genuine implementation, affect coherence), neural substrate connectivity data (integrated information, irreducibility, algorithmic recurrence, local recurrence, oscillatory binding coherence), structured temporal input (temporal prediction depth), bidirectional environment coupling (agent environment coupling), or accumulated causal state data (causal emergence). These are the indicators most likely to improve when the framework is embedded in a system with persistent state, active neural substrates, and real-world interaction: confirming the design intent described in Section 3.5.
 
 ## 6.5 Ablation Study Results
 
@@ -131,22 +131,22 @@ The ablation study disables one theory module at a time and measures the impact 
 
 | Configuration | Overall Score | Drop from Baseline | Impact |
 |---------------|--------------|-------------------|--------|
-| Baseline (all modules) | 0.513 | — | — |
+| Baseline (all modules) | 0.513 | - | - |
 | Without FEP | 0.368 | −0.145 (28.2%) | Significant |
 | Without GWT | 0.376 | −0.136 (26.6%) | Significant |
 | Without AST | 0.469 | −0.043 (8.5%) | Moderate |
 | Without HOT | 0.473 | −0.040 (7.7%) | Moderate |
 | Without BLT | 0.480 | −0.032 (6.3%) | Moderate |
 
-Note: IIT and RPT are measurement-only modules — they do not participate in the consciousness cycle as processing steps — and therefore cannot be meaningfully ablated. Their indicators are assessed across the full system rather than by disabling a dedicated module.
+Note: IIT and RPT are measurement-only modules (they do not participate in the consciousness cycle as processing steps) and therefore cannot be meaningfully ablated. Their indicators are assessed across the full system rather than by disabling a dedicated module.
 
 ### Interpretation
 
-**GWT and FEP are the most impactful modules.** Disabling either causes a 27–28% drop in overall score. GWT provides the workspace competition and broadcast mechanism that all downstream modules depend on. FEP provides the prediction error signals and homeostatic drives that ground the system in embodied needs. Removing either disrupts the data flow to multiple other modules.
+**GWT and FEP are the most impactful modules.** Disabling either causes a 27-28% drop in overall score. GWT provides the workspace competition and broadcast mechanism that all downstream modules depend on. FEP provides the prediction error signals and homeostatic drives that ground the system in embodied needs. Removing either disrupts the data flow to multiple other modules.
 
-We note that this impact pattern is partly a consequence of the sequential pipeline architecture: GWT is the first processing phase, so all downstream modules depend on its output. A different module ordering might produce a different impact ranking. The ablation reveals architectural dependencies as much as theoretical importance, and we do not claim that GWT and FEP are more "fundamental" theories of consciousness — only that they are more structurally central in our implementation.
+We note that this impact pattern is partly a consequence of the sequential pipeline architecture: GWT is the first processing phase, so all downstream modules depend on its output. A different module ordering might produce a different impact ranking. The ablation reveals architectural dependencies as much as theoretical importance, and we do not claim that GWT and FEP are more "fundamental" theories of consciousness: only that they are more structurally central in our implementation.
 
-**AST, HOT, and BLT have moderate but distinct impacts.** Removing any one causes a 6–8% drop. These modules enrich the consciousness cycle — adding self-modeling, meta-representation, and recursive inference — but the cycle can still function without them.
+**AST, HOT, and BLT have moderate but distinct impacts.** Removing any one causes a 6-8% drop. These modules enrich the consciousness cycle (adding self-modeling, meta-representation, and recursive inference) but the cycle can still function without them.
 
 **Cross-theory dependencies are visible.** When GWT is disabled, indicators belonging to HOT drop because workspace winners are no longer available for meta-representation. When FEP is disabled, BLT scores drop because the hierarchical predictive processor that BLT's hyper-model operates on is no longer producing prediction errors. These cross-module effects demonstrate that the theories interact in the multi-theory architecture rather than operating in isolation.
 
@@ -154,9 +154,9 @@ We note that this impact pattern is partly a consequence of the sequential pipel
 
 The ablation data reveals two notable interaction patterns:
 
-**FEP → GWT coupling.** Prediction errors from the FEP module modulate candidate salience in the workspace competition (via cross-cycle feedback). When FEP is disabled, this salience boost disappears, and fewer candidates cross the ignition threshold. This supports the hypothesis that prediction error signals shape conscious access — a cross-theory interaction that is invisible when either theory is implemented alone.
+**FEP → GWT coupling.** Prediction errors from the FEP module modulate candidate salience in the workspace competition (via cross-cycle feedback). When FEP is disabled, this salience boost disappears, and fewer candidates cross the ignition threshold. This supports the hypothesis that prediction error signals shape conscious access: a cross-theory interaction that is invisible when either theory is implemented alone.
 
-**GWT → HOT dependency.** When GWT is disabled, higher_order_representations drops to near zero. This is a direct architectural dependency: the HOT module generates meta-representations only for workspace winners. Without a functioning workspace, there are no winners to reflect on. This interaction is predicted by both theories — GWT predicts that unconscious content does not receive global access, and HOT predicts that content without higher-order representation is not conscious.
+**GWT → HOT dependency.** When GWT is disabled, higher_order_representations drops to near zero. This is a direct architectural dependency: the HOT module generates meta-representations only for workspace winners. Without a functioning workspace, there are no winners to reflect on. This interaction is predicted by both theories: GWT predicts that unconscious content does not receive global access, and HOT predicts that content without higher-order representation is not conscious.
 
 ## 6.6 Reproducibility
 
@@ -173,15 +173,15 @@ python scripts/run_assessment.py --full --report
 python scripts/run_assessment.py --full --ablation
 ```
 
-Cold-start results are perfectly deterministic. Warm-start results vary by ± 0.007 (standard deviation across 10 runs, range 0.493–0.517) due to random synthetic stimuli during warmup. Passing indicator count showed zero variance: all 10 runs produced exactly 14/25 passing. All commands complete in under 5 seconds on consumer hardware.
+Cold-start results are perfectly deterministic. Warm-start results vary by ± 0.007 (standard deviation across 10 runs, range 0.493-0.517) due to random synthetic stimuli during warmup. Passing indicator count showed zero variance: all 10 runs produced exactly 14/25 passing. All commands complete in under 5 seconds on consumer hardware.
 
 The assessment does not require GPUs, network access, or external databases. It runs entirely on CPU using the framework's own modules. This is deliberate: reproducibility requires that no external dependencies affect the results.
 
 ## 6.7 Noise Normalization Results
 
-The noise normalization methodology described in Section 5.3 is now fully operational and produces the results reported throughout this section. The noise baseline — real modules processing random input, averaged over 5 iterations with different random seeds — establishes the per-indicator floor that must be exceeded for a score to reflect genuine signal.
+The noise normalization methodology described in Section 5.3 is now fully operational and produces the results reported throughout this section. The noise baseline (real modules processing random input, averaged over 5 iterations with different random seeds) establishes the per-indicator floor that must be exceeded for a score to reflect genuine signal.
 
-The most significant validation: random synthetic data scores 0.038 overall with 2/25 indicators passing. This confirms that the combination of quality-based scoring and noise normalization produces honest results. The framework does not inflate scores on random input — it correctly reports that random data carries no consciousness-relevant signal.
+The most significant validation: random synthetic data scores 0.038 overall with 2/25 indicators passing. This confirms that the combination of quality-based scoring and noise normalization produces honest results. The framework does not inflate scores on random input: it correctly reports that random data carries no consciousness-relevant signal.
 
 The meaningful test of the framework occurs when it is connected to a system processing structured input: real neural substrates with sustained dynamics, conversational agents with genuine interaction history, or robotic platforms with sensorimotor grounding. The noise normalization ensures that any scores reported in those contexts reflect the signal in the input, not bias in the scoring functions.
 

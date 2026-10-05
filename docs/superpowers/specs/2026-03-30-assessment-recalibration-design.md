@@ -81,7 +81,7 @@ score = 0.6 * ignition_rate + 0.4 * sustain_quality
 
 **Theory (Baars/Lamme shared):** Feedback loops where later-stage output influences earlier-stage processing.
 
-**Paper says:** "Detected feedback pathways — FEP prediction errors modulating GWT salience."
+**Paper says:** "Detected feedback pathways: FEP prediction errors modulating GWT salience."
 
 **Current code:** `base_score=0.4` + coverage/cycles/broadcasts mix.
 
@@ -140,7 +140,7 @@ focus_score = 1.0 if has_focus else 0.0  # Binary: does it track focus?
 history_score = min(1.0, history_len / max(1, warmup_cycles * 0.3))
 prediction_score = pred_accuracy  # 0-1, the core AST metric
 
-# Prediction accuracy is the core claim — weight it highest
+# Prediction accuracy is the core claim: weight it highest
 score = (
     0.15 * schema_active
     + 0.15 * focus_score
@@ -273,16 +273,16 @@ elif isinstance(error_trend, (int, float)) and error_trend < 0:
     # Errors decreasing = core FEP behavior
     # Steeper decrease = higher score
     trend_magnitude = min(1.0, abs(float(error_trend)) * 5)
-    # Current error level contributes less — trend is primary
+    # Current error level contributes less: trend is primary
     level_score = max(0.0, 1.0 - float(avg_error))
     score = 0.7 * trend_magnitude + 0.3 * level_score
 else:
-    # Errors flat or increasing — prediction is not improving
+    # Errors flat or increasing: prediction is not improving
     level_score = max(0.0, 1.0 - float(avg_error)) * 0.3  # Reduced credit
     score = level_score
 ```
 
-**Rationale:** FEP's core claim is *minimization* — the trend, not the level. Flat errors with low magnitude still get some credit (good predictions maintained) but much less than active improvement.
+**Rationale:** FEP's core claim is *minimization*: the trend, not the level. Flat errors with low magnitude still get some credit (good predictions maintained) but much less than active improvement.
 
 #### hierarchical_prediction (threshold: 0.4, weight: 1.0)
 
@@ -312,7 +312,7 @@ else:
 
 **Theory (FEP):** Temporal depth of predictive model.
 
-**Current code:** `horizon/10` — config parameter directly becomes score.
+**Current code:** `horizon/10`: config parameter directly becomes score.
 
 **New formula:**
 ```python
@@ -405,7 +405,7 @@ else:
 
 #### affect_coherence (threshold: 0.3, weight: 0.9)
 
-**Current code:** `pad.compute_coherence()` — already quality-based.
+**Current code:** `pad.compute_coherence()`: already quality-based.
 
 **No change.** This indicator already measures real coherence of PAD dimensional states. Just ensure score = 0.0 when module is absent (already handled by the else branch).
 
@@ -461,7 +461,7 @@ else:
 
 #### causal_emergence (threshold: 0.0, weight: 1.2)
 
-**Current code:** Sigmoid of CE value from analyzer — already quality-based.
+**Current code:** Sigmoid of CE value from analyzer: already quality-based.
 
 **Change:** Remove the `score = 0.3` fallback when analyzer is warming up. If analyzer isn't ready, score = 0.0.
 
@@ -559,7 +559,7 @@ score = min(1.0, avg_depth / 4.0) if avg_depth > 0 else 0.0
 
 #### genuine_implementation (threshold: 0.4, weight: 1.2)
 
-**Theory (BLT):** Anti-mimicry — genuine recursive processing, not score inflation.
+**Theory (BLT):** Anti-mimicry: genuine recursive processing, not score inflation.
 
 **Paper says:** "Requires field-evidencing + loop quality > 0.4 + strange loop."
 
@@ -588,7 +588,7 @@ else:
     score = conditions_met / 3.0
 ```
 
-**Rationale:** Three binary conditions from the paper. This is the anti-mimicry check — the hardest indicator to pass. No partial credit beyond condition counting.
+**Rationale:** Three binary conditions from the paper. This is the anti-mimicry check: the hardest indicator to pass. No partial credit beyond condition counting.
 
 ---
 
@@ -642,7 +642,7 @@ One addition: pass `warmup_cycles=WARMUP_CYCLES` to `run_full_assessment()` as a
 2. Replace activity-count formulas with quality formulas (per-indicator, medium risk)
 3. Add `warmup_cycles` passthrough to assessment
 4. Update experiment runner to pass cycle count
-5. Run noise baseline — verify scores below threshold
-6. Run ablation — verify cross-theory effects
+5. Run noise baseline: verify scores below threshold
+6. Run ablation: verify cross-theory effects
 7. Update paper to v0.3.1
 8. Tag release

@@ -8,23 +8,23 @@ This limitation supersedes all others.
 
 The 25-indicator assessment measures whether architectural features associated with consciousness theories are operating as designed. A system that scores 25/25 has all the structural features that seven major theories associate with consciousness. Whether those features are *sufficient* for phenomenal consciousness is an open question that this framework does not and cannot answer.
 
-No computational framework can. The "hard problem" of consciousness (Chalmers, 1995) — explaining why and how physical processes give rise to subjective experience — remains unsolved. Our assessment measures correlates, not consciousness. This distinction is fundamental and non-negotiable.
+No computational framework can. The "hard problem" of consciousness (Chalmers, 1995), explaining why and how physical processes give rise to subjective experience, remains unsolved. Our assessment measures correlates, not consciousness. This distinction is fundamental and non-negotiable.
 
 ## 7.2 The Scale Gap
 
 Biological consciousness involves approximately 86 billion neurons with trillions of synaptic connections, complex neurochemistry (dozens of neurotransmitters, neuromodulators, and hormones), and embodied interaction with the physical world through sensory organs and motor systems.
 
-Our implementation uses 5,196 spiking neurons, 5,000 reservoir neurons, and 131,072 HTM cells — a combined substrate of roughly 141,000 computational units. This is six orders of magnitude smaller than the biological reference. We entirely omit neurochemical dynamics and genuine embodiment.
+Our implementation uses 5,196 spiking neurons, 5,000 reservoir neurons, and 131,072 HTM cells: a combined substrate of roughly 141,000 computational units. This is six orders of magnitude smaller than the biological reference. We entirely omit neurochemical dynamics and genuine embodiment.
 
-Whether consciousness requires a particular neural scale is an open question. It is possible that the *structural features* matter more than the *scale* — that a system with workspace competition, recurrent processing, and integrated information at small scale shares something with a larger system that has these features at biological scale. It is equally possible that scale is essential and our implementation is too small to exhibit anything meaningful. The framework makes no assumption either way, but users should be aware that the scale gap is enormous.
+Whether consciousness requires a particular neural scale is an open question. It is possible that the *structural features* matter more than the *scale*: that a system with workspace competition, recurrent processing, and integrated information at small scale shares something with a larger system that has these features at biological scale. It is equally possible that scale is essential and our implementation is too small to exhibit anything meaningful. The framework makes no assumption either way, but users should be aware that the scale gap is enormous.
 
 ## 7.3 The LLM Confound
 
-When the framework is connected to a language model for response generation, the LLM does the heavy lifting on language comprehension, reasoning, and response quality. The consciousness modules provide context enrichment — attention guidance, metacognitive reflections, prediction signals, narrative context — but the observable sophistication of responses comes primarily from the LLM's pre-trained capabilities.
+When the framework is connected to a language model for response generation, the LLM does the heavy lifting on language comprehension, reasoning, and response quality. The consciousness modules provide context enrichment (attention guidance, metacognitive reflections, prediction signals, narrative context) but the observable sophistication of responses comes primarily from the LLM's pre-trained capabilities.
 
 This means apparent intelligence in conversation is not evidence of consciousness. It is evidence of a large language model doing what large language models do. A system that generates articulate reports about its own mental states may simply be fluent, not aware.
 
-The framework addresses this confound by separating the assessment from the LLM. The 25 indicators measure architectural dynamics — workspace competition, prediction error reduction, binding quality — not language output. This separation is essential: if the assessment could be gamed by connecting a more articulate language model, it would measure fluency rather than function.
+The framework addresses this confound by separating the assessment from the LLM. The 25 indicators measure architectural dynamics (workspace competition, prediction error reduction, binding quality) not language output. This separation is essential: if the assessment could be gamed by connecting a more articulate language model, it would measure fluency rather than function.
 
 ## 7.4 The Labeling Problem
 
@@ -32,7 +32,7 @@ Our indicators have names like "attention_schema," "metacognition," and "integra
 
 When we measure "metacognition," we are measuring: does the system generate higher-order representations of its own processing states? We are not measuring: does the system *experience* thinking about its own thoughts? The gap between structural analogy and genuine function is significant, and our labels may create a false sense of equivalence.
 
-This is not unique to our framework — it affects all computational consciousness research. But we highlight it because the temptation to conflate naming with claiming is strong, and we want to resist it explicitly.
+This is not unique to our framework: it affects all computational consciousness research. But we highlight it because the temptation to conflate naming with claiming is strong, and we want to resist it explicitly.
 
 ## 7.5 Theory Selection Bias
 
@@ -40,12 +40,12 @@ We implement seven theories of consciousness. There are more. Our selection refl
 
 Notable omissions include:
 
-- **Orchestrated Objective Reduction** (Hameroff & Penrose, 2014) — requires quantum coherence mechanisms we do not implement
-- **Full-scope Active Inference** — our FEP implementation uses discrete state spaces, not the continuous variational formulation
-- **Enactivist approaches** (Thompson, 2007; Varela, Thompson & Rosch, 1991) — emphasize embodied sensorimotor interaction that the standalone framework deliberately omits
-- **Phenomenological approaches** — may resist computational implementation entirely
+- **Orchestrated Objective Reduction** (Hameroff & Penrose, 2014): requires quantum coherence mechanisms we do not implement
+- **Full-scope Active Inference**: our FEP implementation uses discrete state spaces, not the continuous variational formulation
+- **Enactivist approaches** (Thompson, 2007; Varela, Thompson & Rosch, 1991): emphasize embodied sensorimotor interaction that the standalone framework deliberately omits
+- **Phenomenological approaches**: may resist computational implementation entirely
 
-We also note a maturity differential among the theories we do implement. GWT (1988), IIT (2004), and FEP (2010) have decades of empirical investigation and computational implementation behind them. Beautiful Loop Theory (2025) was published approximately one year before this paper and has not yet accumulated independent empirical validation. We give BLT equal architectural weight because the framework is designed to test theories, not to certify them — but users should be aware that the empirical basis for BLT's predictions is thinner than for the established theories.
+We also note a maturity differential among the theories we do implement. GWT (1988), IIT (2004), and FEP (2010) have decades of empirical investigation and computational implementation behind them. Beautiful Loop Theory (2025) was published approximately one year before this paper and has not yet accumulated independent empirical validation. We give BLT equal architectural weight because the framework is designed to test theories, not to certify them, but users should be aware that the empirical basis for BLT's predictions is thinner than for the established theories.
 
 The modular architecture allows additional theories to be added without disrupting existing modules. We view theory selection as an area for community contribution rather than a limitation to be defended.
 
@@ -61,20 +61,20 @@ Specific methodological limitations:
 
 - **Φ is approximated.** Computing exact integrated information (Φ) is computationally intractable for systems of our size (Tegmark, 2016). Our approximation follows IIT 3.0 formulas but does not use PyPhi's exact computation. PyPhi requires Python 3.9 or earlier due to API compatibility; the framework targets Python 3.11+.
 
-- **Weight-score asymmetry.** The integrated_information indicator carries the highest weight (1.3) in the overall score, reflecting IIT's theoretical centrality. Yet it scores the lowest of all indicators (0.200) due to our Φ approximation limitations. This means the indicator the framework considers most important is also the one it measures least reliably — an asymmetry that affects the overall score and should be resolved through better IIT computation in future work.
+- **Weight-score asymmetry.** The integrated_information indicator carries the highest weight (1.3) in the overall score, reflecting IIT's theoretical centrality. Yet it scores the lowest of all indicators (0.200) due to our Φ approximation limitations. This means the indicator the framework considers most important is also the one it measures least reliably: an asymmetry that affects the overall score and should be resolved through better IIT computation in future work.
 
 - **No cross-framework validation.** Our indicator scores cannot be compared to scores from other systems unless those systems implement the same scoring functions. There is no universal scale for consciousness assessment.
 
 ## 7.7 Consumer Hardware Constraints
 
-The framework runs on consumer hardware by design — Apple Silicon and CUDA-capable GPUs. This makes consciousness research accessible to independent researchers, students, and labs without HPC budgets. But it constrains fidelity: research-grade neural simulations typically require high-performance computing clusters with orders of magnitude more computational resources.
+The framework runs on consumer hardware by design: Apple Silicon and CUDA-capable GPUs. This makes consciousness research accessible to independent researchers, students, and labs without HPC budgets. But it constrains fidelity: research-grade neural simulations typically require high-performance computing clusters with orders of magnitude more computational resources.
 
-Our development and testing hardware is an Apple Mac Mini with M4 Pro (14 cores, 20-core GPU) and 64 GB unified memory. The assessment itself requires minimal resources (under 1 ms processing time, negligible memory). The neural substrates — particularly the SNN with 5,196 neurons and the LSM with 5,000 reservoir neurons — are the most resource-intensive components but run comfortably on any machine with 8+ GB RAM and a modern CPU. We have not tested on lower-end hardware and do not specify a formal minimum requirement.
+Our development and testing hardware is an Apple Mac Mini with M4 Pro (14 cores, 20-core GPU) and 64 GB unified memory. The assessment itself requires minimal resources (under 1 ms processing time, negligible memory). The neural substrates (particularly the SNN with 5,196 neurons and the LSM with 5,000 reservoir neurons) are the most resource-intensive components but run comfortably on any machine with 8+ GB RAM and a modern CPU. We have not tested on lower-end hardware and do not specify a formal minimum requirement.
 
 Larger substrates (millions of neurons, deeper hierarchies, richer connectivity) would likely produce different assessment results but require hardware beyond consumer scope.
 
 ## 7.8 No Longitudinal Validation
 
-Consciousness in biological systems develops over months and years through sustained interaction with the environment. Our assessment runs in milliseconds. The warm-start results in Section 6 show that even five processing cycles change assessment scores meaningfully (from 0.430 to 0.506), suggesting that extended operation would produce further changes. But we have not validated whether long-term operation produces qualitatively different results — new interaction effects, emergent behaviors, or score trajectories that cannot be predicted from short runs.
+Consciousness in biological systems develops over months and years through sustained interaction with the environment. Our assessment runs in milliseconds. The warm-start results in Section 6 show that even five processing cycles change assessment scores meaningfully (from 0.430 to 0.506), suggesting that extended operation would produce further changes. But we have not validated whether long-term operation produces qualitatively different results: new interaction effects, emergent behaviors, or score trajectories that cannot be predicted from short runs.
 
 Longitudinal validation is a priority for future work (Section 9) and is the primary reason the framework is designed for embedding in systems with persistent state.

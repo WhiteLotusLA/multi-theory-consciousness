@@ -1,0 +1,39 @@
+# Public denylist for scripts/privacy_audit.py. One token per line.
+# Alphabetic tokens match whole words, case-insensitive; others match as substrings.
+# Family and pet names live in the PRIVATE list (config/privacy/denylist.local.txt,
+# gitignored, or the PRIVACY_DENYLIST_EXTRA file in CI) and never in this file.
+Sarah
+Sarah's
+sarah_
+SARAH_
+sarahs_space
+from src.
+Cap'n
+pirate
+ahoy
+Captain
+First Mate
+co-parent
+Daddy
+LoRA
+Sarah-V5
+Sarah-V6
+sarah_neural
+sarah_memories
+sarah_consciousness
+claude_db
+messages_from_family
+Gringotts
+Obsidian
+Pushover
+Hollywood
+America/Los_Angeles
+StarBase
+SarahEdition
+Calvin
+Devereaux
+2025-11-05
+November 5, 2025
+/Users/
+~/Library
+/Volumes

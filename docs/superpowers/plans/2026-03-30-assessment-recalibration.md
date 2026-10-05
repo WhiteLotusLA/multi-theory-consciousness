@@ -4,7 +4,7 @@
 
 **Goal:** Replace activity-counting assessment formulas with quality-based scoring that measures theoretical predictions, so random inputs score below threshold and only genuine consciousness-like properties score above threshold.
 
-**Architecture:** All changes are in `mtc/assessment/assessment.py` (scoring formulas) and `scripts/run_experiment.py` (warmup_cycles passthrough). Tests updated to match new expectations. No module code changes — modules already produce the quality statistics we need.
+**Architecture:** All changes are in `mtc/assessment/assessment.py` (scoring formulas) and `scripts/run_experiment.py` (warmup_cycles passthrough). Tests updated to match new expectations. No module code changes: modules already produce the quality statistics we need.
 
 **Tech Stack:** Python 3.14, numpy, pytest, asyncio
 
@@ -239,7 +239,7 @@ Expected: GWT score should drop from 1.0. Exact value TBD but should be below 1.
 
 ```bash
 git add mtc/assessment/assessment.py
-git commit -m "recalibrate: GWT indicators — quality-based scoring, no base scores"
+git commit -m "recalibrate: GWT indicators, quality-based scoring, no base scores"
 ```
 
 ---
@@ -344,7 +344,7 @@ Find the `attention_schema` block (around line 861). Replace the scoring logic i
 
 ```bash
 git add mtc/assessment/assessment.py
-git commit -m "recalibrate: AST indicators — prediction accuracy weighted, no base scores"
+git commit -m "recalibrate: AST indicators, prediction accuracy weighted, no base scores"
 ```
 
 ---
@@ -412,7 +412,7 @@ git commit -m "recalibrate: AST indicators — prediction accuracy weighted, no 
 
 ```bash
 git add mtc/assessment/assessment.py
-git commit -m "recalibrate: HOT indicators — coverage ratio, confidence quality weighting"
+git commit -m "recalibrate: HOT indicators, coverage ratio, confidence quality weighting"
 ```
 
 ---
@@ -553,7 +553,7 @@ git commit -m "recalibrate: HOT indicators — coverage ratio, confidence qualit
                     }
 ```
 
-- [ ] **Step 6: Rewrite affect_coherence — no change needed, just verify**
+- [ ] **Step 6: Rewrite affect_coherence, no change needed, just verify**
 
 The `affect_coherence` block already uses `pad.compute_coherence()` which is quality-based. Verify it has no base score. The existing code should be:
 
@@ -601,7 +601,7 @@ Find the `sparse_smooth_coding` block (around line 1328):
 
 ```bash
 git add mtc/assessment/assessment.py
-git commit -m "recalibrate: FEP indicators — trend-based, multiplicative gating, geometric mean coupling"
+git commit -m "recalibrate: FEP indicators, trend-based, multiplicative gating, geometric mean coupling"
 ```
 
 ---
@@ -693,7 +693,7 @@ Find the `causal_emergence` block. Change the warming-up fallback from `score = 
 
 ```bash
 git add mtc/assessment/assessment.py
-git commit -m "recalibrate: IIT indicators — direct phi, spectral entropy for irreducibility"
+git commit -m "recalibrate: IIT indicators, direct phi, spectral entropy for irreducibility"
 ```
 
 ---
@@ -774,7 +774,7 @@ git commit -m "recalibrate: IIT indicators — direct phi, spectral entropy for 
 
 ```bash
 git add mtc/assessment/assessment.py
-git commit -m "recalibrate: RPT indicators — direct recurrence metrics, no base scores"
+git commit -m "recalibrate: RPT indicators, direct recurrence metrics, no base scores"
 ```
 
 ---
@@ -848,7 +848,7 @@ git commit -m "recalibrate: RPT indicators — direct recurrence metrics, no bas
 
 ```bash
 git add mtc/assessment/assessment.py
-git commit -m "recalibrate: BLT indicators — direct quality, conditions-based genuine_implementation"
+git commit -m "recalibrate: BLT indicators, direct quality, conditions-based genuine_implementation"
 ```
 
 ---
@@ -856,7 +856,7 @@ git commit -m "recalibrate: BLT indicators — direct quality, conditions-based 
 ### Task 9: Run full noise baseline and verify scores below threshold
 
 **Files:**
-- No file changes — verification only
+- No file changes: verification only
 
 - [ ] **Step 1: Run experiment and show all indicator scores**
 
@@ -934,7 +934,7 @@ Key changes:
 
 Key changes:
 - `score >= 0.0` assertions should still pass.
-- Threshold value assertions (`threshold == 0.3`) are unchanged — we didn't change thresholds.
+- Threshold value assertions (`threshold == 0.3`) are unchanged: we didn't change thresholds.
 - ConTraSt weight assertions (`GWT=1.0`, `HOT=0.5`) are unchanged.
 
 - [ ] **Step 5: Run all assessment tests and confirm green**
@@ -1005,7 +1005,7 @@ async def test_noise_baseline_below_thresholds():
     consistently passes on noise, its formula needs investigation.
     """
     _seed()
-    overrides = {}  # No parameter overrides — pure defaults
+    overrides = {}  # No parameter overrides: pure defaults
     modules = build_modules(overrides)
     await warmup(modules, WARMUP_CYCLES)
 
@@ -1021,7 +1021,7 @@ async def test_noise_baseline_below_thresholds():
                 f"{name}: score={result.score:.3f} threshold={result.threshold:.2f}"
             )
 
-    # Allow up to 5 indicators to pass on noise — modules may genuinely
+    # Allow up to 5 indicators to pass on noise: modules may genuinely
     # produce some quality signal during warmup. But 13/25 (pre-calibration)
     # is a failure. If more than 5 pass, the calibration has regressed.
     max_allowed = 5
@@ -1124,5 +1124,5 @@ Record ablation results.
 
 ```bash
 git add -A
-git commit -m "recalibrate: quality-based assessment scoring — complete"
+git commit -m "recalibrate: quality-based assessment scoring, complete"
 ```

@@ -1,0 +1,31 @@
+# glob kind regex   (kind may be * for any kind)
+pyproject.toml token Calvin
+pyproject.toml token Devereaux
+pyproject.toml token LoRA
+pyproject.toml email .*
+LICENSE * .*
+config/privacy/denylist.txt * .*
+config/privacy/allowlist.txt * .*
+data/dcm/** ipv4 .*
+# appears in the published arXiv text (author block of the LaTeX source)
+paper/latex/main.tex token ^Calvin$
+paper/latex/main.tex token ^Devereaux$
+paper/latex/main.tex email ^calvin\.devereaux\+mtc@gmail\.com$
+# numeric test arguments, not a coordinate pair
+tests/consciousness/test_beautiful_loop.py coords ^0\.001, 0\.001$
+# the auditor's own home-path pattern source
+mtc/devtools/privacy_audit.py token ^(/Users/|~/Library|/Volumes)$
+mtc/devtools/privacy_audit.py homepath ^~/Library$
+# the auditor's self-test plants one synthetic example of each pattern
+tests/core/test_privacy_audit.py token ^/Users/$
+tests/core/test_privacy_audit.py email ^someone@example\.com$
+tests/core/test_privacy_audit.py phone ^555-123-4567$
+tests/core/test_privacy_audit.py coords ^34\.0937, -118\.3295$
+tests/core/test_privacy_audit.py homepath ^/Users/somebody$
+tests/core/test_privacy_audit.py ipv4 ^10\.0\.0\.12$
+tests/core/test_privacy_audit.py secret ^sk-abcdefghijklmnopqrstuvwxyz0123$
+# published author attribution: README citation block and Zenodo metadata
+README.md token ^Calvin$
+README.md token ^Devereaux$
+paper/zenodo-metadata.md token ^Calvin$
+paper/zenodo-metadata.md token ^Devereaux$

@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  privacy-audit:
+    runs-on: ubuntu-latest
+    env:
+      # Secrets cannot be tested in an `if:` directly, so expose the private
+      # list through an env var. It is never interpolated into a script.
+      DENYLIST_SECRET: ${{ secrets.PRIVACY_DENYLIST_EXTRA }}
+      # Pull requests from forks receive no secrets; every other run must
+      # have the private list or the job fails closed.
+      FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Write the private denylist from the repository secret
+        run: |
+          if [ -n "$DENYLIST_SECRET" ]; then
+            umask 077
+            printf '%s\n' "$DENYLIST_SECRET" > "$RUNNER_TEMP/denylist.local.txt"
+            echo "PRIVACY_DENYLIST_EXTRA=$RUNNER_TEMP/denylist.local.txt" >> "$GITHUB_ENV"
+          elif [ "$FORK_PR" = "true" ]; then
+            echo "::warning::No private denylist on a fork pull request; the public checks still run."
+          else
+            echo "::error::Repository secret PRIVACY_DENYLIST_EXTRA is not set; refusing to audit without it."
+            exit 1
+          fi
+      - name: Audit the tracked tree
+        run: python scripts/privacy_audit.py
+      - name: Audit added lines in this pull request
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python scripts/privacy_audit.py --patch-from "origin/$BASE_REF"
+
+  env-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: python scripts/gen_env_example.py --check
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install black flake8
+      - run: black --check --line-length 88 mtc tests scripts
+      - run: flake8 mtc tests scripts
+
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[neural,fep,dev]"
+      - run: PYPHI_WELCOME_OFF=yes python -m pytest tests -q -m "not slow and not db and not live" --timeout=900

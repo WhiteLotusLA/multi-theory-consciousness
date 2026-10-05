@@ -1,1 +1,1 @@
-Baseline values are approximate — verify against paper before publication
+Baseline values are approximate - verify against paper before publication
