@@ -1,17 +1,18 @@
 """
- Tests for Active Inference Module - Phase 5 FEP
-=====================================================
+Tests for Active Inference Module - Free Energy Principle
+=========================================================
 
 Comprehensive tests for the system's Active Inference implementation,
 covering the Free Energy Principle, Predictive Processing, and
 Homeostatic Drives.
 
 Tests verify:
-1. ActiveInferenceConfig - Configuration validation
+1. ActiveInferenceConfig - Configuration validation and world models
 2. HomeostaticDrives - Internal need tracking and valence
-3. HierarchicalPredictiveProcessor - Multi-level predictions
+3. HierarchicalPredictiveProcessor - Multi-level predictions that learn
 4. ActiveInferenceModule - Core FEP implementation with pymdp
-5. Integration with EnhancedGlobalWorkspace
+5. Observation reconnect, workspace precision feedback, narration gates
+6. Integration with EnhancedGlobalWorkspace
 
 Research Foundation:
 - Friston, K. (2010). "The Free Energy Principle: A Unified Brain Theory?"
@@ -23,10 +24,18 @@ Created: December 5, 2025
 Author: Multi-Theory Consciousness Project
 """
 
+import importlib.util
+import json
+import logging
+import sys
+
 import pytest
 import numpy as np
 
+import mtc.consciousness.active_inference as active_inference_module_file
 from mtc.consciousness.active_inference import (
+    CONVERSATIONAL_OBSERVATION_LABELS,
+    MAX_POLICIES,
     ActiveInferenceConfig,
     HomeostaticConfig,
     HomeostaticDrive,
@@ -58,7 +67,7 @@ def custom_config():
         num_hidden_states=16,
         num_observations=8,
         num_actions=6,
-        planning_horizon=5,
+        planning_horizon=4,  # 6 ** 4 = 1296 policies, under MAX_POLICIES
         gamma=20.0,
         enable_homeostasis=True,
     )
@@ -112,7 +121,7 @@ class TestActiveInferenceConfig:
         assert custom_config.num_hidden_states == 16
         assert custom_config.num_observations == 8
         assert custom_config.num_actions == 6
-        assert custom_config.planning_horizon == 5
+        assert custom_config.planning_horizon == 4
         assert custom_config.gamma == 20.0
 
     def test_learning_rates_in_valid_range(self, default_config):
@@ -942,14 +951,34 @@ class TestSelfReferentialInference:
 
     @pytest.mark.asyncio
     async def test_meta_state_updated_after_inference(self, meta_module):
-        """Test that infer_and_act updates the meta-state."""
+        """The meta-state updates once a recorded forecast has been scored.
+
+        The first cycle only records a forecast of the next observation; the
+        second cycle scores it and feeds the verdict to the meta-state.
+        """
         assert meta_module.meta_state.total_predictions == 0
 
         observation = np.array([0.8, 0.1, 0.05, 0.03, 0.02])
         await meta_module.infer_and_act(observation)
+        assert meta_module.meta_state.total_predictions == 0
+        assert meta_module.prediction_ledger.pending_count == 1
 
+        await meta_module.infer_and_act(observation)
         assert meta_module.meta_state.total_predictions == 1
         assert len(meta_module.meta_state._accuracy_history) == 1
+        assert meta_module.prediction_ledger.scored_count == 1
+
+    @pytest.mark.asyncio
+    async def test_median_method_updates_every_cycle(self):
+        """The v0.4.0 median verdict updates the meta-state every cycle."""
+        module = ActiveInferenceModule(
+            ActiveInferenceConfig(meta_accuracy_method="median")
+        )
+        observation = np.array([0.8, 0.1, 0.05, 0.03, 0.02])
+        await module.infer_and_act(observation)
+
+        assert module.meta_state.total_predictions == 1
+        assert len(module.meta_state._accuracy_history) == 1
 
     @pytest.mark.asyncio
     async def test_meta_prediction_after_multiple_inferences(self, meta_module):
@@ -960,11 +989,23 @@ class TestSelfReferentialInference:
             await meta_module.infer_and_act(observation)
 
         ms = meta_module.meta_state
-        assert ms.total_predictions == 10
-        assert len(ms._accuracy_history) == 10
-        assert len(ms._confidence_history) == 10
+        # Ten cycles score nine forecasts (the first has nothing to score).
+        assert ms.total_predictions == 9
+        assert len(ms._accuracy_history) == 9
+        assert len(ms._confidence_history) == 9
         # predicted_accuracy should have moved from initial 0.5
         assert ms.predicted_accuracy != 0.5
+
+    @pytest.mark.asyncio
+    async def test_meta_verdict_comes_from_the_ledger(self, meta_module):
+        """Each meta-state outcome is the ledger's verdict for that cycle."""
+        observation = np.array([0.8, 0.1, 0.05, 0.03, 0.02])
+        for _ in range(6):
+            await meta_module.infer_and_act(observation)
+
+        ledger_outcomes = [o.was_accurate for o in meta_module.prediction_ledger.scored]
+        assert meta_module.meta_state._recent_outcomes == ledger_outcomes
+        assert meta_module.meta_state.correct_predictions == sum(ledger_outcomes)
 
     @pytest.mark.asyncio
     async def test_calibration_over_time(self, meta_module):
@@ -1043,10 +1084,559 @@ class TestSelfReferentialInference:
     async def test_meta_cognitive_load_reflects_error(self, meta_module):
         """Test that cognitive_load in meta-state reflects prediction error."""
         observation = np.array([0.8, 0.1, 0.05, 0.03, 0.02])
+        await meta_module.infer_and_act(observation)
         result = await meta_module.infer_and_act(observation)
 
         expected_load = min(1.0, result.prediction_error)
         assert meta_module.meta_state.cognitive_load == expected_load
+
+
+# ============================================================================
+# HIERARCHY LEARNING (hidden dims equal input dims)
+# ============================================================================
+
+FAST = dict(num_hidden_states=4, num_actions=2, planning_horizon=2)
+
+
+def _fast_module(**overrides):
+    return ActiveInferenceModule(ActiveInferenceConfig(**{**FAST, **overrides}))
+
+
+class TestHierarchyLearning:
+    """The hierarchy's beliefs must move with real input."""
+
+    def test_hidden_dims_equal_input_dims_by_default(self, hierarchical_processor):
+        for level in hierarchical_processor.levels:
+            assert level.hidden_dim == level.input_dim
+
+    def test_module_passes_hidden_dim_multiplier(self):
+        module = _fast_module(hpp_hidden_dim_multiplier=2)
+        for level in module.hierarchical_processor.levels:
+            assert level.hidden_dim == 2 * level.input_dim
+
+    @pytest.mark.asyncio
+    async def test_beliefs_update_from_prediction_errors(self, hierarchical_processor):
+        rng = np.random.default_rng(11)
+        before = [level.beliefs.copy() for level in hierarchical_processor.levels]
+        for _ in range(5):
+            await hierarchical_processor.process_bottom_up(rng.uniform(-1, 1, 64))
+        for i, level in enumerate(hierarchical_processor.levels):
+            assert not np.allclose(before[i], level.beliefs), f"level {i} frozen"
+
+    @pytest.mark.asyncio
+    async def test_belief_update_consumes_full_error(self):
+        level = PredictiveLevel(
+            level_id=0,
+            input_dim=6,
+            hidden_dim=6,
+            output_dim=3,
+            learning_rate=0.5,
+            time_constant=1.0,
+        )
+        await level.update_beliefs(np.arange(6, dtype=float))
+        np.testing.assert_allclose(level.beliefs, 0.5 * np.arange(6))
+
+    @pytest.mark.asyncio
+    async def test_short_error_skips_update_and_warns_rate_limited(self, caplog):
+        level = PredictiveLevel(
+            level_id=3,
+            input_dim=4,
+            hidden_dim=8,
+            output_dim=2,
+            learning_rate=0.5,
+            time_constant=1.0,
+        )
+        logger_name = "mtc.consciousness.active_inference"
+        with caplog.at_level(logging.WARNING, logger=logger_name):
+            for _ in range(3):
+                await level.update_beliefs(np.ones(4))
+
+        assert level.skipped_updates == 3
+        assert np.all(level.beliefs == 0.0)
+        warnings = [r for r in caplog.records if "belief update skipped" in r.message]
+        assert len(warnings) == 1
+
+    @pytest.mark.asyncio
+    async def test_legacy_multiplier_freezes_hierarchy(self):
+        from mtc.consciousness.active_inference import HPPConfig
+
+        frozen = HierarchicalPredictiveProcessor(HPPConfig(hidden_dim_multiplier=2))
+        rng = np.random.default_rng(5)
+        for _ in range(5):
+            await frozen.process_bottom_up(rng.uniform(-1, 1, 64))
+        for level in frozen.levels:
+            assert np.all(level.beliefs == 0.0)
+
+    @pytest.mark.asyncio
+    async def test_beliefs_stay_bounded(self, hierarchical_processor):
+        rng = np.random.default_rng(7)
+        for _ in range(50):
+            await hierarchical_processor.process_bottom_up(rng.uniform(-5, 5, 64))
+        for level in hierarchical_processor.levels:
+            assert np.all(np.isfinite(level.beliefs))
+            assert np.all(np.abs(level.beliefs) <= 10.0)
+
+
+# ============================================================================
+# WORLD MODELS AND STRUCTURED PRIORS
+# ============================================================================
+
+
+class TestWorldModels:
+    """World-model presets, structured priors and configuration guards."""
+
+    def test_default_world_model_is_compact(self, active_inference_module):
+        assert active_inference_module.world_model == "compact_8x5x4"
+        assert active_inference_module.observation_labels == [
+            "integration",
+            "emotional_arousal",
+            "cognitive_load",
+            "ignition_strength",
+            "social_content",
+        ]
+
+    def test_conversational_model_dimensions_and_labels(self):
+        config = ActiveInferenceConfig(world_model="conversational_16x10x8")
+        assert (config.num_hidden_states, config.num_observations) == (16, 10)
+        assert config.num_actions == 8
+        assert config.planning_horizon == 3  # 8 ** 3 = 512 policies
+
+        module = ActiveInferenceModule(config)
+        assert module.observation_labels == list(CONVERSATIONAL_OBSERVATION_LABELS)
+        assert len(module.hidden_state_labels) == 16
+        assert len(module.action_labels) == 8
+
+    def test_structured_priors_are_normalized_and_labelled(self):
+        module = ActiveInferenceModule(
+            ActiveInferenceConfig(world_model="conversational_16x10x8")
+        )
+        A, B, D = module.A[0], module.B[0], module.D[0]
+        np.testing.assert_allclose(A.sum(axis=0), np.ones(16))
+        for a in range(8):
+            np.testing.assert_allclose(B[:, :, a].sum(axis=0), np.ones(16))
+        assert D.sum() == pytest.approx(1.0)
+
+        obs = module.observation_index
+        state = module.hidden_state_index
+        # A calm state mostly produces a neutral tone, a positive one a warm tone
+        assert np.argmax(A[:, state["calm"]]) == obs["neutral_tone"]
+        assert np.argmax(A[:, state["positive"]]) == obs["warm_tone"]
+        # Validating a feeling moves a negative state toward calm
+        validate = module.action_index["validate_feeling"]
+        column = B[:, state["negative"], validate]
+        assert column[state["calm"]] > column[state["positive"]]
+        # Conversations start calm
+        assert np.argmax(D) == state["calm"]
+        # Preferences are set by label
+        assert module.C[obs["warm_tone"]] == 2.0
+        assert module.C[obs["tense_tone"]] == -1.5
+
+    @pytest.mark.asyncio
+    async def test_structured_initializers_only_for_matching_dims(self):
+        # The parameter sweep runs 2 states and 2 actions on the compact model
+        module = ActiveInferenceModule(
+            ActiveInferenceConfig(num_hidden_states=2, num_actions=2)
+        )
+        assert module.A[0].shape == (5, 2)
+        assert module.B[0].shape == (2, 2, 2)
+        module.modulate_precision_from_workspace(
+            [{"content_type": "emotion", "activation_level": 0.9}]
+        )
+        for _ in range(3):
+            result = await module.infer_and_act(np.array([0.5, 0.2, 0.1, 0.1, 0.1]))
+            assert result.posterior_beliefs.shape == (2,)
+        assert len(await module.predict_next(horizon=2)) == 2
+
+        # The conversational model has fixed dimensions
+        with pytest.raises(ValueError, match="conversational_16x10x8"):
+            ActiveInferenceConfig(
+                world_model="conversational_16x10x8", num_hidden_states=8
+            )
+        with pytest.raises(ValueError, match="num_actions"):
+            ActiveInferenceConfig(world_model="conversational_16x10x8", num_actions=4)
+
+        # Matching explicit dimensions are accepted
+        config = ActiveInferenceConfig(
+            world_model="conversational_16x10x8",
+            num_hidden_states=16,
+            num_observations=10,
+            num_actions=8,
+        )
+        assert config.num_hidden_states == 16
+
+    def test_custom_model_accepts_any_dims_and_labels(self):
+        config = ActiveInferenceConfig(
+            world_model="custom",
+            num_hidden_states=3,
+            num_observations=3,
+            num_actions=2,
+            observation_labels=["warm_tone", "pressure", "quiet"],
+            preferences={"warm_tone": 1.0, "pressure": -1.0},
+        )
+        module = ActiveInferenceModule(config)
+        assert module.observation_labels == ["warm_tone", "pressure", "quiet"]
+        np.testing.assert_array_equal(module.C, [1.0, -1.0, 0.0])
+
+        with pytest.raises(ValueError, match="observation_labels"):
+            ActiveInferenceConfig(
+                world_model="custom", num_observations=3, observation_labels=["a"]
+            )
+        with pytest.raises(ValueError, match="observation_labels"):
+            ActiveInferenceConfig(observation_labels=["a", "b", "c", "d", "e"])
+
+    def test_preferences_by_label(self):
+        module = ActiveInferenceModule(
+            ActiveInferenceConfig(
+                world_model="conversational_16x10x8",
+                preferences={"novel_topic": 3.0},
+            )
+        )
+        expected = np.zeros(10)
+        expected[module.observation_index["novel_topic"]] = 3.0
+        np.testing.assert_array_equal(module.C, expected)
+
+        with pytest.raises(ValueError, match="unknown observation labels"):
+            ActiveInferenceConfig(preferences={"warm_tone": 1.0})
+
+    def test_planning_horizon_policy_guard(self):
+        with pytest.raises(ValueError) as excinfo:
+            ActiveInferenceConfig(num_actions=8, planning_horizon=5)
+        message = str(excinfo.value)
+        assert "planning_horizon=5" in message and "num_actions=8" in message
+
+        # At the limit is fine: 4 ** 5 = 1024, 2 ** 10 = 1024
+        assert 4**5 <= MAX_POLICIES
+        ActiveInferenceConfig(num_actions=4, planning_horizon=5)
+        ActiveInferenceConfig(num_actions=2, num_hidden_states=2, planning_horizon=10)
+
+    @pytest.mark.parametrize(
+        "field, value",
+        [
+            ("world_model", "unknown"),
+            ("meta_accuracy_method", "coin"),
+            ("hpp_hidden_dim_multiplier", 0),
+            ("num_hidden_states", 0),
+        ],
+    )
+    def test_invalid_switch_values_raise(self, field, value):
+        with pytest.raises(ValueError, match=field):
+            ActiveInferenceConfig(**{field: value})
+
+
+# ============================================================================
+# PYMDP IS OPTIONAL AT IMPORT TIME
+# ============================================================================
+
+
+class TestPymdpOptional:
+    """Importing the module never needs pymdp; constructing it does."""
+
+    def test_clear_error_without_pymdp(self, monkeypatch):
+        monkeypatch.setattr(active_inference_module_file, "Agent", None)
+        with pytest.raises(ImportError) as excinfo:
+            ActiveInferenceModule()
+        message = str(excinfo.value)
+        assert "pymdp is required" in message
+        assert "multi-theory-consciousness[fep]" in message
+
+    def test_module_imports_without_pymdp(self, monkeypatch):
+        for name in list(sys.modules):
+            if name == "pymdp" or name.startswith("pymdp."):
+                monkeypatch.setitem(sys.modules, name, None)
+        monkeypatch.setitem(sys.modules, "pymdp", None)
+
+        spec = importlib.util.spec_from_file_location(
+            "isolated_active_inference", active_inference_module_file.__file__
+        )
+        isolated = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(isolated)
+
+        assert isolated.Agent is None
+        assert isolated.ActiveInferenceConfig().num_hidden_states == 8
+        with pytest.raises(ImportError, match="multi-theory-consciousness"):
+            isolated.ActiveInferenceModule()
+
+
+# ============================================================================
+# OBSERVATION RECONNECT
+# ============================================================================
+
+
+class TestObservationReconnect:
+    """The discrete agent infers on the workspace vector, not HPP beliefs."""
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            dict(),
+            dict(world_model="conversational_16x10x8"),
+        ],
+    )
+    def test_observation_has_model_length(self, config):
+        module = ActiveInferenceModule(ActiveInferenceConfig(**config))
+        for length in (3, module.num_observations, 64):
+            observation = module.observation_for_discrete_inference(
+                np.linspace(0.1, 1.0, length)
+            )
+            assert observation.shape == (module.num_observations,)
+
+    @pytest.mark.asyncio
+    async def test_negative_hpp_beliefs_never_reach_the_encoder(self, monkeypatch):
+        # Pins the default "content" route only; "hpp_top_level" is the
+        # v0.4.0 route and is covered by the test below.
+        module = _fast_module()
+        assert module.config.hierarchy_observation == "content"
+        for level in module.hierarchical_processor.levels:
+            level.beliefs = -np.abs(
+                np.random.default_rng(1).normal(size=level.hidden_dim)
+            )
+
+        seen = []
+        original = module._encode_observation_vector
+
+        def spy(vector):
+            seen.append(np.array(vector, dtype=float, copy=True))
+            return original(vector)
+
+        monkeypatch.setattr(module, "_encode_observation_vector", spy)
+
+        workspace_vector = np.array([0.1, 0.2, 0.3, 0.2, 0.1, 0.05, 0.05])
+        observation = module.observation_for_discrete_inference(workspace_vector)
+        np.testing.assert_array_equal(seen[0], workspace_vector)
+        assert np.all(observation >= 0) and observation.sum() == pytest.approx(1.0)
+
+        seen.clear()
+        sensory = np.random.default_rng(2).uniform(0, 1, 64)
+        await module.process_with_hierarchy(sensory)
+        assert seen, "the encoder was not used"
+        for vector in seen:
+            assert np.all(vector >= 0), "signed hierarchy beliefs reached the encoder"
+
+    @pytest.mark.asyncio
+    async def test_hpp_top_level_route_encodes_hierarchy_beliefs(self, monkeypatch):
+        module = _fast_module(hierarchy_observation="hpp_top_level")
+        seen = []
+        original = module._encode_observation_vector
+
+        def spy(vector):
+            seen.append(np.array(vector, dtype=float, copy=True))
+            return original(vector)
+
+        monkeypatch.setattr(module, "_encode_observation_vector", spy)
+
+        sensory = np.random.default_rng(2).uniform(0, 1, 64)
+        await module.process_with_hierarchy(sensory)
+        top_level = module.hierarchical_processor.levels[-1].beliefs
+        assert seen, "the encoder was not used"
+        np.testing.assert_array_equal(seen[0], top_level)
+        assert len(seen[0]) != len(sensory)
+
+    def test_hierarchy_observation_is_validated(self):
+        with pytest.raises(ValueError, match="hierarchy_observation"):
+            ActiveInferenceConfig(hierarchy_observation="beliefs")
+
+    def test_encoder_returns_a_distribution_for_signed_input(self):
+        module = _fast_module()
+        encoded = module._encode_observation_vector(
+            np.array([-3.0, 0.5, np.nan, -1.0, 0.5, 1.0, -2.0])
+        )
+        assert np.all(encoded >= 0)
+        assert encoded.sum() == pytest.approx(1.0)
+
+        uniform = module._encode_observation_vector(-np.ones(7))
+        np.testing.assert_allclose(uniform, np.full(5, 0.2))
+
+
+# ============================================================================
+# WORKSPACE PRECISION FEEDBACK
+# ============================================================================
+
+
+class _Candidate:
+    def __init__(self, content_type, activation_level=0.5):
+        self.content_type = content_type
+        self.activation_level = activation_level
+
+
+class _Winner:
+    def __init__(self, content_type, activation_level=0.5):
+        self.candidate = _Candidate(content_type, activation_level)
+
+
+class TestWorkspacePrecisionFeedback:
+    """Workspace winners sharpen the FEP channels their content maps to."""
+
+    def test_bias_starts_at_zero(self, active_inference_module):
+        bias = active_inference_module.workspace_precision_bias
+        np.testing.assert_array_equal(bias, np.zeros(5))
+
+    def test_channels_follow_compact_labels(self, active_inference_module):
+        channel = active_inference_module.channel_for_content_type
+        assert channel("emotion") == 1  # emotional_arousal
+        assert channel("thought") == 2  # cognitive_load
+        assert channel("sensory") == 3  # ignition_strength
+        assert channel("message") == 4  # social_content
+        assert channel("memory") == 0  # integration
+        assert channel("unknown_type") is None
+        assert channel(None) is None
+
+    def test_channels_follow_conversational_labels(self):
+        module = ActiveInferenceModule(
+            ActiveInferenceConfig(world_model="conversational_16x10x8")
+        )
+        index = module.observation_index
+        channel = module.channel_for_content_type
+        assert channel("emotion") == index["warm_tone"]
+        assert channel("message") == index["inform_intent"]
+        assert channel("memory") == index["familiar_topic"]
+        assert channel("concept") == index["novel_topic"]
+        assert channel("audio") == index["high_engagement"]
+        assert channel("metacognitive") == index["question_intent"]
+        assert channel("social") is None  # no social channel in this model
+
+    def test_custom_model_maps_only_its_labels(self):
+        module = ActiveInferenceModule(
+            ActiveInferenceConfig(
+                world_model="custom",
+                num_hidden_states=3,
+                num_observations=2,
+                num_actions=2,
+                observation_labels=["warm_tone", "something_else"],
+            )
+        )
+        assert module.channel_for_content_type("emotion") == 0
+        assert module.channel_for_content_type("message") is None
+
+    def test_decay_boost_and_cap(self, active_inference_module):
+        module = active_inference_module
+        module.modulate_precision_from_workspace([_Winner("emotion", 1.0)])
+        assert module.workspace_precision_bias[1] == pytest.approx(0.3)
+
+        module.modulate_precision_from_workspace([])
+        assert module.workspace_precision_bias[1] == pytest.approx(0.3 * 0.85)
+
+        for _ in range(20):
+            module.modulate_precision_from_workspace(
+                [_Winner("emotion", 1.0), _Winner("EMOTION", 1.0)]
+            )
+        assert module.workspace_precision_bias[1] == pytest.approx(1.0)
+        assert np.all(module.workspace_precision_bias <= 1.0)
+
+    def test_winner_shapes(self, active_inference_module):
+        module = active_inference_module
+        empty = _Winner("emotion")
+        empty.candidate = None
+        module.modulate_precision_from_workspace(
+            [
+                empty,
+                _Winner("not_a_type"),
+                {"content_type": "sensory", "activation_level": 1.0},
+                _Candidate("message", 1.0),
+            ]
+        )
+        bias = module.workspace_precision_bias
+        assert bias[3] == pytest.approx(0.3)
+        assert bias[4] == pytest.approx(0.3)
+        assert bias[[0, 1, 2]].sum() == 0.0
+
+    @pytest.mark.asyncio
+    async def test_workspace_bias_weights_and_restores_A(self):
+        module = _fast_module()
+        observation = np.array([0.4, 0.3, 0.1, 0.1, 0.1])
+
+        plain = await module.infer_and_act(observation)
+        assert plain.precision_weighted_error == plain.prediction_error
+
+        module.modulate_precision_from_workspace([_Winner("emotion", 1.0)])
+        biased = await module.infer_and_act(observation)
+        assert biased.precision_weighted_error == pytest.approx(
+            biased.prediction_error * (1.0 + 0.3 / 5)
+        )
+        # The unmodulated model is restored for learning and the next cycle
+        assert module.agent.A is module.A
+
+    @pytest.mark.asyncio
+    async def test_attention_and_workspace_bias_combine(self):
+        module = _fast_module()
+        module.modulate_precision_from_workspace([_Winner("emotion", 1.0)])
+        attention = np.array([0.5, 0.0, 0.0, 0.0, 0.0])
+        result = await module.infer_and_act(
+            np.array([0.4, 0.3, 0.1, 0.1, 0.1]), attention_precision=attention
+        )
+        assert result.precision_weighted_error == pytest.approx(
+            result.prediction_error * (1.0 + (0.5 + 0.3) / 5)
+        )
+
+
+# ============================================================================
+# MEASURED ACCURACY, NARRATION GATES AND THE SIGNAL SINK
+# ============================================================================
+
+
+class TestLedgerNarrationAndSignals:
+    """Forecast ledger, narration gates and the per-cycle signal sink."""
+
+    @pytest.mark.asyncio
+    async def test_each_cycle_records_one_forecast_and_scores_the_last(self):
+        module = _fast_module()
+        observation = np.array([0.4, 0.3, 0.1, 0.1, 0.1])
+        for cycle in range(1, 6):
+            await module.infer_and_act(observation)
+            assert module.prediction_ledger.pending_count == 1
+            assert module.prediction_ledger.scored_count == cycle - 1
+        assert module.get_statistics()["scored_forecasts"] == 4
+        assert module.measured_accuracy() is None  # below 20 scored
+
+        for _ in range(20):
+            await module.infer_and_act(observation)
+        accuracy = module.get_statistics()["measured_accuracy"]
+        assert accuracy is not None and 0.0 <= accuracy <= 1.0
+
+    @pytest.mark.asyncio
+    async def test_narration_gates(self):
+        observation = np.array([0.4, 0.3, 0.1, 0.1, 0.1])
+        reports = {}
+        for free_energy in (True, False):
+            for body in (True, False):
+                module = _fast_module(
+                    narrate_free_energy=free_energy, narrate_body_drives=body
+                )
+                module.homeostatic_drives.drives["curiosity"].current_level = 0.1
+                await module.infer_and_act(observation)
+                reports[(free_energy, body)] = (
+                    await module.generate_active_inference_report()
+                )
+
+        assert "prediction error" in reports[(True, True)]
+        assert "Most urgent need" in reports[(True, True)]
+        assert "free energy" in reports[(True, False)]
+        assert "Most urgent need" not in reports[(True, False)]
+        assert "free energy" not in reports[(False, True)]
+        assert "Most urgent need" in reports[(False, True)]
+        assert reports[(False, False)] == ""
+
+    @pytest.mark.asyncio
+    async def test_signal_sink_receives_records(self):
+        records = []
+        module = _fast_module(signal_sink=records.append)
+        await module.infer_and_act(np.array([0.4, 0.3, 0.1, 0.1, 0.1]))
+        await module.infer_and_act(np.array([0.1, 0.1, 0.1, 0.3, 0.4]))
+
+        assert len(records) == 2
+        assert records[0]["signal_id"] == "prediction_error_v1"
+        assert "observation_novelty" not in records[0]["context"]
+        assert records[1]["context"]["observation_novelty"] == pytest.approx(1.0)
+        assert records[1]["values"]["prediction_error"] >= 0.0
+        json.dumps(records)
+
+    @pytest.mark.asyncio
+    async def test_signal_sink_errors_are_ignored(self):
+        def broken_sink(record):
+            raise RuntimeError("sink unavailable")
+
+        module = _fast_module(signal_sink=broken_sink)
+        result = await module.infer_and_act(np.array([0.4, 0.3, 0.1, 0.1, 0.1]))
+        assert result is not None
 
 
 if __name__ == "__main__":
