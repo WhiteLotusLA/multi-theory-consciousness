@@ -43,14 +43,16 @@ This supersedes the April 2026 scope (assessment and measurement only). It was r
 ```
 mtc/
   core/            config.py (single Settings, MTC_ prefix, consumed everywhere), logger.py,
-                   circuit_breaker.py, param_overrides.py, paths.py, backup_verifier.py
+                   circuit_breaker.py, param_overrides.py, paths.py, backup_verifier.py,
+                   embeddings.py (one injectable sentence-embedding seam shared by memory,
+                   affect estimation and drift sampling)
   consciousness/   theory modules (resynced), theory_interaction, thalamic_gate, crossmodal_binding,
                    prediction_ledger, developmental_{modulator,age}, emotion_dynamics, emotion_extractor,
                    affect_{estimator,shadow}, intrinsic_goals, theory_of_mind, sleep_scheduler,
                    dream_engine, prospective_memory, temporal_context (rewritten),
                    perceptual_reality_monitor, self_assessment, identity_continuity, snapshot_service,
                    state_persistence, verification_framework, verification_state_assembler,
-                   attention_{agency,appraisal,observer}, learning/, rsi/,
+                   attention_{appraisal,observer}, learning/, rsi/,
                    continuous/ (schemas, config, seeds, persona, generator, enhancer, novelty, store,
                    machine, surfacing)
   neural/          substrates (resynced), mongodb_schemas, liquid/emotion_lsm_bridge,
@@ -299,3 +301,4 @@ Ten bounded workflows, at most five concurrent agents each. Every phase ends wit
 - 2026-10-04: world model default stays 8/5/4 with the 5-channel encoder (the parameter-sweep harness depends on it); the reference's 16/10/8 conversational model ships as a named preset. Ignition threshold default moves to 0.3 with 0.1 as an experiment preset.
 - 2026-10-04: correctness fixes become v0.5.0 defaults with a `legacy_v04` preset that reproduces the paper's numbers (maintainer, option 1). The paper gets a v0.5.0 results section or erratum; MIGRATION_FROM_V04 records every change with before and after numbers.
 - 2026-10-04: spec approved; Phase 0 begins on branch `feature/full-architecture-port`.
+- 2026-10-05: the attention-agency lever (a stay, drift or turn-back choice delegated to the model) is excluded from the port; the attention schema's release API and the capture journal stay. A shared embedding seam in `mtc/core/embeddings.py` is added so memory, affect estimation and drift sampling use one encoder path.
