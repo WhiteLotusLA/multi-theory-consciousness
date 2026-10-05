@@ -484,7 +484,10 @@ class MetacognitionModule:
 
         The by-id dict would otherwise grow for the lifetime of the process
         while its deque evicts; a first-order state is registered every cycle.
+        A buffer size of 0 keeps nothing: the deque and the dict stay empty.
         """
+        if self.first_order_states.maxlen == 0:
+            return
         evicted = (
             self.first_order_states[0]
             if len(self.first_order_states) == self.first_order_states.maxlen
@@ -496,7 +499,12 @@ class MetacognitionModule:
             self.first_order_by_id.pop(evicted.id, None)
 
     def _append_hot(self, hot: HigherOrderThought) -> None:
-        """Append to the bounded HOT deque and evict the same id from the dict."""
+        """Append to the bounded HOT deque and evict the same id from the dict.
+
+        A buffer size of 0 keeps nothing: the deque and the dict stay empty.
+        """
+        if self.higher_order_thoughts.maxlen == 0:
+            return
         evicted = (
             self.higher_order_thoughts[0]
             if len(self.higher_order_thoughts) == self.higher_order_thoughts.maxlen

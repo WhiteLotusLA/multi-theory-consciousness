@@ -1639,5 +1639,45 @@ class TestLedgerNarrationAndSignals:
         assert result is not None
 
 
+class TestObservationEncoding:
+    """The mass guard applies on every branch of the observation encoder."""
+
+    def test_valid_input_of_right_length_is_unchanged(self, active_inference_module):
+        module = active_inference_module
+        vector = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
+        np.testing.assert_array_equal(module._encode_observation_vector(vector), vector)
+
+    def test_negative_entry_of_right_length_is_zeroed(self, active_inference_module):
+        module = active_inference_module
+        out = module._encode_observation_vector(np.array([0.5, -0.4, 0.5, 0.0, 0.0]))
+        assert np.all(out >= 0.0)
+        assert out[1] == 0.0
+        assert out.sum() == pytest.approx(1.0)
+
+    def test_non_finite_entry_of_right_length_is_zeroed(self, active_inference_module):
+        module = active_inference_module
+        out = module._encode_observation_vector(
+            np.array([np.nan, np.inf, 0.2, 0.3, -np.inf])
+        )
+        assert np.all(np.isfinite(out))
+        assert out[0] == out[1] == out[4] == 0.0
+        assert out.sum() == pytest.approx(1.0)
+
+    def test_all_invalid_input_falls_back_to_uniform(self, active_inference_module):
+        module = active_inference_module
+        out = module._encode_observation_vector(np.full(5, -1.0))
+        np.testing.assert_allclose(out, np.full(5, 0.2))
+
+
+class TestTrimmedHistoryRank:
+    def test_rank_reads_the_retained_window(self, active_inference_module):
+        module = active_inference_module
+        module.prediction_errors = [0.9] * 1001
+        module._trim_histories()
+        assert len(module.prediction_errors) < 1001
+        assert module.prediction_error_rank(0.5) == 0.0
+        assert module.prediction_error_rank(1.0) == 1.0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

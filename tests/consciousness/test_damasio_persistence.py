@@ -222,6 +222,18 @@ def test_sinusoid_circadian_is_continuous():
     assert np.abs(np.diff(old)).max() > 0.9  # the pinned discontinuity
 
 
+def test_invalid_timezone_ignored_by_deterministic_circadian():
+    for mode in ("sinusoid", "v04_sawtooth"):
+        ps = Protoself(circadian=mode, timezone="Not/AZone")
+        state = ps.update(_Drives())
+        assert 0.0 <= state.body_state.circadian_phase <= 1.0
+
+
+def test_invalid_timezone_raises_under_wall_clock():
+    with pytest.raises(ValueError, match="IANA"):
+        Protoself(circadian="wall_clock", timezone="Not/AZone")
+
+
 def test_wall_clock_circadian_uses_injected_now():
     afternoon = datetime(2026, 1, 15, 15, 0, tzinfo=timezone.utc)
     ps = Protoself(

@@ -844,15 +844,6 @@ class TestEdgeCases:
 
 
 # ============================================================================
-# MAIN
-# ============================================================================
-
-if __name__ == "__main__":
-    # Run with: pytest tests/consciousness/test_metacognition.py -v
-    pytest.main([__file__, "-v"])
-
-
-# ============================================================================
 # TEST: STRUCTURED SELF-PREDICTION CHECKS
 # ============================================================================
 
@@ -994,3 +985,41 @@ class TestMetacognitionPersistence:
         result = await restored.introspect(depth=3, max_states=3)
         assert isinstance(result, IntrospectionResult)
         assert result.hots_generated
+
+
+# ============================================================================
+# TEST: ZERO-SIZE BUFFERS
+# ============================================================================
+
+
+class TestZeroSizeBuffers:
+    @pytest.mark.asyncio
+    async def test_zero_buffers_keep_nothing_and_do_not_raise(self):
+        meta = MetacognitionModule(
+            hot_generation_threshold=0.0,
+            max_first_order_buffer=0,
+            max_hot_buffer=0,
+        )
+        for i in range(3):
+            state = meta.register_first_order_state(
+                content=f"synthetic content {i}",
+                content_summary=f"synthetic state {i}",
+                state_type=FirstOrderStateType.THOUGHT,
+                source_module="test",
+                confidence=0.8,
+                evidence_strength=0.7,
+            )
+            await meta.generate_hot(state, meta_type=MetaType.EVALUATION)
+        assert len(meta.first_order_states) == 0
+        assert len(meta.higher_order_thoughts) == 0
+        assert meta.first_order_by_id == {}
+        assert meta.hots_by_id == {}
+
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+if __name__ == "__main__":
+    # Run with: pytest tests/consciousness/test_metacognition.py -v
+    pytest.main([__file__, "-v"])

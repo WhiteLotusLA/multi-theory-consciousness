@@ -249,6 +249,9 @@ class ConsciousnessStateManager:
             for tier in tiers:
                 data = state.get(tier) or {}
                 if not data:
+                    # A tier the module no longer exports must not leave a
+                    # stale file behind for restore to rehydrate
+                    self._tier_path(name, tier).unlink(missing_ok=True)
                     continue
                 if tier == "arrays":
                     self._write_npz(name, data)

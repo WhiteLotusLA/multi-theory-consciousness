@@ -1973,16 +1973,18 @@ class ActiveInferenceModule:
     def _encode_observation_vector(self, observation: np.ndarray) -> np.ndarray:
         """Encode arbitrary observation into correct size.
 
-        A vector that already has ``num_observations`` entries passes through
-        unchanged. Any other length is folded onto the channels and normalized
-        to a probability distribution; negative and non-finite entries carry no
-        probability mass and count as zero, so the result is always a valid
-        distribution.
+        Negative and non-finite entries carry no probability mass and count
+        as zero on every branch, so a corrupt entry can never reach the
+        agent. A vector that already has ``num_observations`` entries and
+        holds only non-negative finite values passes through unchanged. Any
+        other input is folded onto the channels and normalized to a
+        probability distribution (uniform when no mass remains).
         """
         if len(observation) == self.num_observations:
-            return observation
+            values = np.asarray(observation, dtype=float)
+            if np.all(np.isfinite(values)) and np.all(values >= 0.0):
+                return observation
 
-        # Hash-based encoding for larger observations
         encoded = np.zeros(self.num_observations)
         for i, val in enumerate(observation):
             idx = i % self.num_observations
@@ -2248,8 +2250,11 @@ class ActiveInferenceModule:
         """Bound the prediction error and free energy histories.
 
         Same pattern as the belief history: past HISTORY_LIMIT entries the
-        list keeps the most recent HISTORY_KEEP. Every reader looks at the
-        last 100 entries at most, so trimming never changes a reading.
+        list keeps the most recent HISTORY_KEEP. The readers that look at the
+        last 100 entries at most (the state summary's average and trend, the
+        latest free energy) never see a difference. ``prediction_error_rank``
+        ranks against the whole retained history, so its baseline is the
+        trimmed window once a history has been trimmed.
         """
         if len(self.prediction_errors) > HISTORY_LIMIT:
             self.prediction_errors = self.prediction_errors[-HISTORY_KEEP:]
@@ -2399,12 +2404,13 @@ class ActiveInferenceModule:
 
         Returns ``{"scalars": ..., "arrays": ..., "histories": ...}``:
             scalars: JSON-safe counters, drive levels, meta-state values,
-                hierarchy precisions and the schema version
+                hierarchy precisions, the schema version and the prediction
+                ledger's counters (keys prefixed ``ledger_``)
             arrays: numpy arrays (A, B, C, D, workspace bias, belief history,
                 hierarchy weights, beliefs and predictions)
             histories: JSON-safe lists (prediction errors, free energy, the
-                prediction ledger, inference results, posterior mappings,
-                drive and meta-state histories)
+                ledger's pending and scored entries, inference results,
+                posterior mappings, drive and meta-state histories)
 
         The posterior mappings carry each winner's ``content_summary``, so a
         saved state file contains fragments of workspace content.
@@ -2466,11 +2472,20 @@ class ActiveInferenceModule:
                 if value is not None:
                     arrays[f"hpp_level_{i}_{attr}"] = np.array(value, copy=True)
 
+        # The ledger exports in the same contract; its pieces are flattened
+        # into this module's tiers (scalars with a "ledger_" prefix, its two
+        # lists as histories) so histories map names to lists only
+        ledger_state = self.prediction_ledger.to_state_dict()
+        for key, value in (ledger_state.get("scalars") or {}).items():
+            scalars[f"ledger_{key}"] = value
+        ledger_histories = ledger_state.get("histories") or {}
+
         histories.update(
             {
                 "prediction_errors": [float(x) for x in self.prediction_errors],
                 "free_energy_history": [float(x) for x in self.free_energy_history],
-                "prediction_ledger": self.prediction_ledger.to_state_dict(),
+                "ledger_pending": list(ledger_histories.get("pending", [])),
+                "ledger_scored": list(ledger_histories.get("scored", [])),
                 "inference_history": [
                     _inference_result_to_record(r) for r in self.inference_history
                 ],
@@ -2499,6 +2514,26 @@ class ActiveInferenceModule:
             ]
 
         return {"scalars": scalars, "arrays": arrays, "histories": histories}
+
+    @staticmethod
+    def _ledger_state_from(h: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Ledger state from either saved shape, or None when absent.
+
+        The flat shape keeps two lists under ``ledger_pending`` and
+        ``ledger_scored``. State written in Phase 1 nested the ledger's whole
+        state dict under ``prediction_ledger``; it is still read.
+        """
+        if "ledger_pending" in h or "ledger_scored" in h:
+            return {
+                "histories": {
+                    "pending": h.get("ledger_pending") or [],
+                    "scored": h.get("ledger_scored") or [],
+                }
+            }
+        nested = h.get("prediction_ledger")
+        if isinstance(nested, dict):
+            return nested
+        return None
 
     def from_state_dict(self, state: Dict[str, Any]) -> None:
         """Restore state produced by ``to_state_dict()``.
@@ -2604,9 +2639,10 @@ class ActiveInferenceModule:
             self.free_energy_history = _float_list(
                 h.get("free_energy_history"), HISTORY_LIMIT
             )
-            if "prediction_ledger" in h:
+            ledger_state = self._ledger_state_from(h)
+            if ledger_state is not None:
                 try:
-                    self.prediction_ledger.from_state_dict(h["prediction_ledger"])
+                    self.prediction_ledger.from_state_dict(ledger_state)
                 except Exception as exc:  # noqa: BLE001 - keep restoring the rest
                     logger.warning("FEP restore: prediction ledger skipped: %s", exc)
             pending = s.get("pending_prediction_id")

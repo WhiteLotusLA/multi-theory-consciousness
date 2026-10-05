@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone as dt_timezone, tzinfo
 from typing import Any, Callable, Dict, Optional
 from collections import deque
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +201,13 @@ def _get_time_period(hour: float) -> str:
 def _resolve_timezone(name: str) -> tzinfo:
     if name.upper() == "UTC":
         return dt_timezone.utc
-    return ZoneInfo(name)
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, OSError) as exc:
+        raise ValueError(
+            f"timezone must be a valid IANA name for the wall_clock circadian "
+            f"model, got {name!r}"
+        ) from exc
 
 
 _CPU_SAMPLER_PRIMED = False
@@ -311,7 +317,13 @@ class Protoself:
         self.timezone = timezone
         self.wake_hour = int(wake_hour)
         self.sleep_hour = int(sleep_hour)
-        self._tz = _resolve_timezone(timezone)
+        # Only the wall-clock model reads the timezone; the deterministic
+        # models accept any name without resolving it
+        self._tz = (
+            _resolve_timezone(timezone)
+            if circadian == "wall_clock"
+            else dt_timezone.utc
+        )
         self._clock = clock
 
         self.cycle_count = 0

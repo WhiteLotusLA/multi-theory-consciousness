@@ -102,6 +102,30 @@ async def test_save_and_restore_round_trip_with_two_modules(tmp_path):
     assert "Most recent awareness" in report_text
 
 
+def test_empty_tier_removes_the_stale_file(tmp_path):
+    module = _ArrayModule()
+    module.weights = np.ones(3)
+    hub = ConsciousnessStateManager(tmp_path, {"m": module})
+    hub.save_all()
+    assert (tmp_path / "m_arrays.npz").exists()
+
+    class _NoArrays(_ArrayModule):
+        def to_state_dict(self):
+            state = super().to_state_dict()
+            state["arrays"] = {}
+            return state
+
+    fresh = _NoArrays()
+    hub2 = ConsciousnessStateManager(tmp_path, {"m": fresh})
+    hub2.save_all()
+    assert not (tmp_path / "m_arrays.npz").exists()
+
+    restored = _ArrayModule()
+    ConsciousnessStateManager(tmp_path, {"m": restored}).restore_all()
+    assert "arrays" not in restored.restored
+    np.testing.assert_array_equal(restored.weights, np.zeros(3))
+
+
 def test_restore_without_saved_state_starts_fresh(tmp_path):
     module = _ArrayModule()
     hub = ConsciousnessStateManager(tmp_path / "missing", {"m": module})

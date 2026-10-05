@@ -121,6 +121,46 @@ async def test_state_dict_round_trip_restores_agent_and_histories():
 
 
 @pytest.mark.asyncio
+async def test_ledger_state_is_flat_and_round_trips():
+    source = await _run(_module(), 12)
+    state = _json_round_trip(source.to_state_dict())
+
+    assert "prediction_ledger" not in state["histories"]
+    assert state["scalars"]["ledger_scored_count"] == (
+        source.prediction_ledger.scored_count
+    )
+    assert isinstance(state["histories"]["ledger_pending"], list)
+    assert isinstance(state["histories"]["ledger_scored"], list)
+    assert all(isinstance(v, list) for v in state["histories"].values())
+
+    restored = _module()
+    restored.from_state_dict(state)
+    assert restored.prediction_ledger.scored_count == (
+        source.prediction_ledger.scored_count
+    )
+    assert restored.measured_accuracy() == source.measured_accuracy()
+    assert restored._pending_prediction_id == source._pending_prediction_id
+
+
+@pytest.mark.asyncio
+async def test_phase1_nested_ledger_shape_still_restores():
+    source = await _run(_module(), 12)
+    state = _json_round_trip(source.to_state_dict())
+    histories = state["histories"]
+    nested = source.prediction_ledger.to_state_dict()
+    histories.pop("ledger_pending")
+    histories.pop("ledger_scored")
+    histories["prediction_ledger"] = json.loads(json.dumps(nested))
+
+    restored = _module()
+    restored.from_state_dict(state)
+    assert restored.prediction_ledger.scored_count == (
+        source.prediction_ledger.scored_count
+    )
+    assert restored._pending_prediction_id == source._pending_prediction_id
+
+
+@pytest.mark.asyncio
 async def test_report_and_statistics_after_restore_do_not_raise():
     state = (await _run(_module(), 5)).to_state_dict()
     restored = _module()
