@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 5: Tier C infrastructure part 1
+
+- Core and memory: explicit logger setup, path resolution, the `MTC_DEVICE` switch (`auto`, `cpu`, `mps`, `cuda`) as the only device selector, circuit-breaker recovery listeners, persona loading with neutral core blocks, Redis working memory, resilient wrappers that buffer writes and replay them once, PostgreSQL episodic and snapshot stores, and a memory manager, consolidation pipeline and pruner behind store seams with in-memory implementations and contract tests; every store client is optional and imported lazily
+- Knowledge and vectors: Neo4j graph manager with constraints and MERGE seeds from Settings, concept extraction through the brain seam, 384-dimension native vectors with the collection from Settings, GPU utilities on the device switch, and a memory factory that builds each store separately
+- MongoDB and substrate extras: pymongo data manager and document stores, a merged emotion encoder, an emotion bridge that reports no valence, arousal or coherence until its readout is trained, a memory consolidator, and orchestrator components made real
+- Privacy and safety: relationship-keyword data classifier with word-boundary matching, configurable access policy, privacy auditor and facade, a trust compass that never trusts a name, acceptance-gate harness and CLI, a safety monitor with Settings thresholds that names the configured escalation role, and a safety integration over the privacy, wellbeing and alert systems
+- Monitoring and schema: alert manager with console and file notifiers only (no push channel ships), alert, safety audit and privacy audit stores, a wellbeing monitor where agency never alarms, a Redis monitor script, and `mtc.core.schema_registry.SCHEMA_ARTIFACTS` collecting every store's schema artifact for Phase 7
+- `NeuralOrchestrator` `enable_mongodb` now defaults to False (a data manager exists only when injected or requested)
+- The orchestrator builds its real emotion bridge and memory consolidator on the first experience unless each is passed as False
+
 ### Phase 4: Tier B generic modules
 
 - Perception, affect and research: cross-modal binding, perceptual reality monitor, self-assessment, emotion dynamics and extraction, affect estimator with shadow taps, embeddings seam, shadow log, statistics helper, behavioral battery without a mock fallback, longitudinal study manager

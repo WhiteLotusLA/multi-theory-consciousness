@@ -86,6 +86,16 @@ Seven defects affect v0.4.0 measurements. All are fixed in v0.5.0, published v0.
 
 ---
 
+## 12. Limits of the infrastructure layer
+
+- **The emotion bridge reports no valence, arousal or coherence until its LSM readout is trained.** Before training, those fields are None, and the orchestrator does not treat the liquid-state block as real.
+- **Safety scoring, the trust compass's simple mode and data classification are keyword heuristics, and classification errs protective.** They miss paraphrase and flag innocent text; the compass's deep mode adds a model's judgment when a brain answers.
+- **Wellbeing indicators are computed from PAD readings and contact recency, are not reports of felt states, and agency never raises an alarm by design.** A low sense of control is recorded and never read as distress.
+- **Memory gists and knowledge synthesis exist only when the brain answers.** With no brain the memory layer stores and retrieves text and writes no gist.
+- **The embedding model is the memory layer's one network dependency.** Without it nothing is embedded, and recall falls back to labelled full-text search.
+
+---
+
 ## Why Share It Anyway
 
 Given these limitations, why release this framework?
