@@ -64,10 +64,15 @@ Neural substrate initialization involves randomness (random synaptic weights, re
 
 ## 10. Known measurement defects in v0.4.0
 
-Two defects affect the exact Integrated Information (IIT) path in v0.4.0. Both are fixed in v0.5.0, and published v0.4.0 numbers are reproduced by the `legacy_v04` preset.
+Seven defects affect v0.4.0 measurements. All are fixed in v0.5.0, published v0.4.0 numbers are reproduced by the `legacy_v04` preset, and `docs/MIGRATION_FROM_V04.md` records the before and after numbers for each.
 
 1. **Exact Phi never ran.** The exact IIT path in the assessment calls PyPhi with a keyword argument the library does not accept, so every exact Phi attempt in v0.4.0 failed and fell back to the approximation. Reported v0.4.0 Phi values therefore came from the approximation.
 2. **Permuted network.** Both the PhiTracker and the exact path index states big-endian and pass a target-by-source connectivity matrix, where PyPhi expects little-endian rows and a source-by-target matrix. Any exact Phi computed this way was computed for a permuted network, not the network being measured.
+3. **Dead statistics keys and a label-typed trend.** Several indicators read keys their producers never emit (`competition`, `max_depth_reached`, `total_generated`, `active_policies`, `decay_rate`), so they scored a constant, and the prediction-error trend compared a text label to a number, so its numeric branch never ran. v0.5.0 reads what the producers emit, pinned by a statistics contract test; the numbers are in `MIGRATION_FROM_V04.md`.
+4. **Affect coherence rewarded variance.** The PAD coherence formula read 0.97 to 1.0 on pure noise. v0.5.0 scores temporal persistence (lag-1 autocorrelation) and reports nothing below ten states; the numbers are in `MIGRATION_FROM_V04.md`.
+5. **Presence floors and constant stand-ins.** A present module with no data scored 0.1, 0.3 or 0.5, and several indicators granted credit for a module merely existing. v0.5.0 reports `insufficient_data` by name, leaves it out of the averages and starts every floor at zero; the numbers are in `MIGRATION_FROM_V04.md`.
+6. **The legacy 14-indicator integration never measured.** It never awaited its indicator coroutines, so no value was ever produced, and its workspace-integration metric read a NaN correlation on constant vectors as 1.0. v0.5.0 awaits every indicator and reports coverage; see `MIGRATION_FROM_V04.md`.
+7. **A silent SNN and a self-referential HTM anomaly.** A units error kept the spiking network silent at default settings, and the HTM scored each step's anomaly against the predictions it had just made (about 1.0 every step). No published v0.4.0 number used either substrate; see `MIGRATION_FROM_V04.md`.
 
 ---
 

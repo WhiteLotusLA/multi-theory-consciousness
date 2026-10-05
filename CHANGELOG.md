@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 3: assessment, measurement and substrates
+
+- Assessment: honest missing-signal semantics (`insufficient_data`, `absent`, report status and coverage), indicator formulas that read what the producers emit, weighted Fiedler irreducibility, exact IIT 4.0 Phi through the PyPhi bridge with a `phi_tracker` input, temporal affect coherence, causal emergence row order, RPT plasticity and persistence, DCM history cap, cache key and reference adapter; every behaviour change is a switch with its v0.4.0 value in the `legacy_v04` preset
+- Legacy integration and metrics: awaited, coverage-weighted 14-indicator assessment with contract keys; neural orchestrator binding statistics, signal stash, honest optional components and persistence
+- Substrates: SNN membrane and trace units (`SNNConfig.dt`), population synchrony and STDP statistics, HTM anomaly ordering and bounded history, guarded SNN, HTM, LSM and oscillator persistence, timezone-aware protocol timestamps
+- Runners: `assessment_status`, `coverage` and `phi_source_used` lines, a seeded assessment CLI (`--seed`, `--json-path`, `--state-dir`), shared construction in `mtc.core.runner_support`
+- Re-baseline: v0.5.0 fixtures (`tests/fixtures/baseline_v050_*`) and `tests/test_v050_baseline.py`; `docs/MIGRATION_FROM_V04.md` carries the switch attribution and the candidate-mix and body-metrics decisions; version 0.5.0.dev0
+
 ### Phase 0: foundation
 
 - Baseline fixtures recording v0.4.0 assessment behavior
