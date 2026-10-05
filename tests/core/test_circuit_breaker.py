@@ -226,3 +226,117 @@ class TestCircuitBreakerNotification:
 
         assert len(changes) == 1
         assert changes[0] == ("test", "closed", "open")
+
+
+class TestCircuitBreakerRecoveryListeners:
+    """Listeners run once on the transition back to closed."""
+
+    @staticmethod
+    async def _open_then_recover(cb, op_ok):
+        op_fail = AsyncMock(side_effect=Exception("err"))
+        fb = AsyncMock(return_value="x")
+        await cb.call(op_fail, fb)  # opens at threshold 1
+        assert cb.state == "open"
+        await asyncio.sleep(0.06)
+        await cb.call(op_ok, fb)  # the probe succeeds
+
+    @pytest.mark.asyncio
+    async def test_recovery_listeners_fire_once_on_recovery(self):
+        from mtc.core.circuit_breaker import CircuitBreaker
+
+        fired = []
+        cb = CircuitBreaker(
+            name="test",
+            failure_threshold=1,
+            recovery_timeout=0.05,
+            recovery_listeners=[lambda: fired.append("ctor")],
+        )
+        cb.add_recovery_listener(lambda: fired.append("added"))
+        await self._open_then_recover(cb, AsyncMock(return_value="ok"))
+        assert cb.state == "closed"
+        assert fired == ["ctor", "added"]
+        # more successful calls while closed do not fire them again
+        await cb.call(AsyncMock(return_value="ok"), AsyncMock())
+        assert fired == ["ctor", "added"]
+        # a second outage and recovery fires them once more
+        await self._open_then_recover(cb, AsyncMock(return_value="ok"))
+        assert fired == ["ctor", "added", "ctor", "added"]
+
+    @pytest.mark.asyncio
+    async def test_async_listener_is_scheduled_and_awaited(self):
+        from mtc.core.circuit_breaker import CircuitBreaker
+
+        events = []
+
+        async def listener():
+            await asyncio.sleep(0)
+            events.append("done")
+
+        cb = CircuitBreaker(name="test", failure_threshold=1, recovery_timeout=0.05)
+        cb.add_recovery_listener(listener)
+        await self._open_then_recover(cb, AsyncMock(return_value="ok"))
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert events == ["done"]
+
+    @pytest.mark.asyncio
+    async def test_listener_exception_logged_not_raised(self, caplog):
+        import logging
+
+        from mtc.core.circuit_breaker import CircuitBreaker
+
+        async def bad_async():
+            raise RuntimeError("async listener broke")
+
+        def bad_sync():
+            raise RuntimeError("sync listener broke")
+
+        survivors = []
+        cb = CircuitBreaker(name="test", failure_threshold=1, recovery_timeout=0.05)
+        cb.add_recovery_listener(bad_sync)
+        cb.add_recovery_listener(bad_async)
+        cb.add_recovery_listener(lambda: survivors.append("ran"))
+        with caplog.at_level(logging.ERROR, logger="mtc.core.circuit_breaker"):
+            await self._open_then_recover(cb, AsyncMock(return_value="ok"))
+            for _ in range(5):
+                await asyncio.sleep(0)
+        assert cb.state == "closed"
+        assert survivors == ["ran"]
+        text = " ".join(r.getMessage() for r in caplog.records)
+        assert "sync listener broke" in text
+        assert "async listener broke" in text
+
+    @pytest.mark.asyncio
+    async def test_state_change_callback_failure_logged_at_error(self, caplog):
+        import logging
+
+        from mtc.core.circuit_breaker import CircuitBreaker
+
+        def broken(name, old, new, stats):
+            raise RuntimeError("notify broke")
+
+        cb = CircuitBreaker(name="test", failure_threshold=1, on_state_change=broken)
+        with caplog.at_level(logging.ERROR, logger="mtc.core.circuit_breaker"):
+            await cb.call(AsyncMock(side_effect=Exception("err")), AsyncMock())
+        assert cb.state == "open"
+        errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert any("notify broke" in r.getMessage() for r in errors)
+
+    @pytest.mark.asyncio
+    async def test_no_listener_fires_on_open(self):
+        from mtc.core.circuit_breaker import CircuitBreaker
+
+        fired = []
+        cb = CircuitBreaker(
+            name="test",
+            failure_threshold=1,
+            recovery_listeners=[lambda: fired.append("x")],
+        )
+        await cb.call(AsyncMock(side_effect=Exception("err")), AsyncMock())
+        assert cb.state == "open"
+        assert fired == []
+        # a failed probe reopens without firing either
+        cb.recovery_timeout = 0.0
+        await cb.call(AsyncMock(side_effect=Exception("still down")), AsyncMock())
+        assert cb.state == "open"
+        assert fired == []

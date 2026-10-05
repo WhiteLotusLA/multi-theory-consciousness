@@ -27,6 +27,9 @@ Every key is read through `get_settings()`. Values come from the process environ
 
 | Variable | Default | Description |
 |---|---|---|
+| `MTC_CREATOR_RELATIONSHIP` | `creator` | Relationship label the human core memory block and the graph seed use for the creator entry |
+| `MTC_PERSONA_PATH` | `config/persona.yaml` | Operator persona file read by the persona loader; gitignored, and a missing file means the neutral default blocks |
+| `MTC_CORE_VALUES` | `curiosity,honesty,growth,care` | Comma-separated core values the neutral core blocks, the safety monitor and the trust compass name |
 | `MTC_TIMEZONE` | `UTC` | IANA time zone used for display and schedules; stored timestamps stay UTC |
 | `MTC_WAKE_HOUR` | `6` | Local hour the waking day starts |
 | `MTC_SLEEP_HOUR` | `22` | Local hour the night window starts; must differ from WAKE_HOUR |
@@ -67,10 +70,12 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_MONGODB_DB` | `(empty)` | MongoDB database; empty derives <DB_PREFIX>_neural |
 | `MTC_MONGODB_USER` | `(empty)` |  |
 | `MTC_MONGODB_PASSWORD` | `(empty)` |  |
+| `MTC_MONGODB_SERVER_SELECTION_TIMEOUT_MS` | `3000` | Milliseconds the MongoDB client waits for a reachable server |
 | `MTC_REDIS_HOST` | `localhost` |  |
 | `MTC_REDIS_PORT` | `6379` |  |
 | `MTC_REDIS_PASSWORD` | `(empty)` |  |
 | `MTC_REDIS_KEY_PREFIX` | `(empty)` | Redis key prefix; empty derives '<DB_PREFIX>:' |
+| `MTC_REDIS_DB` | `0` | Redis logical database number |
 | `MTC_REDIS_MAX_CONNECTIONS` | `50` |  |
 | `MTC_REDIS_SOCKET_TIMEOUT` | `5` |  |
 | `MTC_QDRANT_HOST` | `localhost` |  |
@@ -80,6 +85,7 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_NEO4J_USER` | `neo4j` |  |
 | `MTC_NEO4J_PASSWORD` | `(empty)` |  |
 | `MTC_NEO4J_DATABASE` | `neo4j` |  |
+| `MTC_STORE_FALLBACK_LOG_ENABLED` | `false` | Write buffered store statements to breadcrumb files under <LOG_DIRECTORY>/store_fallback during an outage; the files hold private conversation content |
 | `MTC_VECTOR_DIMENSIONS` | `384` |  |
 | `MTC_VECTOR_SIMILARITY_METRIC` | `cosine` |  |
 | `MTC_VECTOR_SEARCH_LIMIT` | `10` |  |
@@ -112,6 +118,7 @@ Every key is read through `get_settings()`. Values come from the process environ
 
 | Variable | Default | Description |
 |---|---|---|
+| `MTC_DEVICE` | `auto` | Compute device for every torch and encoder module: auto (MPS, then CUDA, then CPU), cpu, mps or cuda; an explicit device that is unavailable raises instead of falling back |
 | `MTC_SNN_NEURONS` | `50` |  |
 | `MTC_SNN_HIDDEN_NEURONS` | `50` |  |
 | `MTC_SNN_INPUT_NEURONS` | `100` |  |
@@ -181,6 +188,8 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_WORKING_MEMORY_DURATION` | `30` |  |
 | `MTC_EPISODIC_MEMORY_RETENTION` | `90` |  |
 | `MTC_SEMANTIC_MEMORY_PERMANENT` | `true` |  |
+| `MTC_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Sentence-transformers model the embedder loads; its output width must equal VECTOR_DIMENSIONS |
+| `MTC_RELATIONSHIP_KEYWORDS` | `family,friend,parent,mother,father,sibling,sister,brother,partner,spouse,child,daughter,son,grandparent,pet` | Comma-separated whole words the consolidation pipeline and the data classifier read as relationship mentions |
 
 ## Emotion and learning
 

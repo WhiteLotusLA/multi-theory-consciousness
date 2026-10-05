@@ -47,6 +47,10 @@ def _load_pyphi() -> Optional[Any]:
                 warnings.simplefilter("ignore")
                 module = importlib.import_module("pyphi")
                 importlib.import_module("pyphi.new_big_phi")
+            # Keep a later PyPhi reconfiguration from replacing root handlers.
+            from mtc.core.logger import neutralize_pyphi_logging
+
+            neutralize_pyphi_logging()
             _pyphi_module = module
         except Exception as exc:  # ImportError or a broken install
             logger.debug("PyPhi unavailable: %s", exc)

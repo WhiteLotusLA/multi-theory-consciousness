@@ -15,7 +15,7 @@ Provides type-safe access to all framework settings including:
 
 import os
 from datetime import date
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 from zoneinfo import ZoneInfo
 
 from pydantic import (
@@ -39,6 +39,11 @@ COMPANION_TYPES = (
 )
 
 
+def csv_list(value: str) -> List[str]:
+    """Split a comma-separated setting into trimmed, non-empty items."""
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
 class Settings(BaseSettings):
     """
     Multi-Theory Consciousness Framework configuration settings.
@@ -52,6 +57,21 @@ class Settings(BaseSettings):
 
     SYSTEM_NAME: str = "ConsciousnessAgent"
     CREATOR_NAME: str = "Creator"
+    CREATOR_RELATIONSHIP: str = Field(
+        "creator",
+        description="Relationship label the human core memory block and the "
+        "graph seed use for the creator entry",
+    )
+    PERSONA_PATH: str = Field(
+        "config/persona.yaml",
+        description="Operator persona file read by the persona loader; "
+        "gitignored, and a missing file means the neutral default blocks",
+    )
+    CORE_VALUES: str = Field(
+        "curiosity,honesty,growth,care",
+        description="Comma-separated core values the neutral core blocks, "
+        "the safety monitor and the trust compass name",
+    )
 
     # ========================================================================
     # IDENTITY AND LOCALE
@@ -197,6 +217,11 @@ class Settings(BaseSettings):
     )
     MONGODB_USER: str = ""
     MONGODB_PASSWORD: str = ""
+    MONGODB_SERVER_SELECTION_TIMEOUT_MS: int = Field(
+        3000,
+        gt=0,
+        description="Milliseconds the MongoDB client waits for a reachable server",
+    )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -225,6 +250,7 @@ class Settings(BaseSettings):
             return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}"
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}"
 
+    REDIS_DB: int = Field(0, ge=0, description="Redis logical database number")
     REDIS_MAX_CONNECTIONS: int = 50
     REDIS_SOCKET_TIMEOUT: int = 5
 
@@ -242,6 +268,13 @@ class Settings(BaseSettings):
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = ""
     NEO4J_DATABASE: str = "neo4j"
+
+    STORE_FALLBACK_LOG_ENABLED: bool = Field(
+        False,
+        description="Write buffered store statements to breadcrumb files under "
+        "<LOG_DIRECTORY>/store_fallback during an outage; the files hold "
+        "private conversation content",
+    )
 
     # ========================================================================
     # LLM CONFIGURATION
@@ -277,6 +310,13 @@ class Settings(BaseSettings):
     # ========================================================================
     # NEURAL NETWORK PARAMETERS
     # ========================================================================
+
+    DEVICE: Literal["auto", "cpu", "mps", "cuda"] = Field(
+        "auto",
+        description="Compute device for every torch and encoder module: auto "
+        "(MPS, then CUDA, then CPU), cpu, mps or cuda; an explicit device that "
+        "is unavailable raises instead of falling back",
+    )
 
     # Spiking Neural Network (SNN)
     SNN_NEURONS: int = 50
@@ -388,6 +428,18 @@ class Settings(BaseSettings):
     WORKING_MEMORY_DURATION: int = 30  # seconds
     EPISODIC_MEMORY_RETENTION: int = 90  # days
     SEMANTIC_MEMORY_PERMANENT: bool = True
+
+    EMBEDDING_MODEL: str = Field(
+        "sentence-transformers/all-MiniLM-L6-v2",
+        description="Sentence-transformers model the embedder loads; its "
+        "output width must equal VECTOR_DIMENSIONS",
+    )
+    RELATIONSHIP_KEYWORDS: str = Field(
+        "family,friend,parent,mother,father,sibling,sister,brother,partner,"
+        "spouse,child,daughter,son,grandparent,pet",
+        description="Comma-separated whole words the consolidation pipeline and "
+        "the data classifier read as relationship mentions",
+    )
 
     # Vector Search
     VECTOR_DIMENSIONS: int = 384

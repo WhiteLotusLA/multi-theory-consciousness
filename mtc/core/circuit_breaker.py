@@ -6,12 +6,19 @@ Three states: CLOSED (normal), OPEN (fallback), HALF_OPEN (probing).
 Async-native with asyncio.Lock for concurrent probe protection.
 
 No database-specific code - this is a general-purpose pattern.
+
+Recovery listeners (sync or async callables with no arguments) run once on each
+transition back to CLOSED, never on opening. An async listener is scheduled as
+a task whose failure is logged; a failing listener or state-change callback is
+logged at ERROR and never raised into the caller. Buffered-write replay hangs
+off this hook.
 """
 
 import asyncio
+import inspect
 import logging
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +41,16 @@ class CircuitBreaker:
         recovery_timeout: float = 60.0,
         start_open: bool = False,
         on_state_change: Optional[Callable] = None,
+        recovery_listeners: Optional[List[Callable[[], Any]]] = None,
     ):
         self.name = name
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.on_state_change = on_state_change
+        self._recovery_listeners: List[Callable[[], Any]] = list(
+            recovery_listeners or []
+        )
+        self._listener_tasks: Set["asyncio.Future[Any]"] = set()
 
         # State
         self._state = "open" if start_open else "closed"
@@ -161,6 +173,29 @@ class CircuitBreaker:
         self._failure_count = 0
         self._lifetime_fallbacks += self._total_fallbacks
         self._total_fallbacks = 0  # Reset per-outage counter
+        self._fire_recovery_listeners()
+
+    def add_recovery_listener(self, listener: Callable[[], Any]) -> None:
+        """Register a callable to run each time the breaker recovers."""
+        self._recovery_listeners.append(listener)
+
+    def _fire_recovery_listeners(self) -> None:
+        for listener in list(self._recovery_listeners):
+            try:
+                result = listener()
+                if inspect.isawaitable(result):
+                    task = asyncio.ensure_future(result)
+                    self._listener_tasks.add(task)
+                    task.add_done_callback(self._listener_done)
+            except Exception as exc:
+                logger.error(f"{self.name} recovery listener failed: {exc}")
+
+    def _listener_done(self, task: "asyncio.Future[Any]") -> None:
+        self._listener_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.error(
+                f"{self.name} recovery listener task failed: {task.exception()}"
+            )
 
     def _on_probe_failure(self, error: Exception) -> None:
         """Handle failed probe in HALF_OPEN state."""
@@ -179,8 +214,12 @@ class CircuitBreaker:
         if self.on_state_change and old_state != new_state:
             try:
                 self.on_state_change(self.name, old_state, new_state, self.stats)
-            except Exception:
-                pass  # notification failure must not break the breaker
+            except Exception as exc:
+                # A lost state-change notification is itself an outage signal.
+                logger.error(
+                    f"{self.name} state-change notification failed "
+                    f"({old_state} -> {new_state}): {exc}"
+                )
 
     async def _call_async(self, fn: Callable, *args: Any, **kwargs: Any) -> Any:
         """Call a function, handling both sync and async callables."""
