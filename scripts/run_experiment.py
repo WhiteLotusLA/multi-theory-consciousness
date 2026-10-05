@@ -2,12 +2,16 @@
 """
 AutoConsciousness experiment runner.
 
-Loads parameter overrides from experiments/params.toml, validates against
-experiments/param_schema.toml, instantiates consciousness modules with
-overridden params, runs warmup + assessment, prints grep-friendly results.
+Loads parameter overrides from experiments/params.toml (or --params PATH),
+optionally layered over a preset from experiments/presets/ (--preset NAME),
+validates against experiments/param_schema.toml, instantiates consciousness
+modules with overridden params, runs warmup + assessment, prints
+grep-friendly results.
 
 Usage:
     python scripts/run_experiment.py                    # standard run
+    python scripts/run_experiment.py --preset legacy_v04  # reproduce v0.4.0
+    python scripts/run_experiment.py --params my.toml   # alternate params file
     python scripts/run_experiment.py --validate gwt     # run + ablation check on GWT
     python scripts/run_experiment.py --validate ast,hot # check multiple modules
 """
@@ -18,6 +22,7 @@ import random
 import sys
 import time
 from collections import defaultdict
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict
 
@@ -35,7 +40,8 @@ try:
 except ImportError:
     pass
 
-from mtc.core.param_overrides import load_overrides  # noqa: E402
+from mtc.core.param_overrides import load_layered_overrides  # noqa: E402
+import mtc.consciousness.enhanced_global_workspace as egw_module  # noqa: E402
 from mtc.consciousness.enhanced_global_workspace import (  # noqa: E402
     EnhancedGlobalWorkspace,
     TemporalWorkspaceConfig,
@@ -67,6 +73,7 @@ from mtc.assessment.causal_emergence import CausalEmergenceAnalyzer  # noqa: E40
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = ROOT / "experiments" / "param_schema.toml"
 PARAMS_PATH = ROOT / "experiments" / "params.toml"
+PRESETS_DIR = ROOT / "experiments" / "presets"
 WARMUP_CYCLES = 25
 
 
@@ -191,6 +198,51 @@ _TEMPORAL_FIELDS = {
 }
 
 
+# fep.* behaviour switches that must reach every ActiveInferenceModule in the
+# run, including the one the workspace constructs for itself.
+_FEP_BEHAVIOUR_SWITCHES = (
+    "hpp_hidden_dim_multiplier",
+    "meta_accuracy_method",
+    "drive_model",
+    "drive_decay_floor",
+    "legacy_double_decay",
+)
+
+
+@contextmanager
+def _workspace_fep_switches(fep_overrides: dict):
+    """Apply the fep behaviour switches to the workspace's own inference module.
+
+    EnhancedGlobalWorkspace builds an ActiveInferenceModule internally with a
+    fixed generative-model geometry and no config argument, and its cycle
+    drives that instance (it also consumes the shared random stream). Without
+    this, a preset such as legacy_v04 would switch the runner's own module but
+    leave the workspace's on the new defaults, and the v0.4.0 numbers would
+    not reproduce. Only the behaviour switches are forwarded; the geometry and
+    learning rates stay as the workspace sets them, as in v0.4.0. When no
+    switch is overridden this is a no-op, so the workspace runs on the
+    defaults like every other module.
+
+    Remove once the workspace constructor accepts an inference config.
+    """
+    switches = {
+        k: fep_overrides[k] for k in _FEP_BEHAVIOUR_SWITCHES if k in fep_overrides
+    }
+    if not switches:
+        yield
+        return
+    original = egw_module.ActiveInferenceConfig
+
+    def configured(*args, **kwargs):
+        return original(*args, **{**kwargs, **switches})
+
+    egw_module.ActiveInferenceConfig = configured
+    try:
+        yield
+    finally:
+        egw_module.ActiveInferenceConfig = original
+
+
 def build_modules(overrides: dict) -> dict:
     """Instantiate all consciousness modules, applying TOML overrides."""
 
@@ -205,12 +257,13 @@ def build_modules(overrides: dict) -> dict:
             temporal_ov.update(gwt_ov.pop(key))
 
     temporal_config = TemporalWorkspaceConfig(**temporal_ov) if temporal_ov else None
-    workspace = EnhancedGlobalWorkspace(
-        capacity=gwt_ov.get("capacity", 7),
-        ignition_threshold=gwt_ov.get("ignition_threshold", 0.3),
-        amplification_factor=gwt_ov.get("amplification_factor", 2.0),
-        temporal_config=temporal_config,
-    )
+    with _workspace_fep_switches(overrides.get("fep", {})):
+        workspace = EnhancedGlobalWorkspace(
+            capacity=gwt_ov.get("capacity", 7),
+            ignition_threshold=gwt_ov.get("ignition_threshold", 0.3),
+            amplification_factor=gwt_ov.get("amplification_factor", 2.0),
+            temporal_config=temporal_config,
+        )
 
     ast_ov = overrides.get("ast", {})
     attention = AttentionSchemaModule(**ast_ov)
@@ -220,12 +273,20 @@ def build_modules(overrides: dict) -> dict:
 
     fep_ov = overrides.get("fep", {}).copy()
     fep_ov.pop("drives", None)  # drives handled separately (not yet wired)
+    # Every fep.* key (including the world_model, hpp_hidden_dim_multiplier,
+    # meta_accuracy_method, drive_model, drive_decay_floor and
+    # legacy_double_decay switches) is an ActiveInferenceConfig field.
     fep_config = ActiveInferenceConfig(**{k: v for k, v in fep_ov.items()})
     active_inference = ActiveInferenceModule(config=fep_config)
 
+    # blt.* keys (loop_quality_formula, precision_floor_enabled,
+    # require_recursive_confidence, ...) are BeautifulLoop constructor kwargs.
     blt_ov = overrides.get("blt", {})
     beautiful_loop = BeautifulLoop(**blt_ov)
 
+    # damasio.* keys (circadian, ...) are DamasioLayers constructor kwargs. The
+    # layers do not feed the assessment, so this builds the object to validate
+    # the keys against the real constructor without keeping it.
     damasio_ov = overrides.get("damasio", {})
     DamasioLayers(**damasio_ov)
 
@@ -485,7 +546,7 @@ async def _compute_noise_baseline(
 
         modules = build_modules(overrides)
         await warmup(modules, WARMUP_CYCLES)
-        assessment = ConsciousnessAssessment()
+        assessment = ConsciousnessAssessment(**overrides.get("assessment", {}))
         report = await assessment.run_full_assessment(
             **modules, warmup_cycles=WARMUP_CYCLES, normalize=False
         )
@@ -582,7 +643,7 @@ async def run_ablation(
         modules = build_modules(overrides)
         modules[kwarg_name] = None  # Disable this module
         await warmup(modules, WARMUP_CYCLES)
-        assessment = ConsciousnessAssessment()
+        assessment = ConsciousnessAssessment(**overrides.get("assessment", {}))
         ablated_report = await assessment.run_full_assessment(
             **modules,
             warmup_cycles=WARMUP_CYCLES,
@@ -609,13 +670,31 @@ async def run():
         default=None,
         help="Comma-separated module names to ablation-check (e.g., gwt,ast,hot)",
     )
+    parser.add_argument(
+        "--params",
+        type=str,
+        default=str(PARAMS_PATH),
+        help="Parameter overrides TOML (default: experiments/params.toml)",
+    )
+    parser.add_argument(
+        "--preset",
+        type=str,
+        default=None,
+        help="Preset name from experiments/presets/ applied before --params "
+        "(e.g., legacy_v04 reproduces v0.4.0)",
+    )
     args = parser.parse_args()
 
     t_start = time.time()
 
-    # Load and validate overrides
+    # Load and validate overrides: defaults, then preset, then params file
     try:
-        overrides = load_overrides(str(PARAMS_PATH), str(SCHEMA_PATH))
+        overrides = load_layered_overrides(
+            args.params,
+            str(SCHEMA_PATH),
+            preset=args.preset,
+            presets_dir=str(PRESETS_DIR),
+        )
     except ValueError as e:
         print(f"PARAM ERROR: {e}", file=sys.stderr)
         sys.exit(1)
@@ -639,7 +718,7 @@ async def run():
 
     modules = build_modules(overrides)
     await warmup(modules, WARMUP_CYCLES)
-    assessment = ConsciousnessAssessment()
+    assessment = ConsciousnessAssessment(**overrides.get("assessment", {}))
     report = await assessment.run_full_assessment(
         **modules,
         warmup_cycles=WARMUP_CYCLES,

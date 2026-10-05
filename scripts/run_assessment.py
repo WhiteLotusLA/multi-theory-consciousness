@@ -18,17 +18,25 @@ Usage:
     python scripts/run_assessment.py --full --report
     python scripts/run_assessment.py --ablation
     python scripts/run_assessment.py --full --json
+    python scripts/run_assessment.py --preset legacy_v04 --full  # v0.4.0 behaviour
+    python scripts/run_assessment.py --params my.toml            # parameter overrides
+
+Overrides are optional here: with neither --preset nor --params the modules
+run on their defaults. --preset NAME loads experiments/presets/NAME.toml on
+top of the defaults, and --params PATH loads on top of the preset.
 """
 
 import argparse
 import asyncio
 import json
 import logging
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 
+import mtc.consciousness.enhanced_global_workspace as egw_module
 from mtc.consciousness.enhanced_global_workspace import (
     EnhancedGlobalWorkspace,
     WorkspaceCandidate,
@@ -44,15 +52,23 @@ from mtc.consciousness.metacognition import (
     FirstOrderStateType,
     MetaType,
 )
-from mtc.consciousness.active_inference import ActiveInferenceModule
+from mtc.consciousness.active_inference import (
+    ActiveInferenceConfig,
+    ActiveInferenceModule,
+)
 from mtc.consciousness.beautiful_loop import BeautifulLoop
 from mtc.assessment.assessment import ConsciousnessAssessment
+from mtc.core.param_overrides import deep_merge, load_overrides, preset_path
 
 logging.basicConfig(
     level=logging.WARNING,
     format="%(levelname)s  %(name)s  %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+ROOT = Path(__file__).resolve().parent.parent
+SCHEMA_PATH = ROOT / "experiments" / "param_schema.toml"
+PRESETS_DIR = ROOT / "experiments" / "presets"
 
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -115,10 +131,15 @@ async def warmup(workspace, attention, metacognition, active_inference, cycles=5
 
 
 async def run_standard(
-    workspace, attention, metacognition, active_inference, beautiful_loop
+    workspace,
+    attention,
+    metacognition,
+    active_inference,
+    beautiful_loop,
+    assessment_kwargs=None,
 ):
     """Run a single assessment and return the report."""
-    assessment = ConsciousnessAssessment()
+    assessment = ConsciousnessAssessment(**(assessment_kwargs or {}))
     return await assessment.run_full_assessment(
         global_workspace=workspace,
         attention_schema=attention,
@@ -129,10 +150,15 @@ async def run_standard(
 
 
 async def run_ablation(
-    workspace, attention, metacognition, active_inference, beautiful_loop
+    workspace,
+    attention,
+    metacognition,
+    active_inference,
+    beautiful_loop,
+    assessment_kwargs=None,
 ):
     """Disable one module at a time and compare scores."""
-    assessment = ConsciousnessAssessment()
+    assessment = ConsciousnessAssessment(**(assessment_kwargs or {}))
 
     components = ["gwt", "ast", "hot", "fep", "beautiful_loop"]
     results = {}
@@ -225,6 +251,57 @@ def print_ablation(results):
 # ── main ─────────────────────────────────────────────────────────────
 
 
+# fep.* behaviour switches that must reach every ActiveInferenceModule in the
+# run, including the one the workspace constructs for itself.
+_FEP_BEHAVIOUR_SWITCHES = (
+    "hpp_hidden_dim_multiplier",
+    "meta_accuracy_method",
+    "drive_model",
+    "drive_decay_floor",
+    "legacy_double_decay",
+)
+
+
+@contextmanager
+def _workspace_fep_switches(fep_overrides):
+    """Apply the fep behaviour switches to the workspace's own inference module.
+
+    EnhancedGlobalWorkspace builds an ActiveInferenceModule internally with a
+    fixed geometry and no config argument, so a preset such as legacy_v04
+    would otherwise leave that instance on the new defaults. Only the
+    behaviour switches are forwarded. A no-op when none is overridden.
+
+    Remove once the workspace constructor accepts an inference config.
+    """
+    switches = {
+        k: fep_overrides[k] for k in _FEP_BEHAVIOUR_SWITCHES if k in fep_overrides
+    }
+    if not switches:
+        yield
+        return
+    original = egw_module.ActiveInferenceConfig
+
+    def configured(*args, **kwargs):
+        return original(*args, **{**kwargs, **switches})
+
+    egw_module.ActiveInferenceConfig = configured
+    try:
+        yield
+    finally:
+        egw_module.ActiveInferenceConfig = original
+
+
+def _load_overrides(params, preset):
+    """Validated overrides: the preset first, then the params file (both optional)."""
+    schema = str(SCHEMA_PATH)
+    overrides = {}
+    if preset:
+        overrides = load_overrides(preset_path(str(PRESETS_DIR), preset), schema)
+    if params:
+        overrides = deep_merge(overrides, load_overrides(params, schema))
+    return overrides
+
+
 async def main():
     parser = argparse.ArgumentParser(
         description="Run the multi-theory consciousness assessment."
@@ -255,14 +332,37 @@ async def main():
         default=5,
         help="Number of warmup cycles for --full mode (default: 5)",
     )
+    parser.add_argument(
+        "--params",
+        type=str,
+        default=None,
+        help="Parameter overrides TOML applied on top of the preset "
+        "(default: none, modules use their defaults)",
+    )
+    parser.add_argument(
+        "--preset",
+        type=str,
+        default=None,
+        help="Preset name from experiments/presets/ applied before --params "
+        "(e.g., legacy_v04 reproduces v0.4.0)",
+    )
     args = parser.parse_args()
 
+    try:
+        overrides = _load_overrides(args.params, args.preset)
+    except ValueError as exc:
+        parser.error(f"parameter error: {exc}")
+
     # Initialize modules
-    workspace = EnhancedGlobalWorkspace(capacity=7, ignition_threshold=0.3)
+    fep_ov = {k: v for k, v in overrides.get("fep", {}).items() if k != "drives"}
+    with _workspace_fep_switches(fep_ov):
+        workspace = EnhancedGlobalWorkspace(capacity=7, ignition_threshold=0.3)
     attention = AttentionSchemaModule()
     metacognition_mod = MetacognitionModule()
-    active_inference = ActiveInferenceModule()
-    beautiful_loop = BeautifulLoop(num_levels=3)
+    active_inference = ActiveInferenceModule(
+        config=ActiveInferenceConfig(**fep_ov) if fep_ov else None
+    )
+    beautiful_loop = BeautifulLoop(**{"num_levels": 3, **overrides.get("blt", {})})
 
     if args.full:
         await warmup(
@@ -280,6 +380,7 @@ async def main():
             metacognition_mod,
             active_inference,
             beautiful_loop,
+            assessment_kwargs=overrides.get("assessment", {}),
         )
         print_ablation(results)
         return
@@ -290,6 +391,7 @@ async def main():
         metacognition_mod,
         active_inference,
         beautiful_loop,
+        assessment_kwargs=overrides.get("assessment", {}),
     )
     print_report(report, markdown=args.report)
 

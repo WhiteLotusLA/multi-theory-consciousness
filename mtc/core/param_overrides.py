@@ -7,7 +7,8 @@ thread overrides into module constructors.
 """
 
 import tomllib
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
 _TYPE_MAP = {
     "int": int,
@@ -100,6 +101,12 @@ def load_overrides(params_path: str, schema_path: str) -> dict:
         if expected_type == "float" and isinstance(value, int):
             value = float(value)
 
+        if "choices" in spec and value not in spec["choices"]:
+            raise ValueError(
+                f"Parameter '{dotted_key}' = {value!r} is not one of "
+                f"{list(spec['choices'])}"
+            )
+
         if "min" in spec and value < spec["min"]:
             raise ValueError(
                 f"Parameter '{dotted_key}' = {value} out of bounds "
@@ -114,3 +121,48 @@ def load_overrides(params_path: str, schema_path: str) -> dict:
         validated[dotted_key] = value
 
     return _unflatten(validated)
+
+
+def deep_merge(base: dict, top: dict) -> dict:
+    """Return a new nested dict with ``top`` layered over ``base``."""
+    merged = {}
+    for key in base.keys() | top.keys():
+        if key in base and key in top:
+            if isinstance(base[key], dict) and isinstance(top[key], dict):
+                merged[key] = deep_merge(base[key], top[key])
+            else:
+                merged[key] = top[key]
+        else:
+            merged[key] = top[key] if key in top else base[key]
+    return merged
+
+
+def preset_path(presets_dir: str, name: str) -> str:
+    """Resolve a preset name to its TOML file, rejecting path tricks."""
+    if not name or Path(name).name != name or name.startswith("."):
+        raise ValueError(f"Invalid preset name '{name}'")
+    path = Path(presets_dir) / f"{name}.toml"
+    if not path.is_file():
+        available = sorted(p.stem for p in Path(presets_dir).glob("*.toml"))
+        raise ValueError(f"Preset '{name}' not found. Available presets: {available}")
+    return str(path)
+
+
+def load_layered_overrides(
+    params_path: str,
+    schema_path: str,
+    preset: Optional[str] = None,
+    presets_dir: Optional[str] = None,
+) -> dict:
+    """Load overrides with an optional preset layered under the params file.
+
+    Order: module defaults, then the preset, then ``params_path``. Both files
+    are validated against the schema on their own, so an error names the file
+    that holds the bad value.
+    """
+    layered: dict = {}
+    if preset:
+        if presets_dir is None:
+            presets_dir = str(Path(schema_path).parent / "presets")
+        layered = load_overrides(preset_path(presets_dir, preset), schema_path)
+    return deep_merge(layered, load_overrides(params_path, schema_path))
