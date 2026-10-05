@@ -160,3 +160,29 @@ async def test_ablated_modules_score_zero():
         assert (
             result.score <= 0.15
         ), f"{name} scores {result.score:.3f} with all modules ablated"
+
+
+def test_saturated_noise_baseline_scores_zero():
+    """An indicator whose noise floor leaves under min_range headroom is uninformative."""
+    from mtc.assessment.assessment import ConsciousnessAssessment
+
+    assert ConsciousnessAssessment.get_normalized_score(1.0, 0.974) == 0.0
+    assert ConsciousnessAssessment.get_normalized_score(0.99, 0.95) == 0.0
+    # plenty of headroom: ordinary rescaling
+    assert abs(ConsciousnessAssessment.get_normalized_score(0.9, 0.5) - 0.8) < 1e-9
+
+
+def test_guard_disabled_reproduces_old_normalization():
+    """min_range 0.0 is the v0.4.0 behaviour used by the legacy preset."""
+    from mtc.assessment.assessment import ConsciousnessAssessment
+
+    assert (
+        abs(
+            ConsciousnessAssessment.get_normalized_score(1.0, 0.974, min_range=0.0)
+            - 1.0
+        )
+        < 1e-9
+    )
+    assert ConsciousnessAssessment.get_normalized_score(0.5, 1.0, min_range=0.0) == 0.0
+    assessment = ConsciousnessAssessment(saturated_baseline_min_range=0.0)
+    assert assessment.saturated_baseline_min_range == 0.0

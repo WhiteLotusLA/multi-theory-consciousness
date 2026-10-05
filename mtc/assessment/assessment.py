@@ -432,8 +432,17 @@ class ConsciousnessAssessment:
     - ActiveInferenceModule (FEP)
     """
 
-    def __init__(self):
-        """Initialize consciousness assessment framework."""
+    def __init__(self, saturated_baseline_min_range: float = 0.1):
+        """Initialize consciousness assessment framework.
+
+        Args:
+            saturated_baseline_min_range: minimum headroom (1.0 minus the noise
+                baseline) an indicator must leave before its normalized score
+                counts. Below it the indicator is treated as uninformative and
+                scores 0.0, because noise alone nearly maxes it out. 0.0 disables
+                the guard (the v0.4.0 behaviour).
+        """
+        self.saturated_baseline_min_range = float(saturated_baseline_min_range)
         self.phi_calculator = PhiCalculator()
         self.assessment_history: List[ConsciousnessReport] = []
 
@@ -978,7 +987,13 @@ class ConsciousnessAssessment:
                 baselines = self._noise_baselines
             for name, result in indicator_results.items():
                 baseline = baselines.get(name, 0.0)
-                normalized = self.get_normalized_score(result.score, baseline)
+                normalized = self.get_normalized_score(
+                    result.score, baseline, self.saturated_baseline_min_range
+                )
+                saturated = bool(
+                    baseline >= 1.0
+                    or (1.0 - baseline) < self.saturated_baseline_min_range
+                )
                 # Replace the result with normalized score
                 indicator_results[name] = IndicatorResult(
                     name=result.name,
@@ -991,6 +1006,7 @@ class ConsciousnessAssessment:
                         **result.evidence,
                         "raw_score": result.score,
                         "noise_baseline": baseline,
+                        "noise_saturated": saturated,
                     },
                     measurement_time_ms=result.measurement_time_ms,
                 )
@@ -2101,14 +2117,16 @@ class ConsciousnessAssessment:
         return baselines
 
     @staticmethod
-    def get_normalized_score(raw_score: float, baseline: float) -> float:
+    def get_normalized_score(
+        raw_score: float, baseline: float, min_range: float = 0.1
+    ) -> float:
         """
         Normalize a raw indicator score by subtracting the noise baseline.
 
         The formula rescales the score into the range [baseline, 1.0] so that
         only the portion *above* the noise floor counts. If the baseline itself
-        is >= 1.0 the indicator is fundamentally broken (noise alone maxes it
-        out), so we return 0.0.
+        leaves less than ``min_range`` of headroom the indicator is uninformative
+        (noise alone nearly maxes it out), so the score is 0.0.
 
         Args:
             raw_score: The indicator's raw score (0.0 - 1.0).
@@ -2117,9 +2135,11 @@ class ConsciousnessAssessment:
         Returns:
             Normalized score in [0.0, 1.0].
         """
-        if baseline >= 1.0:
-            return 0.0  # Indicator is broken if noise passes it
-        return max(0.0, (raw_score - baseline) / (1.0 - baseline))
+        headroom = 1.0 - baseline
+        if baseline >= 1.0 or headroom < min_range:
+            # Noise alone (nearly) maxes the indicator out: it carries no signal.
+            return 0.0
+        return max(0.0, (raw_score - baseline) / headroom)
 
     async def run_normalized_assessment(
         self,
