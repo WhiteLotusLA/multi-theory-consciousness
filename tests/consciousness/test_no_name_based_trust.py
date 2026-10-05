@@ -31,6 +31,10 @@ ROLE_LABELS = frozenset({"user", "assistant", "system", "unknown", ""})
 # renders the name for display only; none grants trust from it.
 ALLOWED_CREATOR_NAME_READERS: Tuple[Tuple[str, str], ...] = (
     ("mtc/memory/core_blocks.py", "renders the human block; never trust"),
+    (
+        "mtc/knowledge/graph_manager.py",
+        "seeds the creator Person node through MERGE; never trust",
+    ),
 )
 CONFIG_MODULE = PACKAGE / "core" / "config.py"
 
