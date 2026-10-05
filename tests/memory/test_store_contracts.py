@@ -5,17 +5,25 @@ the default. A later phase adds a real store by appending one ``pytest.param``
 entry (carrying ``pytest.mark.db``) whose factory builds the named store kind;
 no test case below needs editing. A backend that does not support a capacity
 cap sets ``supports_cap=False`` and the cap test skips for it.
+
+A store-backed entry names the throwaway fixture it runs on (``fixture``) and
+an async ``prepare`` hook that creates its schema there; its factory takes that
+target first. A backend that implements only some kinds builds the in-memory
+store for the others, so a case touching several kinds still exercises the real
+store for its own kind. A persistent factory asked for an item cap skips.
 """
 
 import asyncio
 import copy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 import pytest
+import pytest_asyncio
 
 from mtc.memory import inmemory, protocols
+from mtc.memory.postgres_stores import PostgresSnapshotStore
 from mtc.memory.protocols import SnapshotEvent, SnapshotRecord
 
 T0 = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -39,6 +47,8 @@ class Backend:
     name: str
     factory: Callable[..., Any]
     supports_cap: bool = True
+    fixture: Optional[str] = None
+    prepare: Optional[Callable[[Any], Awaitable[None]]] = None
 
 
 def _inmemory_factory(kind: str, max_items: Optional[int] = None) -> Any:
@@ -55,10 +65,33 @@ def _inmemory_factory(kind: str, max_items: Optional[int] = None) -> Any:
     return classes[kind](max_items=max_items)
 
 
+def _postgres_factory(pool: Any, kind: str, max_items: Optional[int] = None) -> Any:
+    if max_items is not None:
+        pytest.skip("PostgreSQL stores keep every row; they have no item cap")
+    if kind == "snapshot":
+        return PostgresSnapshotStore(pool)
+    return _inmemory_factory(kind)
+
+
+async def _postgres_prepare(pool: Any) -> None:
+    await PostgresSnapshotStore(pool).ensure_schema()
+
+
 # Append a pytest.param(Backend(...), marks=pytest.mark.db, id="...") entry per
 # real store; the cases below do not change.
 BACKENDS = [
     pytest.param(Backend("inmemory", _inmemory_factory), id="inmemory"),
+    pytest.param(
+        Backend(
+            "postgres",
+            _postgres_factory,
+            supports_cap=False,
+            fixture="throwaway_postgres",
+            prepare=_postgres_prepare,
+        ),
+        marks=pytest.mark.db,
+        id="postgres",
+    ),
 ]
 
 
@@ -68,8 +101,24 @@ def backend(request) -> Backend:
 
 
 @pytest.fixture
-def make_store(backend):
+def store_target(request, backend) -> Any:
+    if backend.fixture is None:
+        return None
+    return request.getfixturevalue(backend.fixture)
+
+
+@pytest_asyncio.fixture
+async def prepared_target(backend, store_target) -> Any:
+    if backend.prepare is not None:
+        await backend.prepare(store_target)
+    return store_target
+
+
+@pytest.fixture
+def make_store(backend, prepared_target):
     def build(kind: str, **kwargs: Any) -> Any:
+        if backend.fixture is not None:
+            return backend.factory(prepared_target, kind, **kwargs)
         return backend.factory(kind, **kwargs)
 
     return build

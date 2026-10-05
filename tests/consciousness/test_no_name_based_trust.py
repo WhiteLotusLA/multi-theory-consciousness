@@ -9,7 +9,7 @@ explicit allowlist below. It runs at every gate of the port.
 
 import ast
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "mtc"
@@ -27,9 +27,11 @@ SPEAKER_NAMES = frozenset(
 UNWRAP_METHODS = frozenset({"lower", "strip", "casefold", "upper"})
 ROLE_LABELS = frozenset({"user", "assistant", "system", "unknown", ""})
 
-# Modules allowed to read the creator name, each with its reason. Empty until
-# the prompt assembler lands.
-ALLOWED_CREATOR_NAME_READERS: tuple = ()
+# Modules allowed to read the creator name, each as (path, reason). A reader
+# renders the name for display only; none grants trust from it.
+ALLOWED_CREATOR_NAME_READERS: Tuple[Tuple[str, str], ...] = (
+    ("mtc/memory/core_blocks.py", "renders the human block; never trust"),
+)
 CONFIG_MODULE = PACKAGE / "core" / "config.py"
 
 
@@ -121,9 +123,14 @@ def test_no_speaker_name_literals_in_modules():
     assert not hits, "speaker compared with a name literal: " + ", ".join(hits)
 
 
+def test_allowed_creator_name_readers_exist_and_give_reasons():
+    for entry, reason in ALLOWED_CREATOR_NAME_READERS:
+        assert (ROOT / entry).is_file(), entry
+        assert reason.strip(), entry
+
+
 def test_creator_name_read_only_by_allowed_modules():
-    allowed = {ROOT / entry for entry in ALLOWED_CREATOR_NAME_READERS}
-    assert ALLOWED_CREATOR_NAME_READERS == ()
+    allowed = {ROOT / entry for entry, _reason in ALLOWED_CREATOR_NAME_READERS}
     hits: List[str] = []
     for path in _module_files():
         if path == CONFIG_MODULE or path in allowed:
