@@ -5,7 +5,6 @@ Verifies that the noise-normalized assessment produces near-zero scores
 on random synthetic data, preventing score inflation from returning.
 """
 
-import asyncio
 import random
 
 import numpy as np
@@ -39,7 +38,9 @@ async def test_noise_normalized_below_thresholds():
     )
     from mtc.core.param_overrides import load_overrides
 
-    overrides = load_overrides("experiments/params.toml", "experiments/param_schema.toml")
+    overrides = load_overrides(
+        "experiments/params.toml", "experiments/param_schema.toml"
+    )
 
     # Compute noise baseline
     noise_baselines = await _compute_noise_baseline(overrides, iterations=3)
@@ -65,9 +66,10 @@ async def test_noise_normalized_below_thresholds():
     ]
 
     # At most 3 indicators should pass on random data
-    assert len(passing_on_noise) <= 3, (
-        f"{len(passing_on_noise)} indicators pass on noise (max 3):\n"
-        + "\n".join(passing_on_noise)
+    assert (
+        len(passing_on_noise) <= 3
+    ), f"{len(passing_on_noise)} indicators pass on noise (max 3):\n" + "\n".join(
+        passing_on_noise
     )
 
 
@@ -85,7 +87,9 @@ async def test_no_perfect_scores_after_normalization():
     )
     from mtc.core.param_overrides import load_overrides
 
-    overrides = load_overrides("experiments/params.toml", "experiments/param_schema.toml")
+    overrides = load_overrides(
+        "experiments/params.toml", "experiments/param_schema.toml"
+    )
     noise_baselines = await _compute_noise_baseline(overrides, iterations=3)
 
     random.seed(SEED)
@@ -101,10 +105,7 @@ async def test_no_perfect_scores_after_normalization():
         noise_baselines=noise_baselines,
     )
 
-    perfect = [
-        name for name, r in report.indicator_results.items()
-        if r.score >= 0.99
-    ]
+    perfect = [name for name, r in report.indicator_results.items() if r.score >= 0.99]
     assert len(perfect) == 0, f"Perfect scores on noise: {perfect}"
 
 
@@ -122,7 +123,9 @@ async def test_overall_score_near_zero_on_noise():
     )
     from mtc.core.param_overrides import load_overrides
 
-    overrides = load_overrides("experiments/params.toml", "experiments/param_schema.toml")
+    overrides = load_overrides(
+        "experiments/params.toml", "experiments/param_schema.toml"
+    )
     noise_baselines = await _compute_noise_baseline(overrides, iterations=3)
 
     random.seed(SEED)
@@ -138,9 +141,9 @@ async def test_overall_score_near_zero_on_noise():
         noise_baselines=noise_baselines,
     )
 
-    assert report.overall_score < 0.15, (
-        f"Overall score {report.overall_score:.3f} on noise (expected < 0.15)"
-    )
+    assert (
+        report.overall_score < 0.15
+    ), f"Overall score {report.overall_score:.3f} on noise (expected < 0.15)"
 
 
 @pytest.mark.asyncio
@@ -149,11 +152,11 @@ async def test_ablated_modules_score_zero():
     _seed()
     assessment = ConsciousnessAssessment()
     report = await assessment.run_full_assessment(
-        normalize=False,  # No normalization needed — raw scores should be near zero
+        normalize=False,  # No normalization needed - raw scores should be near zero
         warmup_cycles=25,
     )
 
     for name, result in report.indicator_results.items():
-        assert result.score <= 0.15, (
-            f"{name} scores {result.score:.3f} with all modules ablated"
-        )
+        assert (
+            result.score <= 0.15
+        ), f"{name} scores {result.score:.3f} with all modules ablated"

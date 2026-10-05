@@ -16,8 +16,7 @@ Performance targets:
 """
 
 import numpy as np
-from typing import Dict, Any, Optional
-from dataclasses import dataclass
+from typing import Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)
@@ -307,10 +306,10 @@ if __name__ == "__main__":
 
     print("\nNetwork Configuration:")
     metrics = snn.get_metrics()
-    print(f"  Total neurons: {metrics['total_neurons']}")
-    print(f"  Total synapses: {metrics['total_synapses']}")
+    print(f" Total neurons: {metrics['total_neurons']}")
+    print(f" Total synapses: {metrics['total_synapses']}")
     print(
-        f"  Learning: {'Enabled' if snn.learning_enabled else 'Disabled (inference mode)'}"
+        f" Learning: {'Enabled' if snn.learning_enabled else 'Disabled (inference mode)'}"
     )
 
     print("\nRunning performance test (100 timesteps)...")
@@ -337,21 +336,21 @@ if __name__ == "__main__":
     end_time = time.perf_counter()
     elapsed_ms = (end_time - start_time) * 1000
 
-    print(f"\nSimulation complete!")
-    print(f"  Processing time: {elapsed_ms:.2f}ms")
-    print(f"  Steps simulated: {steps}")
-    print(f"  Time per step: {elapsed_ms/steps:.3f}ms")
+    print("\nSimulation complete!")
+    print(f" Processing time: {elapsed_ms:.2f}ms")
+    print(f" Steps simulated: {steps}")
+    print(f" Time per step: {elapsed_ms/steps:.3f}ms")
 
     print("\nResults:")
     metrics = snn.get_metrics()
-    print(f"  Total spikes: {metrics['total_spikes']}")
-    print(f"  Avg spikes/step: {metrics['avg_spikes_per_step']:.2f}")
-    print(f"  Avg firing rate: {metrics['avg_network_firing_rate_hz']:.2f} Hz")
+    print(f" Total spikes: {metrics['total_spikes']}")
+    print(f" Avg spikes/step: {metrics['avg_spikes_per_step']:.2f}")
+    print(f" Avg firing rate: {metrics['avg_network_firing_rate_hz']:.2f} Hz")
 
     print("\nFiring Rates:")
     rates = snn.get_firing_rates(100.0)
-    print(f"  Input layer: {rates['input'].mean():.1f} Hz (avg)")
-    print(f"  Hidden layer: {rates['hidden'].mean():.1f} Hz (avg)")
-    print(f"  Output layer: {rates['output'].mean():.1f} Hz (avg)")
+    print(f" Input layer: {rates['input'].mean():.1f} Hz (avg)")
+    print(f" Hidden layer: {rates['hidden'].mean():.1f} Hz (avg)")
+    print(f" Output layer: {rates['output'].mean():.1f} Hz (avg)")
 
     print("\nOptimized SNN ready!")

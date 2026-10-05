@@ -12,12 +12,8 @@ Author: Multi-Theory Consciousness Project
 
 import pytest
 import numpy as np
-import asyncio
-from unittest.mock import Mock, MagicMock
-from dataclasses import dataclass, field
-from typing import List
+from unittest.mock import Mock
 
-import sys
 
 from mtc.consciousness.beautiful_loop import (
     BeautifulLoop,
@@ -25,16 +21,15 @@ from mtc.consciousness.beautiful_loop import (
     HyperModel,
     PrecisionState,
     BayesianBinding,
-    BoundPercept,
     Inference,
     EpistemicDepthTracker,
     SelfReferenceMetrics,
 )
 
-
 # ==========================================================================
 # HyperModel Tests (H.1)
 # ==========================================================================
+
 
 class TestHyperModel:
     """Tests for the precision controller."""
@@ -113,12 +108,8 @@ class TestHyperModel:
     def test_context_dependent_precision(self, hyper_model):
         """Different contexts learn different precision patterns."""
         for _ in range(10):
-            hyper_model.update_precision_beliefs(
-                [0.01, 0.5, 0.01], context="social"
-            )
-            hyper_model.update_precision_beliefs(
-                [0.5, 0.01, 0.5], context="analytical"
-            )
+            hyper_model.update_precision_beliefs([0.01, 0.5, 0.01], context="social")
+            hyper_model.update_precision_beliefs([0.5, 0.01, 0.5], context="analytical")
 
         # Social: levels 0 and 2 should have higher precision
         p_social = hyper_model.allocate_precision(1, context="social")
@@ -174,6 +165,7 @@ class TestHyperModel:
 # ==========================================================================
 # BayesianBinding Tests (H.2)
 # ==========================================================================
+
 
 class TestBayesianBinding:
     """Tests for inference competition via mutual information."""
@@ -301,6 +293,7 @@ class TestBayesianBinding:
 # ==========================================================================
 # EpistemicDepthTracker Tests (H.3)
 # ==========================================================================
+
 
 class TestEpistemicDepthTracker:
     """Tests for recursive self-reference measurement."""
@@ -490,6 +483,7 @@ class TestEpistemicDepthTracker:
 # BeautifulLoop Integration Tests (H.4)
 # ==========================================================================
 
+
 class TestBeautifulLoop:
     """Tests for the integrated Beautiful Loop."""
 
@@ -521,7 +515,10 @@ class TestBeautifulLoop:
         )
         assert isinstance(moment.precision_state, PrecisionState)
         # Level 1 (lowest error) should have highest precision
-        assert moment.precision_state.level_precisions[1] > moment.precision_state.level_precisions[2]
+        assert (
+            moment.precision_state.level_precisions[1]
+            > moment.precision_state.level_precisions[2]
+        )
 
     @pytest.mark.asyncio
     async def test_process_with_workspace_winners(self, loop):
@@ -547,7 +544,9 @@ class TestBeautifulLoop:
         mock_winner2.salience = 0.6
 
         mock_result = Mock()
-        mock_result.posterior_beliefs = np.array([0.3, 0.2, 0.1, 0.15, 0.05, 0.05, 0.1, 0.05])
+        mock_result.posterior_beliefs = np.array(
+            [0.3, 0.2, 0.1, 0.15, 0.05, 0.05, 0.1, 0.05]
+        )
 
         moment = await loop.process_conscious_moment(
             workspace_winners=[mock_winner1, mock_winner2],
@@ -574,7 +573,11 @@ class TestBeautifulLoop:
     @pytest.mark.asyncio
     async def test_full_loop_with_all_inputs(self, loop):
         """Full loop with all inputs produces enriched moment."""
-        mock_errors = [Mock(error_magnitude=0.2), Mock(error_magnitude=0.1), Mock(error_magnitude=0.3)]
+        mock_errors = [
+            Mock(error_magnitude=0.2),
+            Mock(error_magnitude=0.1),
+            Mock(error_magnitude=0.3),
+        ]
 
         mock_candidate = Mock()
         mock_candidate.id = "w1"
@@ -586,7 +589,9 @@ class TestBeautifulLoop:
         mock_winner.salience = 0.7
 
         mock_result = Mock()
-        mock_result.posterior_beliefs = np.array([0.3, 0.2, 0.1, 0.15, 0.05, 0.05, 0.1, 0.05])
+        mock_result.posterior_beliefs = np.array(
+            [0.3, 0.2, 0.1, 0.15, 0.05, 0.05, 0.1, 0.05]
+        )
 
         mock_self_model = Mock()
         mock_self_model.update_count = 10
@@ -700,4 +705,8 @@ class TestBeautifulLoop:
         )
 
         # Precisions should have been modified
-        assert level0.precision != 1.0 or level1.precision != 1.0 or level2.precision != 1.0
+        assert (
+            level0.precision != 1.0
+            or level1.precision != 1.0
+            or level2.precision != 1.0
+        )

@@ -33,14 +33,14 @@ try:
     from .cpp_integration import CppHtmInterface, HTMBuildSystem
 
     HTM_CPP_AVAILABLE = True
-except ImportError as e:
+except ImportError:
     HTM_CPP_AVAILABLE = False
     CppHtmInterface = None
     HTMBuildSystem = None
 
 # Always available Python implementations
-from .htm_core import HTM, SDR, SpatialPooler, TemporalMemory
-from .production_htm import ProductionHTM
+from .htm_core import HTM, SDR, SpatialPooler, TemporalMemory  # noqa: E402
+from .production_htm import ProductionHTM  # noqa: E402
 
 
 def get_best_htm():
@@ -79,9 +79,7 @@ __all__ = [
 
 # Log availability summary
 if HTM_MPS_AVAILABLE:
-    logger.info(
-        "HTM: Using MPS GPU acceleration"
-    )
+    logger.info("HTM: Using MPS GPU acceleration")
 elif HTM_CPP_AVAILABLE:
     logger.info("HTM: Using C++ with Eigen SIMD")
 else:

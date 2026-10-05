@@ -31,7 +31,7 @@ import logging
 import numpy as np
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 from collections import deque
 from enum import Enum
 
@@ -566,21 +566,21 @@ class RPTMeasurement:
         """Generate a human-readable RPT report."""
         stats = self.get_statistics()
         lines = ["RPT (Recurrent Processing Theory) Status:"]
-        lines.append(f"  Measurements: {stats['measurement_count']}")
-        lines.append(f"  Avg local recurrence: {stats['average_local']:.3f}")
-        lines.append(f"  Avg global recurrence: {stats['average_global']:.3f}")
+        lines.append(f" Measurements: {stats['measurement_count']}")
+        lines.append(f" Avg local recurrence: {stats['average_local']:.3f}")
+        lines.append(f" Avg global recurrence: {stats['average_global']:.3f}")
 
         dist = stats["recurrence_type_distribution"]
         total = sum(dist.values())
         if total > 0:
-            lines.append("  Recurrence type distribution:")
+            lines.append(" Recurrence type distribution:")
             for rtype, count in dist.items():
                 pct = count / total * 100
-                lines.append(f"    {rtype}: {count} ({pct:.0f}%)")
+                lines.append(f"   {rtype}: {count} ({pct:.0f}%)")
 
         if stats["latest"]:
             lines.append(
-                f"  Latest: type={stats['latest']['type']}, "
+                f" Latest: type={stats['latest']['type']}, "
                 f"phenomenal={stats['latest']['phenomenal']:.3f}, "
                 f"access={stats['latest']['access']:.3f}"
             )

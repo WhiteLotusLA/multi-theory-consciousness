@@ -22,11 +22,10 @@ This mimics the complete human consciousness stack:
 """
 
 import numpy as np
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
-import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +233,8 @@ class NeuralOrchestrator:
         self.lsm_bridge = None
         if _HAS_EMOTION_BRIDGE:
             self.lsm_bridge = EmotionLSMBridge(
-                neural_data_manager=self.neural_data_manager, store_states=enable_mongodb
+                neural_data_manager=self.neural_data_manager,
+                store_states=enable_mongodb,
             )
 
         # Layer 2: Memory Consolidation (HTM)

@@ -22,9 +22,6 @@ from qdrant_client.models import (
     Distance,
     VectorParams,
     PointStruct,
-    Filter,
-    FieldCondition,
-    Range,
     SearchParams,
     ScalarQuantization,
     ScalarQuantizationConfig,
@@ -439,7 +436,7 @@ if __name__ == "__main__":
         memory_id = coordinator.store_memory(
             text=text, importance=importance, emotional_weight=emotion
         )
-        print(f"  Stored: {memory_id} - '{text[:40]}...'")
+        print(f" Stored: {memory_id} - '{text[:40]}...'")
 
     print("\nTesting semantic search...")
     queries = [
@@ -452,13 +449,13 @@ if __name__ == "__main__":
         print(f"\n  Query: '{query}'")
         results = coordinator.search_similar(query, top_k=3)
         for memory_id, score, metadata in results:
-            print(f"    [{score:.3f}] {metadata.get('text', '')[:60]}...")
+            print(f"   [{score:.3f}] {metadata.get('text', '')[:60]}...")
 
     print("\nPerformance Metrics:")
     metrics = coordinator.get_metrics()
-    print(f"  Avg embedding time: {metrics['avg_embedding_time_ms']:.2f}ms")
-    print(f"  Avg search time: {metrics['avg_search_time_ms']:.2f}ms")
-    print(f"  Last latency: {metrics['last_latency']:.2f}ms")
-    print(f"  Meeting <50ms target: {'Yes' if metrics['meeting_target'] else 'No'}")
+    print(f" Avg embedding time: {metrics['avg_embedding_time_ms']:.2f}ms")
+    print(f" Avg search time: {metrics['avg_search_time_ms']:.2f}ms")
+    print(f" Last latency: {metrics['last_latency']:.2f}ms")
+    print(f" Meeting <50ms target: {'Yes' if metrics['meeting_target'] else 'No'}")
 
     print("\nVector Coordinator ready for consciousness research!")

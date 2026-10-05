@@ -13,14 +13,14 @@ consciousness arises from a self-referential predictive processing loop:
 This module integrates three mechanisms into a single consciousness
 enrichment step that runs after each GWT broadcast:
 
-1. HyperModel (H.1): Precision controller — learns which levels
+1. HyperModel (H.1): Precision controller - learns which levels
    of the predictive hierarchy are reliable in which contexts.
 
 2. BayesianBinding (H.2): Inference competition via mutual information
-   — binds coherent inferences into unified conscious experience.
+   - binds coherent inferences into unified conscious experience.
 
 3. EpistemicDepthTracker (H.3): Recursive self-reference measurement
-   — tracks how deeply the system models itself modeling the world.
+   - tracks how deeply the system models itself modeling the world.
 
 The BeautifulLoop class integrates these into process_conscious_moment(),
 which takes the current hierarchy state and world model, and produces
@@ -340,7 +340,7 @@ class BeautifulLoop:
         Perfect balance (entropy = max) means all levels equally trusted.
         Maximum focus (entropy = 0) means one level dominates.
 
-        A moderate balance is optimal — the system should have learned
+        A moderate balance is optimal - the system should have learned
         which levels to trust, but not ignore any completely.
         """
         precisions = list(precision_state.level_precisions.values())
@@ -360,7 +360,7 @@ class BeautifulLoop:
 
         # Optimal balance is moderate entropy (0.4-0.7 of max)
         normalized_entropy = entropy / max_entropy
-        # Peaked around 0.5 — neither too uniform nor too focused
+        # Peaked around 0.5 - neither too uniform nor too focused
         balance = 1.0 - 2.0 * abs(normalized_entropy - 0.5)
         return float(np.clip(balance, 0.0, 1.0))
 
@@ -392,9 +392,9 @@ class BeautifulLoop:
     def generate_report(self) -> str:
         """Generate comprehensive Beautiful Loop report."""
         lines = ["Beautiful Loop Status:"]
-        lines.append(f"  Cycles: {self.cycle_count}")
-        lines.append(f"  Avg loop quality: {self.get_average_loop_quality():.3f}")
-        lines.append(f"  Field-evidencing events: {self.field_evidencing_count}")
+        lines.append(f" Cycles: {self.cycle_count}")
+        lines.append(f" Avg loop quality: {self.get_average_loop_quality():.3f}")
+        lines.append(f" Field-evidencing events: {self.field_evidencing_count}")
         lines.append("")
         lines.append(self.hyper_model.generate_report())
         lines.append("")

@@ -30,38 +30,39 @@ np.random.seed(SEED)
 
 try:
     import torch
+
     torch.manual_seed(SEED)
 except ImportError:
     pass
 
-from mtc.core.param_overrides import load_overrides
-from mtc.consciousness.enhanced_global_workspace import (
+from mtc.core.param_overrides import load_overrides  # noqa: E402
+from mtc.consciousness.enhanced_global_workspace import (  # noqa: E402
     EnhancedGlobalWorkspace,
     TemporalWorkspaceConfig,
     WorkspaceCandidate,
     WorkspaceCandidateSource,
 )
-from mtc.consciousness.attention_schema import (
+from mtc.consciousness.attention_schema import (  # noqa: E402
     AttentionSchemaModule,
     AttentionTarget,
     AttentionShiftType,
 )
-from mtc.consciousness.metacognition import (
+from mtc.consciousness.metacognition import (  # noqa: E402
     MetacognitionModule,
     FirstOrderStateType,
     MetaType,
 )
-from mtc.consciousness.active_inference import (
+from mtc.consciousness.active_inference import (  # noqa: E402
     ActiveInferenceModule,
     ActiveInferenceConfig,
 )
-from mtc.consciousness.beautiful_loop import BeautifulLoop
-from mtc.consciousness.damasio import DamasioLayers
-from mtc.consciousness.pad_affect import PADAffectModel, PADSources
-from mtc.neural.oscillatory_binding import OscillatoryBinding
-from mtc.assessment.rpt_measurement import RPTMeasurement
-from mtc.assessment.assessment import ConsciousnessAssessment
-from mtc.assessment.causal_emergence import CausalEmergenceAnalyzer
+from mtc.consciousness.beautiful_loop import BeautifulLoop  # noqa: E402
+from mtc.consciousness.damasio import DamasioLayers  # noqa: E402
+from mtc.consciousness.pad_affect import PADAffectModel, PADSources  # noqa: E402
+from mtc.neural.oscillatory_binding import OscillatoryBinding  # noqa: E402
+from mtc.assessment.rpt_measurement import RPTMeasurement  # noqa: E402
+from mtc.assessment.assessment import ConsciousnessAssessment  # noqa: E402
+from mtc.assessment.causal_emergence import CausalEmergenceAnalyzer  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = ROOT / "experiments" / "param_schema.toml"
@@ -75,6 +76,7 @@ class _WarmupPhiTracker:
     Records binary module states (5 modules) and builds an empirical TPM
     from the warmup cycle activity.
     """
+
     def __init__(self):
         self.transitions = []
         self.warming_up = True
@@ -84,8 +86,13 @@ class _WarmupPhiTracker:
     def record(self, modules: dict):
         """Record module states after each warmup cycle."""
         state = []
-        for key in ["global_workspace", "attention_schema", "metacognition",
-                     "active_inference", "beautiful_loop"]:
+        for key in [
+            "global_workspace",
+            "attention_schema",
+            "metacognition",
+            "active_inference",
+            "beautiful_loop",
+        ]:
             mod = modules.get(key)
             if mod is None:
                 state.append(0)
@@ -108,7 +115,7 @@ class _WarmupPhiTracker:
     def build_tpm(self):
         """Build empirical node-by-state TPM (32 x 5) from recorded transitions."""
         n = 5
-        n_states = 2 ** n
+        n_states = 2**n
         counts = np.zeros((n_states, n), dtype=np.float64)
         totals = np.zeros(n_states, dtype=np.float64)
         for prev, next_s in self.transitions:
@@ -129,8 +136,9 @@ class _WarmupSelfModel:
     """Lightweight self-model for BLT epistemic depth during warmup.
 
     Starts naive (0.5 across the board) and drifts via random walk.
-    No pre-calibration — the model earns its confidence through cycles.
+    No pre-calibration - the model earns its confidence through cycles.
     """
+
     def __init__(self):
         self.update_count = 0
         self.confidence = 0.5
@@ -151,8 +159,9 @@ class _WarmupSelfModel:
 class _WarmupMetaState:
     """Lightweight meta-state for BLT epistemic depth during warmup.
 
-    Independent tracking with its own noise — not locked to self-model.
+    Independent tracking with its own noise - not locked to self-model.
     """
+
     def __init__(self):
         self.total_predictions = 0
         self.predicted_accuracy = 0.5
@@ -161,11 +170,16 @@ class _WarmupMetaState:
 
     def step(self, self_model):
         self.total_predictions += 1
-        # Track self-model loosely, not perfectly — independent noise
-        self.prediction_accuracy = self_model.prediction_accuracy + np.random.uniform(-0.1, 0.1)
+        # Track self-model loosely, not perfectly - independent noise
+        self.prediction_accuracy = self_model.prediction_accuracy + np.random.uniform(
+            -0.1, 0.1
+        )
         self.prediction_accuracy = np.clip(self.prediction_accuracy, 0.1, 0.9)
-        self.predicted_accuracy = self.prediction_accuracy + np.random.uniform(-0.1, 0.1)
+        self.predicted_accuracy = self.prediction_accuracy + np.random.uniform(
+            -0.1, 0.1
+        )
         self.model_confidence = 0.4 + 0.2 * min(1.0, self.total_predictions / 10)
+
 
 # Fields that belong to TemporalWorkspaceConfig, not EnhancedGlobalWorkspace
 _TEMPORAL_FIELDS = {
@@ -213,7 +227,7 @@ def build_modules(overrides: dict) -> dict:
     beautiful_loop = BeautifulLoop(**blt_ov)
 
     damasio_ov = overrides.get("damasio", {})
-    damasio = DamasioLayers(**damasio_ov)
+    DamasioLayers(**damasio_ov)
 
     pad_ov = overrides.get("pad", {})
     pad_affect = PADAffectModel(**pad_ov)
@@ -244,17 +258,19 @@ def _build_neural_states() -> dict:
 
     Uses unbiased random data so the Phi approximation measures whatever
     integration structure emerges naturally. No engineered connectivity
-    or shared-signal injection — scores reflect the framework's baseline
+    or shared-signal injection - scores reflect the framework's baseline
     response to uninstructed substrate data.
     """
-    n = 16  # Moderate size — enough to exercise Phi without inflating size_factor
+    n = 16  # Moderate size - enough to exercise Phi without inflating size_factor
     snn = np.random.rand(n, n).astype(np.float32)
     lsm = np.random.rand(n, n).astype(np.float32)
     htm = np.random.rand(n, n).astype(np.float32)
 
-    combined_state = np.mean([snn.mean(axis=1), lsm.mean(axis=1), htm.mean(axis=1)], axis=0)
+    combined_state = np.mean(
+        [snn.mean(axis=1), lsm.mean(axis=1), htm.mean(axis=1)], axis=0
+    )
 
-    # Random symmetric connectivity — no engineered spectral structure
+    # Random symmetric connectivity - no engineered spectral structure
     raw = np.random.rand(n, n).astype(np.float32)
     connectivity = (raw + raw.T) / 2.0  # Symmetric
     np.fill_diagonal(connectivity, 1.0)
@@ -340,7 +356,7 @@ async def warmup(modules: dict, cycles: int = WARMUP_CYCLES):
             obs = np.random.dirichlet(np.ones(5))
             fep_result = await active_inference.infer_and_act(obs)
 
-        # Feed BLT — run a conscious moment with full cross-module data
+        # Feed BLT - run a conscious moment with full cross-module data
         if beautiful_loop is not None:
             self_model.step()
             meta_state.step(self_model)
@@ -361,12 +377,14 @@ async def warmup(modules: dict, cycles: int = WARMUP_CYCLES):
             if hot_obj is not None:
                 blt_kwargs["higher_order_thoughts"] = [hot_obj]
             if attention is not None:
-                blt_kwargs["attention_schema_state"] = getattr(attention, "schema", None)
+                blt_kwargs["attention_schema_state"] = getattr(
+                    attention, "schema", None
+                )
             await beautiful_loop.process_conscious_moment(**blt_kwargs)
 
-        # Feed RPT — neutral substrate states for recurrence measurement
+        # Feed RPT - neutral substrate states for recurrence measurement
         if rpt is not None:
-            # SNN: full range — hidden can amplify OR attenuate
+            # SNN: full range - hidden can amplify OR attenuate
             num_neurons = 100
             input_spikes = np.random.randint(1, 20, size=num_neurons)
             hidden_spikes = np.random.randint(1, 20, size=num_neurons)
@@ -385,7 +403,11 @@ async def warmup(modules: dict, cycles: int = WARMUP_CYCLES):
             }
             ws_state = None
             if workspace is not None:
-                gw_stats = workspace.get_statistics() if hasattr(workspace, "get_statistics") else {}
+                gw_stats = (
+                    workspace.get_statistics()
+                    if hasattr(workspace, "get_statistics")
+                    else {}
+                )
                 ws_state = {
                     "broadcast": gw_stats.get("broadcast", {}),
                     "cycle_count": gw_stats.get("cycle_count", i + 1),
@@ -414,7 +436,7 @@ async def warmup(modules: dict, cycles: int = WARMUP_CYCLES):
         # Record module states for PhiTracker TPM
         phi_tracker.record(modules)
 
-        # Feed PAD affect model — full valid domain per PADSources spec
+        # Feed PAD affect model - full valid domain per PADSources spec
         if pad_affect is not None:
             pad_sources = PADSources(
                 somatic_valence=np.random.uniform(-1.0, 1.0),
@@ -438,22 +460,25 @@ async def warmup(modules: dict, cycles: int = WARMUP_CYCLES):
         modules["causal_emergence_analyzer"] = ce_analyzer
 
 
-async def _compute_noise_baseline(overrides: dict, iterations: int = 5) -> Dict[str, float]:
+async def _compute_noise_baseline(
+    overrides: dict, iterations: int = 5
+) -> Dict[str, float]:
     """Compute noise baseline by running real modules with different random seeds.
 
-    This measures what the modules produce on random data — the floor score
+    This measures what the modules produce on random data - the floor score
     that any input would achieve. Scores above this floor represent genuine
     signal from structured input.
     """
     accumulated = defaultdict(list)
 
     for i in range(iterations):
-        # Different seed each iteration — but deterministic for reproducibility
+        # Different seed each iteration - but deterministic for reproducibility
         seed = SEED + 1000 + i
         random.seed(seed)
         np.random.seed(seed)
         try:
             import torch
+
             torch.manual_seed(seed)
         except ImportError:
             pass
@@ -472,6 +497,7 @@ async def _compute_noise_baseline(overrides: dict, iterations: int = 5) -> Dict[
     np.random.seed(SEED)
     try:
         import torch
+
         torch.manual_seed(SEED)
     except ImportError:
         pass
@@ -487,7 +513,9 @@ def print_report(report, t_total: float, ablation_results: dict = None):
     print(f"passing_count:     {passing}")
     print(f"total_indicators:  {len(report.indicator_results)}")
     for theory_name, theory_score in sorted(report.theory_scores.items()):
-        print(f"{theory_name.lower()}_score:{'':>{13 - len(theory_name)}}{theory_score:.6f}")
+        print(
+            f"{theory_name.lower()}_score:{'':>{13 - len(theory_name)}}{theory_score:.6f}"
+        )
     print(f"processing_ms:     {report.processing_time_ms:.1f}")
     print(f"warmup_cycles:     {WARMUP_CYCLES}")
     print(f"total_seconds:     {t_total:.1f}")
@@ -498,9 +526,11 @@ def print_report(report, t_total: float, ablation_results: dict = None):
         all_pass = True
         for module_name, result in sorted(ablation_results.items()):
             status = "GENUINE" if result["genuine"] else "COSMETIC"
-            print(f"  {module_name}: score_with={result['score_with']:.6f} "
-                  f"score_without={result['score_without']:.6f} "
-                  f"drop={result['drop']:.6f} {status}")
+            print(
+                f" {module_name}: score_with={result['score_with']:.6f} "
+                f"score_without={result['score_without']:.6f} "
+                f"drop={result['drop']:.6f} {status}"
+            )
             if not result["genuine"]:
                 all_pass = False
         print(f"ablation_passed:   {'true' if all_pass else 'false'}")
@@ -517,7 +547,12 @@ _ABLATION_MAP = {
 }
 
 
-async def run_ablation(overrides: dict, modules_to_check: list[str], baseline_score: float, noise_baselines: dict = None) -> dict:
+async def run_ablation(
+    overrides: dict,
+    modules_to_check: list[str],
+    baseline_score: float,
+    noise_baselines: dict = None,
+) -> dict:
     """Run ablation validation: disable each specified module and check score drops.
 
     Returns dict of {module_name: {score_with, score_without, drop, genuine}}.
@@ -526,7 +561,10 @@ async def run_ablation(overrides: dict, modules_to_check: list[str], baseline_sc
     results = {}
     for module_name in modules_to_check:
         if module_name not in _ABLATION_MAP:
-            print(f"WARNING: Unknown module '{module_name}' for ablation, skipping", file=sys.stderr)
+            print(
+                f"WARNING: Unknown module '{module_name}' for ablation, skipping",
+                file=sys.stderr,
+            )
             continue
 
         kwarg_name = _ABLATION_MAP[module_name]
@@ -536,6 +574,7 @@ async def run_ablation(overrides: dict, modules_to_check: list[str], baseline_sc
         np.random.seed(SEED)
         try:
             import torch
+
             torch.manual_seed(SEED)
         except ImportError:
             pass
@@ -564,8 +603,12 @@ async def run_ablation(overrides: dict, modules_to_check: list[str], baseline_sc
 
 async def run():
     parser = argparse.ArgumentParser(description="AutoConsciousness experiment runner")
-    parser.add_argument("--validate", type=str, default=None,
-                        help="Comma-separated module names to ablation-check (e.g., gwt,ast,hot)")
+    parser.add_argument(
+        "--validate",
+        type=str,
+        default=None,
+        help="Comma-separated module names to ablation-check (e.g., gwt,ast,hot)",
+    )
     args = parser.parse_args()
 
     t_start = time.time()
@@ -589,6 +632,7 @@ async def run():
     np.random.seed(SEED)
     try:
         import torch
+
         torch.manual_seed(SEED)
     except ImportError:
         pass

@@ -39,9 +39,8 @@ import time
 import uuid
 import random
 from typing import Dict, Any, Optional, List, Tuple
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from datetime import datetime
-from collections import deque
 from enum import Enum
 from pathlib import Path
 
@@ -54,7 +53,7 @@ try:
     import pyphi
 
     # Test if it actually works (collections.abc compatibility)
-    from pyphi import examples
+    from pyphi import examples  # noqa: F401
 
     PYPHI_AVAILABLE = True
 except (ImportError, AttributeError):
@@ -674,7 +673,7 @@ class ConsciousnessAssessment:
                 "entails": [],
                 "supported_by": [],
             },
-            # Oscillatory Binding indicator (AKOrN — Kuramoto dynamics)
+            # Oscillatory Binding indicator (AKOrN - Kuramoto dynamics)
             "oscillatory_binding_coherence": {
                 "theory": ConsciousnessTheory.RPT,
                 "threshold": 0.3,
@@ -808,11 +807,14 @@ class ConsciousnessAssessment:
                 "specificity": 0.6,
                 "sensitivity": 0.7,
                 "entails": ["agency", "flexible_responsiveness"],
-                "supported_by": ["prediction_error_minimization", "agent_environment_coupling"],
+                "supported_by": [
+                    "prediction_error_minimization",
+                    "agent_environment_coupling",
+                ],
             },
         }
 
-        # Negative indicators (Butlin 2025 §3) — presence reduces overall score
+        # Negative indicators (Butlin 2025 §3) - presence reduces overall score
         self.negative_indicator_configs = {
             "purely_reactive": {
                 "theory": ConsciousnessTheory.GWT,
@@ -969,7 +971,7 @@ class ConsciousnessAssessment:
         if normalize:
             if noise_baselines is not None:
                 baselines = noise_baselines
-            elif not hasattr(self, '_noise_baselines') or self._noise_baselines is None:
+            elif not hasattr(self, "_noise_baselines") or self._noise_baselines is None:
                 baselines = await self.run_noise_baseline(iterations=5)
                 self._noise_baselines = baselines
             else:
@@ -1017,7 +1019,9 @@ class ConsciousnessAssessment:
             "active_inference": active_inference,
         }
         for neg_name, neg_cfg in self.negative_indicator_configs.items():
-            neg_score = self._measure_negative_indicator(neg_name, neg_cfg, **neg_kwargs)
+            neg_score = self._measure_negative_indicator(
+                neg_name, neg_cfg, **neg_kwargs
+            )
             if neg_score > neg_cfg["threshold"]:
                 penalty = neg_score * neg_cfg["weight"] * 0.05
                 negative_penalty += penalty
@@ -1075,7 +1079,7 @@ class ConsciousnessAssessment:
         confidence = 0.5  # Default confidence
 
         # Check if component is ablated
-        ablation_config = kwargs.get("ablation_config", {})
+        kwargs.get("ablation_config", {})
 
         # GWT Indicators (from EnhancedGlobalWorkspace)
         if theory == ConsciousnessTheory.GWT:
@@ -1112,7 +1116,9 @@ class ConsciousnessAssessment:
                     confidence = 0.7 if ignitions > 5 else 0.4
                     evidence = {
                         "ignitions": ignitions,
-                        "ignition_rate": ignitions / max(1, cycle_count) if cycle_count > 0 else 0.0,
+                        "ignition_rate": (
+                            ignitions / max(1, cycle_count) if cycle_count > 0 else 0.0
+                        ),
                         "sustain_rate": sustain_rate,
                         "module_active": True,
                     }
@@ -1145,9 +1151,13 @@ class ConsciousnessAssessment:
                         history_len = stats.get("history_length", 0)
                         pred_accuracy = stats.get("prediction_accuracy", 0.0)
 
-                        schema_active = min(1.0, total_updates / max(1, warmup_cycles * 0.5))
+                        schema_active = min(
+                            1.0, total_updates / max(1, warmup_cycles * 0.5)
+                        )
                         focus_score = 1.0 if has_focus else 0.0
-                        history_score = min(1.0, history_len / max(1, warmup_cycles * 0.3))
+                        history_score = min(
+                            1.0, history_len / max(1, warmup_cycles * 0.3)
+                        )
                         prediction_score = pred_accuracy
 
                         score = (
@@ -1187,15 +1197,23 @@ class ConsciousnessAssessment:
                     }
 
                 elif name == "embodiment":
-                    stats = ast.get_statistics() if hasattr(ast, "get_statistics") else {}
+                    stats = (
+                        ast.get_statistics() if hasattr(ast, "get_statistics") else {}
+                    )
                     warmup_cycles = kwargs.get("warmup_cycles", 25)
                     capacity = stats.get("capacity_used", 0.0)
                     history_len = stats.get("history_length", 0)
                     vol_ratio = stats.get("voluntary_ratio", 0.0)
                     capacity_score = min(1.0, capacity) if capacity > 0 else 0.0
-                    perspective_score = min(1.0, history_len / max(1, warmup_cycles * 0.5))
+                    perspective_score = min(
+                        1.0, history_len / max(1, warmup_cycles * 0.5)
+                    )
                     agency_score = vol_ratio
-                    score = 0.4 * capacity_score + 0.3 * perspective_score + 0.3 * agency_score
+                    score = (
+                        0.4 * capacity_score
+                        + 0.3 * perspective_score
+                        + 0.3 * agency_score
+                    )
                     confidence = 0.5 + 0.2 * min(1.0, history_len / 5)
                     evidence = {
                         "capacity_used": capacity,
@@ -1218,7 +1236,11 @@ class ConsciousnessAssessment:
                     )
                     hot_count = stats.get("total_hots_generated", 0)
                     gw = kwargs.get("global_workspace")
-                    gw_stats = gw.get_statistics() if gw is not None and hasattr(gw, "get_statistics") else {}
+                    gw_stats = (
+                        gw.get_statistics()
+                        if gw is not None and hasattr(gw, "get_statistics")
+                        else {}
+                    )
                     cycle_count = gw_stats.get("cycle_count", 0)
                     if cycle_count == 0 or hot_count == 0:
                         score = 0.0
@@ -1241,12 +1263,19 @@ class ConsciousnessAssessment:
                     belief_evaluations = stats.get("belief_evaluations", 0)
                     overall_confidence = stats.get("overall_confidence", 0.0)
                     gw = kwargs.get("global_workspace")
-                    gw_stats = gw.get_statistics() if gw is not None and hasattr(gw, "get_statistics") else {}
+                    gw_stats = (
+                        gw.get_statistics()
+                        if gw is not None and hasattr(gw, "get_statistics")
+                        else {}
+                    )
                     cycle_count = gw_stats.get("cycle_count", 0)
                     if introspections + belief_evaluations == 0:
                         score = 0.0
                     else:
-                        activity_rate = min(1.0, (introspections + belief_evaluations) / max(1, cycle_count))
+                        activity_rate = min(
+                            1.0,
+                            (introspections + belief_evaluations) / max(1, cycle_count),
+                        )
                         quality = overall_confidence
                         score = 0.4 * activity_rate + 0.6 * quality
                     confidence = 0.6 if introspections > 2 else 0.3
@@ -1301,7 +1330,9 @@ class ConsciousnessAssessment:
                             error_quality = max(0.0, 1.0 - float(hierarchical_error))
                         else:
                             error_quality = 0.0
-                        activity_rate = min(1.0, total_inferences / max(1, warmup_cycles))
+                        activity_rate = min(
+                            1.0, total_inferences / max(1, warmup_cycles)
+                        )
                         score = 0.7 * error_quality + 0.3 * activity_rate
                     confidence = 0.6 if total_inferences > 5 else 0.3
                     evidence = {
@@ -1313,8 +1344,14 @@ class ConsciousnessAssessment:
                 elif name == "temporal_prediction_depth":
                     fep = kwargs.get("active_inference")
                     if fep is not None:
-                        horizon = fep.config.planning_horizon if hasattr(fep, "config") else 3
-                        stats = fep.get_statistics() if hasattr(fep, "get_statistics") else {}
+                        horizon = (
+                            fep.config.planning_horizon if hasattr(fep, "config") else 3
+                        )
+                        stats = (
+                            fep.get_statistics()
+                            if hasattr(fep, "get_statistics")
+                            else {}
+                        )
                         total_inferences = stats.get("total_inferences", 0)
                         avg_error = stats.get("avg_prediction_error", 0.5)
                         if isinstance(avg_error, str):
@@ -1326,7 +1363,11 @@ class ConsciousnessAssessment:
                             quality = max(0.0, 1.0 - float(avg_error))
                             score = horizon_factor * quality
                         confidence = 0.5 + 0.2 * min(1.0, total_inferences / 10)
-                        evidence = {"planning_horizon": horizon, "total_inferences": total_inferences, "avg_error": avg_error}
+                        evidence = {
+                            "planning_horizon": horizon,
+                            "total_inferences": total_inferences,
+                            "avg_error": avg_error,
+                        }
                     else:
                         score, confidence = 0.0, 0.3
                         evidence = {"module_absent": True}
@@ -1334,7 +1375,11 @@ class ConsciousnessAssessment:
                 elif name == "agent_environment_coupling":
                     fep = kwargs.get("active_inference")
                     if fep is not None:
-                        stats = fep.get_statistics() if hasattr(fep, "get_statistics") else {}
+                        stats = (
+                            fep.get_statistics()
+                            if hasattr(fep, "get_statistics")
+                            else {}
+                        )
                         warmup_cycles = kwargs.get("warmup_cycles", 25)
                         action_count = stats.get("total_inferences", 0)
                         observation_count = stats.get("total_model_updates", 0)
@@ -1342,10 +1387,17 @@ class ConsciousnessAssessment:
                             score = 0.0
                         else:
                             act_rate = min(1.0, action_count / max(1, warmup_cycles))
-                            obs_rate = min(1.0, observation_count / max(1, warmup_cycles))
+                            obs_rate = min(
+                                1.0, observation_count / max(1, warmup_cycles)
+                            )
                             score = (act_rate * obs_rate) ** 0.5
-                        confidence = 0.5 + 0.3 * min(1.0, (action_count + observation_count) / 20)
-                        evidence = {"actions": action_count, "observations": observation_count}
+                        confidence = 0.5 + 0.3 * min(
+                            1.0, (action_count + observation_count) / 20
+                        )
+                        evidence = {
+                            "actions": action_count,
+                            "observations": observation_count,
+                        }
                     else:
                         score, confidence = 0.0, 0.3
                         evidence = {"module_absent": True}
@@ -1366,7 +1418,12 @@ class ConsciousnessAssessment:
                             if isinstance(free_energy, (int, float)) and free_energy > 0
                             else 0.0
                         )
-                        score = min(1.0, 0.4 * inference_rate + 0.3 * update_rate + 0.3 * drive_score)
+                        score = min(
+                            1.0,
+                            0.4 * inference_rate
+                            + 0.3 * update_rate
+                            + 0.3 * drive_score,
+                        )
                     confidence = 0.6 if inferences > 5 else 0.3
                     evidence = {
                         "inferences": inferences,
@@ -1395,7 +1452,10 @@ class ConsciousnessAssessment:
                     else:
                         score = 0.1
                         confidence = 0.3
-                        evidence = {"ablated": True, "reason": "pad_affect_model not provided"}
+                        evidence = {
+                            "ablated": True,
+                            "reason": "pad_affect_model not provided",
+                        }
             else:
                 score = 0.1
                 confidence = 0.3
@@ -1431,7 +1491,11 @@ class ConsciousnessAssessment:
                                 eigenvalues_norm * np.log(eigenvalues_norm + 1e-10)
                             )
                             max_entropy = np.log(len(eigenvalues))
-                            score = spectral_entropy / max_entropy if max_entropy > 0 else 0.0
+                            score = (
+                                spectral_entropy / max_entropy
+                                if max_entropy > 0
+                                else 0.0
+                            )
                         else:
                             score = 0.0
                             spectral_entropy = 0.0
@@ -1496,7 +1560,10 @@ class ConsciousnessAssessment:
                 else:
                     score = 0.1
                     confidence = 0.3
-                    evidence = {"ablated": True, "reason": "global_workspace not provided"}
+                    evidence = {
+                        "ablated": True,
+                        "reason": "global_workspace not provided",
+                    }
             elif rpt is not None:
                 if name == "algorithmic_recurrence":
                     stats = (
@@ -1518,7 +1585,9 @@ class ConsciousnessAssessment:
                     }
 
                 elif name == "local_recurrence":
-                    stats = rpt.get_statistics() if hasattr(rpt, "get_statistics") else {}
+                    stats = (
+                        rpt.get_statistics() if hasattr(rpt, "get_statistics") else {}
+                    )
                     avg_local = stats.get("average_local", 0.0)
                     measurement_count = stats.get("measurement_count", 0)
                     score = avg_local if measurement_count > 0 else 0.0
@@ -1530,9 +1599,11 @@ class ConsciousnessAssessment:
                     }
 
                 elif name == "oscillatory_binding_coherence":
-                    osc_stats = rpt.get_oscillatory_binding_stats() if hasattr(
-                        rpt, "get_oscillatory_binding_stats"
-                    ) else {}
+                    osc_stats = (
+                        rpt.get_oscillatory_binding_stats()
+                        if hasattr(rpt, "get_oscillatory_binding_stats")
+                        else {}
+                    )
                     global_r = osc_stats.get("global_order_parameter", 0.0)
                     cross_vals = osc_stats.get("cross_coherence", {})
                     binding_count = osc_stats.get("binding_count", 0)
@@ -1602,7 +1673,9 @@ class ConsciousnessAssessment:
                         has_field_evidencing = fe_count > 0
                         has_loop_quality = avg_quality >= 0.4
                         has_strange_loop = depth_stats.get("max_depth_reached", 0) >= 2
-                        conditions_met = sum([has_field_evidencing, has_loop_quality, has_strange_loop])
+                        conditions_met = sum(
+                            [has_field_evidencing, has_loop_quality, has_strange_loop]
+                        )
                         score = conditions_met / 3.0
                     confidence = 0.5 + 0.3 * min(1.0, cycle_count / 20)
                     evidence = {
@@ -1610,8 +1683,15 @@ class ConsciousnessAssessment:
                         "field_evidencing_count": fe_count,
                         "has_field_evidencing": fe_count > 0,
                         "has_loop_quality": avg_quality >= 0.4,
-                        "has_strange_loop": depth_stats.get("max_depth_reached", 0) >= 2,
-                        "conditions_met": sum([fe_count > 0, avg_quality >= 0.4, depth_stats.get("max_depth_reached", 0) >= 2]),
+                        "has_strange_loop": depth_stats.get("max_depth_reached", 0)
+                        >= 2,
+                        "conditions_met": sum(
+                            [
+                                fe_count > 0,
+                                avg_quality >= 0.4,
+                                depth_stats.get("max_depth_reached", 0) >= 2,
+                            ]
+                        ),
                         "module_active": True,
                     }
             else:
@@ -1619,7 +1699,7 @@ class ConsciousnessAssessment:
                 confidence = 0.3
                 evidence = {"ablated": True, "reason": "beautiful_loop not provided"}
 
-        # AE Indicators (Agency & Embodiment — Butlin 2025)
+        # AE Indicators (Agency & Embodiment - Butlin 2025)
         elif theory == ConsciousnessTheory.AE:
             ai = kwargs.get("active_inference")
             ast = kwargs.get("attention_schema")
@@ -1631,19 +1711,43 @@ class ConsciousnessAssessment:
                     urgency = stats.get("urgency_level", 0.0)
                     free_energy = stats.get("variational_free_energy", 0.0)
                     base_score = 0.4
-                    inference_score = min(0.6, inferences / 10) if inferences > 0 else 0.0
-                    drive_score = (min(0.3, 0.3 * (1.0 - 1.0 / (1.0 + float(free_energy)))) if isinstance(free_energy, (int, float)) and free_energy > 0 else 0.0)
-                    urgency_bonus = (min(0.1, float(urgency) * 0.2) if isinstance(urgency, (int, float)) else 0.0)
-                    score = min(1.0, max(base_score, inference_score + drive_score + urgency_bonus))
+                    inference_score = (
+                        min(0.6, inferences / 10) if inferences > 0 else 0.0
+                    )
+                    drive_score = (
+                        min(0.3, 0.3 * (1.0 - 1.0 / (1.0 + float(free_energy))))
+                        if isinstance(free_energy, (int, float)) and free_energy > 0
+                        else 0.0
+                    )
+                    urgency_bonus = (
+                        min(0.1, float(urgency) * 0.2)
+                        if isinstance(urgency, (int, float))
+                        else 0.0
+                    )
+                    score = min(
+                        1.0,
+                        max(base_score, inference_score + drive_score + urgency_bonus),
+                    )
                     confidence = 0.6 if inferences > 5 else 0.4
-                    evidence = {"inferences": inferences, "model_updates": model_updates, "urgency": urgency, "free_energy": free_energy, "module_active": True}
+                    evidence = {
+                        "inferences": inferences,
+                        "model_updates": model_updates,
+                        "urgency": urgency,
+                        "free_energy": free_energy,
+                        "module_active": True,
+                    }
                 else:
                     score = 0.1
                     confidence = 0.3
-                    evidence = {"ablated": True, "reason": "active_inference not provided"}
+                    evidence = {
+                        "ablated": True,
+                        "reason": "active_inference not provided",
+                    }
             elif name == "embodiment":
                 if ast is not None:
-                    stats = ast.get_statistics() if hasattr(ast, "get_statistics") else {}
+                    stats = (
+                        ast.get_statistics() if hasattr(ast, "get_statistics") else {}
+                    )
                     base_score = 0.4
                     capacity = stats.get("capacity_used", 0.0)
                     history_len = stats.get("history_length", 0)
@@ -1651,13 +1755,26 @@ class ConsciousnessAssessment:
                     capacity_score = min(1.0, capacity * 2) if capacity > 0 else 0.3
                     perspective_score = min(1.0, history_len / 5)
                     agency_score = vol_ratio
-                    score = max(base_score, 0.3 * capacity_score + 0.4 * perspective_score + 0.3 * agency_score)
+                    score = max(
+                        base_score,
+                        0.3 * capacity_score
+                        + 0.4 * perspective_score
+                        + 0.3 * agency_score,
+                    )
                     confidence = 0.5 + 0.2 * min(1.0, history_len / 5)
-                    evidence = {"capacity_used": capacity, "history_length": history_len, "voluntary_ratio": vol_ratio, "module_active": True}
+                    evidence = {
+                        "capacity_used": capacity,
+                        "history_length": history_len,
+                        "voluntary_ratio": vol_ratio,
+                        "module_active": True,
+                    }
                 else:
                     score = 0.1
                     confidence = 0.3
-                    evidence = {"ablated": True, "reason": "attention_schema not provided"}
+                    evidence = {
+                        "ablated": True,
+                        "reason": "attention_schema not provided",
+                    }
 
         # New indicators (refined measurements / Butlin 2025 additions)
         if name == "sparse_smooth_coding":
@@ -1723,7 +1840,11 @@ class ConsciousnessAssessment:
                 diversity_score = min(1.0, total_candidates / 10)
                 score = max(base_score, 0.5 * cycle_score + 0.5 * diversity_score)
                 confidence = 0.5 + 0.3 * min(1.0, cycle_count / 5)
-                evidence = {"cycles": cycle_count, "total_candidates": total_candidates, "module_active": True}
+                evidence = {
+                    "cycles": cycle_count,
+                    "total_candidates": total_candidates,
+                    "module_active": True,
+                }
             else:
                 score = 0.1
                 confidence = 0.3
@@ -1734,16 +1855,30 @@ class ConsciousnessAssessment:
             rpt = kwargs.get("rpt_measurement")
             if gw is not None or rpt is not None:
                 base_score = 0.3
-                gw_stats = gw.get_statistics() if gw and hasattr(gw, "get_statistics") else {}
+                gw_stats = (
+                    gw.get_statistics() if gw and hasattr(gw, "get_statistics") else {}
+                )
                 comp_stats = gw_stats.get("competition", {})
                 source_counts = comp_stats.get("source_counts", {})
-                perceptual_count = sum(source_counts.get(s, 0) for s in ["snn", "lsm", "sensory", "vision"])
-                perceptual_score = min(1.0, perceptual_count / 5) if perceptual_count > 0 else 0.0
-                rpt_stats = rpt.get_statistics() if rpt and hasattr(rpt, "get_statistics") else {}
+                perceptual_count = sum(
+                    source_counts.get(s, 0) for s in ["snn", "lsm", "sensory", "vision"]
+                )
+                perceptual_score = (
+                    min(1.0, perceptual_count / 5) if perceptual_count > 0 else 0.0
+                )
+                rpt_stats = (
+                    rpt.get_statistics()
+                    if rpt and hasattr(rpt, "get_statistics")
+                    else {}
+                )
                 avg_local = rpt_stats.get("average_local", 0.0)
                 score = max(base_score, 0.5 * perceptual_score + 0.5 * avg_local)
                 confidence = 0.4 + 0.2 * min(1.0, perceptual_count / 3)
-                evidence = {"perceptual_candidates": perceptual_count, "avg_local_recurrence": avg_local, "module_active": True}
+                evidence = {
+                    "perceptual_candidates": perceptual_count,
+                    "avg_local_recurrence": avg_local,
+                    "module_active": True,
+                }
             else:
                 score = 0.1
                 confidence = 0.3
@@ -1754,7 +1889,9 @@ class ConsciousnessAssessment:
             ai = kwargs.get("active_inference")
             if gw is not None:
                 try:
-                    gw_stats = gw.get_statistics() if hasattr(gw, "get_statistics") else {}
+                    gw_stats = (
+                        gw.get_statistics() if hasattr(gw, "get_statistics") else {}
+                    )
                     comp_stats = gw_stats.get("competition", {})
                     source_counts = comp_stats.get("source_counts", {})
                     num_sources = len([s for s, c in source_counts.items() if c > 0])
@@ -1763,16 +1900,28 @@ class ConsciousnessAssessment:
                     belief_updates = 0.0
                     if ai is not None:
                         try:
-                            ai_stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
+                            ai_stats = (
+                                ai.get_statistics()
+                                if hasattr(ai, "get_statistics")
+                                else {}
+                            )
                             model_updates = ai_stats.get("total_model_updates", 0)
-                            belief_updates = min(1.0, model_updates / 10) if model_updates > 0 else 0.0
+                            belief_updates = (
+                                min(1.0, model_updates / 10)
+                                if model_updates > 0
+                                else 0.0
+                            )
                         except Exception:
                             pass
                     base_score = 0.3
                     computed = diversity_ratio * 0.5 + belief_updates * 0.5
                     score = max(base_score, computed)
                     confidence = 0.5
-                    evidence = {"source_diversity": num_sources, "belief_updates": round(belief_updates, 3), "module_active": True}
+                    evidence = {
+                        "source_diversity": num_sources,
+                        "belief_updates": round(belief_updates, 3),
+                        "module_active": True,
+                    }
                 except Exception:
                     score = 0.3
                     confidence = 0.4
@@ -1795,15 +1944,25 @@ class ConsciousnessAssessment:
                 lr_nonzero = 0.0
                 try:
                     if ai is not None:
-                        ai_stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
+                        ai_stats = (
+                            ai.get_statistics() if hasattr(ai, "get_statistics") else {}
+                        )
                         model_updates = ai_stats.get("total_model_updates", 0)
                         if model_updates > 0:
                             active_beliefs = model_updates
                         lr = getattr(ai, "learning_rate", 0.0)
-                        if lr is not None and isinstance(lr, (int, float)) and float(lr) > 0:
+                        if (
+                            lr is not None
+                            and isinstance(lr, (int, float))
+                            and float(lr) > 0
+                        ):
                             lr_nonzero = 1.0
                     if meta is not None:
-                        meta_stats = meta.get_statistics() if hasattr(meta, "get_statistics") else {}
+                        meta_stats = (
+                            meta.get_statistics()
+                            if hasattr(meta, "get_statistics")
+                            else {}
+                        )
                         introspections = meta_stats.get("introspection_count", 0)
                         if introspections > 0:
                             has_recent = min(1.0, introspections / 5)
@@ -1813,7 +1972,11 @@ class ConsciousnessAssessment:
                     lr_score = lr_nonzero * 0.2
                     score = max(base_score, belief_score + experience_score + lr_score)
                     confidence = 0.4 + 0.2 * min(1.0, active_beliefs / 5)
-                    evidence = {"active_beliefs": active_beliefs, "has_recent_experiences": has_recent > 0, "module_active": True}
+                    evidence = {
+                        "active_beliefs": active_beliefs,
+                        "has_recent_experiences": has_recent > 0,
+                        "module_active": True,
+                    }
                 except Exception:
                     score = 0.2
                     confidence = 0.3
@@ -1823,16 +1986,28 @@ class ConsciousnessAssessment:
             ai = kwargs.get("active_inference")
             if ai is not None:
                 try:
-                    ai_stats = ai.get_statistics() if hasattr(ai, "get_statistics") else {}
+                    ai_stats = (
+                        ai.get_statistics() if hasattr(ai, "get_statistics") else {}
+                    )
                     num_policies = ai_stats.get("active_policies", 1)
-                    policy_diversity = min(1.0, num_policies / 5) if num_policies > 1 else 0.2
+                    policy_diversity = (
+                        min(1.0, num_policies / 5) if num_policies > 1 else 0.2
+                    )
                     avg_error = ai_stats.get("avg_prediction_error", 0.0)
-                    prediction_variance = 0.3 if isinstance(avg_error, (int, float)) and float(avg_error) > 0 else 0.0
+                    prediction_variance = (
+                        0.3
+                        if isinstance(avg_error, (int, float)) and float(avg_error) > 0
+                        else 0.0
+                    )
                     base_score = 0.25
                     computed = policy_diversity * 0.5 + prediction_variance * 0.5
                     score = max(base_score, computed)
                     confidence = 0.5
-                    evidence = {"policy_diversity": round(policy_diversity, 3), "prediction_variance": round(prediction_variance, 3), "module_active": True}
+                    evidence = {
+                        "policy_diversity": round(policy_diversity, 3),
+                        "prediction_variance": round(prediction_variance, 3),
+                        "module_active": True,
+                    }
                 except Exception:
                     score = 0.25
                     confidence = 0.4
@@ -2042,7 +2217,9 @@ class ConsciousnessAssessment:
 
         return result
 
-    def _measure_negative_indicator(self, name: str, config: Dict[str, Any], **kwargs) -> float:
+    def _measure_negative_indicator(
+        self, name: str, config: Dict[str, Any], **kwargs
+    ) -> float:
         """Measure a negative indicator (Butlin 2025 §3).
         Returns 0-1 where higher = MORE negative property present."""
         if name == "purely_reactive":
@@ -2106,9 +2283,7 @@ class ConsciousnessAssessment:
     def _log_assessment_summary(self, report: ConsciousnessReport):
         """Log a summary of the assessment."""
         logger.info("=" * 70)
-        logger.info(
-            f"CONSCIOUSNESS ASSESSMENT COMPLETE (Session: {report.session_id})"
-        )
+        logger.info(f"CONSCIOUSNESS ASSESSMENT COMPLETE (Session: {report.session_id})")
         logger.info("=" * 70)
         logger.info(f"Overall Score: {report.overall_score:.3f}")
         logger.info(
@@ -2121,13 +2296,13 @@ class ConsciousnessAssessment:
 
         logger.info("\nTheory Scores:")
         for theory, score in report.theory_scores.items():
-            logger.info(f"  {theory}: {score:.3f}")
+            logger.info(f" {theory}: {score:.3f}")
 
         if report.phi_measurement:
             logger.info(f"\nIIT Phi: {report.phi_measurement.phi:.4f}")
-            logger.info(f"  Normalized: {report.phi_measurement.phi_normalized:.3f}")
+            logger.info(f" Normalized: {report.phi_measurement.phi_normalized:.3f}")
             logger.info(
-                f"  Approximate: {'Yes' if report.phi_measurement.is_approximate else 'No'}"
+                f" Approximate: {'Yes' if report.phi_measurement.is_approximate else 'No'}"
             )
 
         logger.info(f"\nProcessing Time: {report.processing_time_ms:.2f}ms")
@@ -2201,9 +2376,7 @@ class LongitudinalStudy:
         self.start_time: Optional[datetime] = None
         self.is_running = False
 
-        logger.info(
-            f"Longitudinal Study Framework initialized (ID: {self.study_id})"
-        )
+        logger.info(f"Longitudinal Study Framework initialized (ID: {self.study_id})")
 
     async def run_study(
         self,
@@ -2713,8 +2886,8 @@ async def test_assessment():
     report = await assessment.run_full_assessment(neural_states=neural_states)
 
     print(f"\n   Overall Score: {report.overall_score:.3f}")
-    print(f"   Architecture Functional: {report.architecture_functional}")
-    print(f"   Passing Indicators: {report.passing_count}/{report.total_indicators}")
+    print(f"  Architecture Functional: {report.architecture_functional}")
+    print(f"  Passing Indicators: {report.passing_count}/{report.total_indicators}")
 
     # Test Phi calculation
     print("\n2. Testing PyPhi integration...")
@@ -2723,16 +2896,16 @@ async def test_assessment():
     connectivity = np.random.rand(8, 8)
     phi_result = await phi_calc.calculate_phi(state, connectivity)
 
-    print(f"   Phi: {phi_result.phi:.4f}")
-    print(f"   Normalized: {phi_result.phi_normalized:.3f}")
-    print(f"   Approximate: {phi_result.is_approximate}")
-    print(f"   Computation time: {phi_result.computation_time_ms:.2f}ms")
+    print(f"  Phi: {phi_result.phi:.4f}")
+    print(f"  Normalized: {phi_result.phi_normalized:.3f}")
+    print(f"  Approximate: {phi_result.is_approximate}")
+    print(f"  Computation time: {phi_result.computation_time_ms:.2f}ms")
 
     print("\n" + "=" * 70)
     print("Consciousness Assessment Framework operational!")
-    print(f"   {len(assessment.indicator_configs)} indicators configured")
-    print(f"   PyPhi: {'Available' if PYPHI_AVAILABLE else 'Using approximation'}")
-    print(f"   Ready for consciousness research!")
+    print(f"  {len(assessment.indicator_configs)} indicators configured")
+    print(f"  PyPhi: {'Available' if PYPHI_AVAILABLE else 'Using approximation'}")
+    print("  Ready for consciousness research!")
 
     return True
 

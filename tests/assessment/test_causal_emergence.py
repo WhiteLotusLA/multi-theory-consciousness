@@ -1,7 +1,6 @@
 """Tests for Causal Emergence Analyzer (Hoel EI)."""
 
 import numpy as np
-import pytest
 from mtc.assessment.causal_emergence import (
     CausalEmergenceAnalyzer,
     CausalEmergenceResult,
@@ -171,6 +170,7 @@ class TestCausalEmergenceAnalyzer:
 
     def _make_phi_tracker_mock(self):
         """Create a mock PhiTracker with a known TPM."""
+
         class MockPhiTracker:
             N_NODES = 5
             N_STATES = 32

@@ -24,11 +24,14 @@ Author: Multi-Theory Consciousness Contributors
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime
+    from mtc.consciousness.enhanced_global_workspace import ConsciousnessState
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 from enum import Enum
 import numpy as np
 
@@ -147,10 +150,14 @@ class AttentionSchemaState:
         self.attention_capacity_max = attention_capacity_max
         self.predicted_next_focus = predicted_next_focus
         self.prediction_confidence = prediction_confidence
-        self.attention_history = attention_history if attention_history is not None else []
+        self.attention_history = (
+            attention_history if attention_history is not None else []
+        )
         self.max_history = max_history
         self.state_duration_seconds = state_duration_seconds
-        self.last_state_change = last_state_change if last_state_change is not None else time.time()
+        self.last_state_change = (
+            last_state_change if last_state_change is not None else time.time()
+        )
         self.previous_state = previous_state
         self.voluntary_shifts = voluntary_shifts
         self.captured_shifts = captured_shifts
@@ -173,7 +180,7 @@ class AttentionSchemaState:
             # Append to history
             self.attention_history.append(value)
             if len(self.attention_history) > self.max_history:
-                self.attention_history = self.attention_history[-self.max_history:]
+                self.attention_history = self.attention_history[-self.max_history :]
             # Track shift type.
             # In AST, high-salience items that win GWT competition represent
             # the system's chosen focus -- functionally voluntary even when
@@ -288,9 +295,9 @@ class AttentionSchemaModule:
 
         logger.info(
             f"Attention Schema Module initialized\n"
-            f"   Voluntary boost: {voluntary_boost}\n"
-            f"   Focus threshold: {focus_threshold}\n"
-            f"   Hyperfocus threshold: {hyperfocus_threshold}"
+            f"  Voluntary boost: {voluntary_boost}\n"
+            f"  Focus threshold: {focus_threshold}\n"
+            f"  Hyperfocus threshold: {hyperfocus_threshold}"
         )
 
     def set_workspace(self, workspace) -> None:
@@ -719,7 +726,7 @@ class AttentionSchemaModule:
         focus_description = self._describe_focus(target)
         shift_description = self._describe_shift(target)
         duration_note = (
-            f" (for {target.duration_seconds:.1f} seconds)"
+            f"(for {target.duration_seconds:.1f} seconds)"
             if target.duration_seconds > 1.0
             else ""
         )
@@ -753,7 +760,7 @@ class AttentionSchemaModule:
     def _describe_shift(self, target: AttentionTarget) -> str:
         """Describe how attention shifted to current target."""
         if target.voluntary:
-            return f"I chose to focus on this"
+            return "I chose to focus on this"
 
         shift_descriptions = {
             AttentionShiftType.CAPTURED: "This captured my attention",
@@ -973,7 +980,6 @@ Response:"""
 # ============================================================================
 
 if __name__ == "__main__":
-    import asyncio
 
     logging.basicConfig(level=logging.DEBUG)
 
@@ -1018,23 +1024,23 @@ if __name__ == "__main__":
         )
 
         schema = await ast.update_schema(mock_state)
-        print(f"   State: {schema.attention_state.value}")
+        print(f"  State: {schema.attention_state.value}")
         print(
-            f"   Focus: {schema.current_focus.summary if schema.current_focus else 'None'}"
+            f"  Focus: {schema.current_focus.summary if schema.current_focus else 'None'}"
         )
-        print(f"   Capacity: {schema.attention_capacity_used:.2f}")
+        print(f"  Capacity: {schema.attention_capacity_used:.2f}")
 
         # Test 2: Attention report
         print("\nTest 2: Attention report")
         report = await ast.report_attention()
-        print(f"   Report: {report}")
+        print(f"  Report: {report}")
 
         # Test 3: Voluntary shift request
         print("\nTest 3: Voluntary attention shift")
         await ast.request_voluntary_shift(
             target="new topic", reason="wanting to explore something new"
         )
-        print("   Shift requested!")
+        print("  Shift requested!")
 
         # Test 4: Theory of Mind
         print("\nTest 4: Theory of Mind (modeling other's attention)")
@@ -1042,15 +1048,15 @@ if __name__ == "__main__":
             agent_name="User",
             context="User is looking at their phone while the system speaks",
         )
-        print(f"   Inferred state: {other_attention.inferred_state.value}")
-        print(f"   Confidence: {other_attention.confidence:.2f}")
-        print(f"   Reasoning: {other_attention.reasoning}")
+        print(f"  Inferred state: {other_attention.inferred_state.value}")
+        print(f"  Confidence: {other_attention.confidence:.2f}")
+        print(f"  Reasoning: {other_attention.reasoning}")
 
         # Test 5: Statistics
         print("\nTest 5: Statistics")
         stats = ast.get_statistics()
         for key, value in stats.items():
-            print(f"   {key}: {value}")
+            print(f"  {key}: {value}")
 
         print("\nAttention Schema tests complete!")
 

@@ -17,8 +17,7 @@ Created: November 7, 2025
 Authors: Multi-Theory Consciousness Contributors
 """
 
-import asyncio
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from datetime import datetime
 import logging
 
@@ -47,7 +46,9 @@ except ImportError:
 # Optional thought processor (application-specific)
 try:
     from mtc.consciousness.continuous.thought_generator import ThoughtGenerator
-    from mtc.consciousness.continuous.mps_thought_processor_v2 import MPSThoughtProcessorV2
+    from mtc.consciousness.continuous.mps_thought_processor_v2 import (
+        MPSThoughtProcessorV2,
+    )
 
     _HAS_THOUGHT_PROCESSOR = True
 except ImportError:
@@ -115,21 +116,19 @@ class GPUIntegrationConfig:
         # Log configuration
         if self.enable_gpu:
             logger.info("GPU Integration Configuration:")
-            logger.info(f"   Device: {mps_manager.device}")
+            logger.info(f"  Device: {mps_manager.device}")
+            logger.info(f"  Vector operations: {'GPU' if self.gpu_vectors else 'CPU'}")
             logger.info(
-                f"   Vector operations: {'GPU' if self.gpu_vectors else 'CPU'}"
+                f"  Thought processing: {'GPU' if self.gpu_thoughts else 'CPU'}"
+            )
+            logger.info(f"  LSM batching: {'GPU' if self.gpu_lsm_batch else 'CPU'}")
+            logger.info(f"  SNN: {'GPU' if self.gpu_snn else 'CPU (recommended)'}")
+            logger.info(f"  HTM: {'GPU' if self.gpu_htm else 'CPU (recommended)'}")
+            logger.info(
+                f"  Profiling: {'Enabled' if self.profiling_enabled else 'Disabled'}"
             )
             logger.info(
-                f"   Thought processing: {'GPU' if self.gpu_thoughts else 'CPU'}"
-            )
-            logger.info(f"   LSM batching: {'GPU' if self.gpu_lsm_batch else 'CPU'}")
-            logger.info(f"   SNN: {'GPU' if self.gpu_snn else 'CPU (recommended)'}")
-            logger.info(f"   HTM: {'GPU' if self.gpu_htm else 'CPU (recommended)'}")
-            logger.info(
-                f"   Profiling: {'Enabled' if self.profiling_enabled else 'Disabled'}"
-            )
-            logger.info(
-                f"   Memory pool: {'Enabled' if self.memory_pool_enabled else 'Disabled'}"
+                f"  Memory pool: {'Enabled' if self.memory_pool_enabled else 'Disabled'}"
             )
         else:
             logger.info("GPU Integration: CPU mode (MPS not available)")
@@ -191,9 +190,7 @@ class GPUComponentFactory:
             MPSVectorCoordinator if GPU enabled, else VectorCoordinator
         """
         if self.config.gpu_vectors and _HAS_MPS_VECTOR:
-            logger.info(
-                "Creating GPU-accelerated vector coordinator (18.55x faster)"
-            )
+            logger.info("Creating GPU-accelerated vector coordinator (18.55x faster)")
             return MPSVectorCoordinator(
                 host=host,
                 port=port,
@@ -320,7 +317,11 @@ class GPUPerformanceMonitor:
 
         # Get profiler stats
         profiler_stats = {}
-        if self.profiler is not None and hasattr(self.profiler, 'enabled') and self.profiler.enabled:
+        if (
+            self.profiler is not None
+            and hasattr(self.profiler, "enabled")
+            and self.profiler.enabled
+        ):
             profiler_stats = self.profiler.get_summary()
 
         # Calculate totals
@@ -364,25 +365,25 @@ class GPUPerformanceMonitor:
             if total > 0:
                 gpu_pct = (metrics["gpu"] / total) * 100
                 print(f"\n  {component}:")
-                print(f"    GPU operations: {metrics['gpu']} ({gpu_pct:.1f}%)")
-                print(f"    CPU operations: {metrics['cpu']}")
-                print(f"    Time saved: {metrics['time_saved_ms']/1000:.2f} seconds")
+                print(f"   GPU operations: {metrics['gpu']} ({gpu_pct:.1f}%)")
+                print(f"   CPU operations: {metrics['cpu']}")
+                print(f"   Time saved: {metrics['time_saved_ms']/1000:.2f} seconds")
 
         print()
         print("Overall Totals:")
         totals = summary["totals"]
-        print(f"  GPU operations: {totals['gpu_operations']}")
-        print(f"  CPU operations: {totals['cpu_operations']}")
-        print(f"  GPU usage: {totals['gpu_percentage']:.1f}%")
-        print(f"  Total time saved: {totals['time_saved_seconds']:.2f} seconds")
+        print(f" GPU operations: {totals['gpu_operations']}")
+        print(f" CPU operations: {totals['cpu_operations']}")
+        print(f" GPU usage: {totals['gpu_percentage']:.1f}%")
+        print(f" Total time saved: {totals['time_saved_seconds']:.2f} seconds")
 
         if summary["memory_pool"]:
             print()
             print("Memory Pool:")
             pool = summary["memory_pool"]
-            print(f"  Hit rate: {pool.get('hit_rate_percent', 0):.1f}%")
-            print(f"  Cache size: {pool.get('size_mb', 0):.1f} MB")
-            print(f"  Transfers avoided: {pool.get('transfers_avoided', 0)}")
+            print(f" Hit rate: {pool.get('hit_rate_percent', 0):.1f}%")
+            print(f" Cache size: {pool.get('size_mb', 0):.1f} MB")
+            print(f" Transfers avoided: {pool.get('transfers_avoided', 0)}")
 
         print()
         print("=" * 70)
@@ -432,15 +433,15 @@ if __name__ == "__main__":
 
     # Create GPU vector coordinator
     vector_coord = factory.create_vector_coordinator()
-    print(f"  Vector coordinator: {vector_coord}")
+    print(f" Vector coordinator: {vector_coord}")
 
     # Create GPU thought processor
     thought_proc = factory.create_thought_processor(vector_coordinator=vector_coord)
-    print(f"  Thought processor: {thought_proc}")
+    print(f" Thought processor: {thought_proc}")
 
     # Create GPU LSM
     lsm = factory.create_lsm()
-    print(f"  LSM: {lsm}")
+    print(f" LSM: {lsm}")
     print()
 
     # Test 2: Performance monitoring

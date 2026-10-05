@@ -24,10 +24,7 @@ Author: Multi-Theory Consciousness Project
 """
 
 import pytest
-import asyncio
 import numpy as np
-from typing import Dict, Any
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from mtc.consciousness.active_inference import (
     ActiveInferenceConfig,
@@ -43,10 +40,10 @@ from mtc.consciousness.active_inference import (
     PredictionError,
 )
 
-
 # ============================================================================
 # FIXTURES
 # ============================================================================
+
 
 @pytest.fixture
 def default_config():
@@ -94,6 +91,7 @@ def active_inference_module_custom(custom_config):
 # ============================================================================
 # CONFIGURATION TESTS
 # ============================================================================
+
 
 class TestActiveInferenceConfig:
     """Test Active Inference configuration."""
@@ -151,17 +149,26 @@ class TestHomeostaticConfig:
 # HOMEOSTATIC DRIVES TESTS
 # ============================================================================
 
+
 class TestHomeostaticDrives:
     """Test Homeostatic Drives for micro-emotions."""
 
     def test_initialization(self, homeostatic_drives):
         """Test homeostatic drives initialization."""
         assert len(homeostatic_drives.drives) == 5
-        assert all(isinstance(d, HomeostaticDrive) for d in homeostatic_drives.drives.values())
+        assert all(
+            isinstance(d, HomeostaticDrive) for d in homeostatic_drives.drives.values()
+        )
 
     def test_all_drives_present(self, homeostatic_drives):
         """Test all default drives are present."""
-        expected = ["attention_budget", "curiosity", "social_connection", "coherence", "safety"]
+        expected = [
+            "attention_budget",
+            "curiosity",
+            "social_connection",
+            "coherence",
+            "safety",
+        ]
         for drive_name in expected:
             assert drive_name in homeostatic_drives.drives
 
@@ -268,13 +275,16 @@ class TestHomeostaticDrives:
 # HIERARCHICAL PREDICTIVE PROCESSOR TESTS
 # ============================================================================
 
+
 class TestHierarchicalPredictiveProcessor:
     """Test Hierarchical Predictive Processor."""
 
     def test_initialization(self, hierarchical_processor):
         """Test processor initialization."""
         assert len(hierarchical_processor.levels) == 3  # Default 3 levels
-        assert all(isinstance(l, PredictiveLevel) for l in hierarchical_processor.levels)
+        assert all(
+            isinstance(lvl, PredictiveLevel) for lvl in hierarchical_processor.levels
+        )
 
     def test_levels_have_decreasing_dimensions(self, hierarchical_processor):
         """Test levels have appropriate dimension progression for compression.
@@ -330,7 +340,9 @@ class TestHierarchicalPredictiveProcessor:
         assert error >= 0.0
 
     @pytest.mark.asyncio
-    async def test_prediction_error_decreases_with_learning(self, hierarchical_processor):
+    async def test_prediction_error_decreases_with_learning(
+        self, hierarchical_processor
+    ):
         """Test prediction error decreases with repeated exposure."""
         # Same input multiple times
         sensory_input = np.random.rand(64)
@@ -356,6 +368,7 @@ class TestHierarchicalPredictiveProcessor:
 # ============================================================================
 # ACTIVE INFERENCE MODULE TESTS
 # ============================================================================
+
 
 class TestActiveInferenceModule:
     """Test Active Inference Module (Core FEP)."""
@@ -388,7 +401,11 @@ class TestActiveInferenceModule:
         # B matrix (transition model)
         assert active_inference_module.B is not None
         assert len(active_inference_module.B) == 1  # One factor
-        assert active_inference_module.B[0].shape == (8, 8, 4)  # (states, states, actions)
+        assert active_inference_module.B[0].shape == (
+            8,
+            8,
+            4,
+        )  # (states, states, actions)
 
         # D matrix (initial state prior)
         assert active_inference_module.D is not None
@@ -428,7 +445,9 @@ class TestActiveInferenceModule:
         assert 0.0 <= result.action_confidence <= 1.0
 
     @pytest.mark.asyncio
-    async def test_infer_and_act_with_different_observations(self, active_inference_module):
+    async def test_infer_and_act_with_different_observations(
+        self, active_inference_module
+    ):
         """Test inference with different observation patterns."""
         observations = [
             np.array([1.0, 0.0, 0.0, 0.0, 0.0]),  # One-hot
@@ -489,7 +508,7 @@ class TestActiveInferenceModule:
         await active_inference_module.infer_and_act(observation)
 
         # Store original A matrix
-        original_A = active_inference_module.A[0].copy()
+        active_inference_module.A[0].copy()
 
         # Update model
         experience = {
@@ -521,7 +540,9 @@ class TestActiveInferenceModule:
         """Test combined hierarchical + active inference processing."""
         sensory_input = np.random.rand(64)
 
-        inference_result, hier_errors = await active_inference_module.process_with_hierarchy(sensory_input)
+        inference_result, hier_errors = (
+            await active_inference_module.process_with_hierarchy(sensory_input)
+        )
 
         assert isinstance(inference_result, InferenceResult)
         assert isinstance(hier_errors, list)
@@ -566,6 +587,7 @@ class TestActiveInferenceModule:
 # FREE ENERGY PRINCIPLE TESTS
 # ============================================================================
 
+
 class TestFreeEnergyPrinciple:
     """Test Free Energy Principle properties."""
 
@@ -608,6 +630,7 @@ class TestFreeEnergyPrinciple:
 # ============================================================================
 # INTEGRATION TESTS
 # ============================================================================
+
 
 class TestIntegrationWithWorkspace:
     """Test integration with Enhanced Global Workspace."""
@@ -664,7 +687,7 @@ class TestIntegrationWithWorkspace:
             winners=[],
             ignited=[],
             integration_level=0.5,
-            emotional_state={"joy": 0.8, "fear": 0.1}
+            emotional_state={"joy": 0.8, "fear": 0.1},
         )
 
         assert len(observation) == 5
@@ -674,6 +697,7 @@ class TestIntegrationWithWorkspace:
 # ============================================================================
 # EDGE CASE TESTS
 # ============================================================================
+
 
 class TestEdgeCases:
     """Test edge cases and error handling."""
@@ -731,6 +755,7 @@ class TestEdgeCases:
 # PERFORMANCE TESTS
 # ============================================================================
 
+
 class TestPerformance:
     """Test performance characteristics."""
 
@@ -767,6 +792,7 @@ class TestPerformance:
 # ============================================================================
 # META-STATE TESTS (Beautiful Loop - Self-Referential Active Inference)
 # ============================================================================
+
 
 class TestMetaState:
     """
@@ -815,8 +841,7 @@ class TestMetaState:
         ms = MetaState()
         # 70% accuracy: 7 correct, 3 wrong
         for i in range(10):
-            ms.update(prediction_error=0.3 if i < 7 else 0.8,
-                      was_accurate=(i < 7))
+            ms.update(prediction_error=0.3 if i < 7 else 0.8, was_accurate=(i < 7))
 
         assert ms.total_predictions == 10
         assert ms.correct_predictions == 7
@@ -976,7 +1001,9 @@ class TestSelfReferentialInference:
         assert isinstance(state, ActiveInferenceState)
         # Meta fields should be populated from the MetaState
         assert state.meta_confidence == meta_module.meta_state.model_confidence
-        assert state.meta_predicted_accuracy == meta_module.meta_state.predicted_accuracy
+        assert (
+            state.meta_predicted_accuracy == meta_module.meta_state.predicted_accuracy
+        )
         assert state.meta_cognitive_load == meta_module.meta_state.cognitive_load
 
     @pytest.mark.asyncio

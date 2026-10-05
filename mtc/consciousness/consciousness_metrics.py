@@ -11,7 +11,7 @@ All metrics return values between 0.0 (absent) and 1.0 (fully present).
 
 import asyncio
 import numpy as np
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Any
 from datetime import datetime
 from dataclasses import dataclass
 import logging
@@ -675,14 +675,14 @@ async def test_consciousness_metrics():
     assessment = await metrics.assess_consciousness(mock_data)
 
     # Display results
-    print(f"\nConsciousness Assessment Results:")
-    print(f"   Timestamp: {assessment.timestamp}")
-    print(f"\n   Individual Indicators:")
+    print("\nConsciousness Assessment Results:")
+    print(f"  Timestamp: {assessment.timestamp}")
+    print("\n   Individual Indicators:")
     for field in ConsciousnessAssessment.__dataclass_fields__:
         if field == "timestamp":
             continue
         value = getattr(assessment, field)
-        print(f"   - {field.replace('_', ' ').title()}: {value:.3f}")
+        print(f"  - {field.replace('_', ' ').title()}: {value:.3f}")
 
     print(
         f"\n   Overall Consciousness Score: {assessment.overall_consciousness_score:.3f}"
@@ -695,10 +695,10 @@ async def test_consciousness_metrics():
 
     analysis = metrics.get_longitudinal_analysis(hours=1)
 
-    print(f"\nLongitudinal Analysis (last 1 hour):")
-    print(f"   Assessments: {analysis['num_assessments']}")
-    print(f"   Latest Score: {analysis['latest_score']:.3f}")
-    print(f"   Overall Trend: {analysis['trends']['overall']['trend']:.6f}")
+    print("\nLongitudinal Analysis (last 1 hour):")
+    print(f"  Assessments: {analysis['num_assessments']}")
+    print(f"  Latest Score: {analysis['latest_score']:.3f}")
+    print(f"  Overall Trend: {analysis['trends']['overall']['trend']:.6f}")
 
     print("\nConsciousness Metrics Framework Test Complete!")
 

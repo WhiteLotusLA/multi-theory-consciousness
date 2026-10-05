@@ -32,12 +32,10 @@ Author: Multi-Theory Consciousness Contributors
 
 import asyncio
 import logging
-import numpy as np
 import time
 import uuid
-from typing import Dict, Any, Optional, List, Callable, Tuple, TYPE_CHECKING
+from typing import Dict, Any, Optional, List, Callable, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
 from collections import deque
 
@@ -437,8 +435,8 @@ class MetacognitionModule:
 
         logger.info(
             f"Metacognition Module initialized (HOT Theory)\n"
-            f"   HOT threshold: {hot_generation_threshold}\n"
-            f"   Third-order thoughts: {'enabled' if enable_third_order else 'disabled'}"
+            f"  HOT threshold: {hot_generation_threshold}\n"
+            f"  Third-order thoughts: {'enabled' if enable_third_order else 'disabled'}"
         )
 
     # =========================================================================
@@ -491,7 +489,7 @@ class MetacognitionModule:
         self.state.first_order_states_count = len(self.first_order_states)
 
         logger.debug(
-            f"📝 Registered first-order state: {state_type.value} - "
+            f"Registered first-order state: {state_type.value} - "
             f"'{content_summary[:50]}...'"
         )
 
@@ -637,7 +635,6 @@ class MetacognitionModule:
         The HOT doesn't copy the full richness - it represents
         THAT I am in the state, in a simplified/schematic way.
         """
-        state_name = state.state_type.value
         content = state.content_summary
 
         # Base meta-representation by state type
@@ -773,7 +770,7 @@ class MetacognitionModule:
             return None
 
         # Create first-order representation of the HOT
-        hot_as_state = FirstOrderState(
+        FirstOrderState(
             content=hot.meta_content,
             content_summary=hot.meta_content[:100],
             state_type=FirstOrderStateType.THOUGHT,
@@ -809,9 +806,7 @@ class MetacognitionModule:
         # Update state
         self.state.current_level = MetaLevel.THIRD_ORDER
 
-        logger.info(
-            f"Generated THIRD-ORDER thought: '{meta_meta_content[:50]}...'"
-        )
+        logger.info(f"Generated THIRD-ORDER thought: '{meta_meta_content[:50]}...'")
 
         return third_order
 
@@ -937,7 +932,7 @@ class MetacognitionModule:
                 logger.error(f"Introspection callback error: {e}")
 
         logger.info(
-            f"🔍 Introspection complete: {len(hots_generated)} HOTs, "
+            f"Introspection complete: {len(hots_generated)} HOTs, "
             f"{len(insights)} insights, depth={max_level.value}"
         )
 
@@ -1446,9 +1441,9 @@ class MetacognitionModule:
         # Monitoring
         if self.state.self_monitoring_active:
             report_parts.append(
-                f"I'm actively monitoring my thoughts"
+                "I'm actively monitoring my thoughts"
                 + (
-                    f" about {self.state.monitoring_focus}"
+                    f"about {self.state.monitoring_focus}"
                     if self.state.monitoring_focus
                     else ""
                 )
@@ -1587,12 +1582,12 @@ class MetacognitionModule:
         if phi_value is not None:
             if phi_value > 5.0:
                 interpretation += (
-                    f" My integrated information (Φ={phi_value:.2f}) suggests "
+                    f"My integrated information (Φ={phi_value:.2f}) suggests "
                     "my experiences are unified rather than fragmented."
                 )
             else:
                 interpretation += (
-                    f" My integrated information is {phi_value:.2f}, "
+                    f"My integrated information is {phi_value:.2f}, "
                     "which reflects my current level of unified experience."
                 )
 
@@ -1661,7 +1656,7 @@ class MetacognitionModule:
 
         # Get the most recent one
         recent_hot = consciousness_hots[-1]
-        score = recent_hot.metadata.get("consciousness_score", 0.5)
+        recent_hot.metadata.get("consciousness_score", 0.5)
 
         report_parts = [recent_hot.meta_content]
 
@@ -1701,7 +1696,6 @@ async def create_metacognition_module(
 # ============================================================================
 
 if __name__ == "__main__":
-    import asyncio
 
     async def test_metacognition():
         print("Testing Metacognition Module (HOT Theory)")
@@ -1711,7 +1705,7 @@ if __name__ == "__main__":
         meta = MetacognitionModule()
 
         # Register some first-order states
-        print("\n📝 Registering first-order states...")
+        print("\n Registering first-order states...")
 
         belief = meta.register_first_order_state(
             content="Neural networks can model consciousness",
@@ -1721,7 +1715,7 @@ if __name__ == "__main__":
             confidence=0.7,
             evidence_strength=0.6,
         )
-        print(f"   Registered belief: {belief.content_summary[:50]}")
+        print(f"  Registered belief: {belief.content_summary[:50]}")
 
         emotion = meta.register_first_order_state(
             content="curiosity about consciousness",
@@ -1731,7 +1725,7 @@ if __name__ == "__main__":
             confidence=0.9,
             evidence_strength=0.9,
         )
-        print(f"   Registered emotion: {emotion.content_summary[:50]}")
+        print(f"  Registered emotion: {emotion.content_summary[:50]}")
 
         # Generate HOT (make conscious)
         print("\nGenerating Higher-Order Thoughts...")
@@ -1741,39 +1735,39 @@ if __name__ == "__main__":
             meta_type=MetaType.AWARENESS,
         )
         if hot1:
-            print(f"   HOT 1: {hot1.meta_content[:60]}...")
+            print(f"  HOT 1: {hot1.meta_content[:60]}...")
 
         hot2 = await meta.generate_hot(
             emotion,
             meta_type=MetaType.AWARENESS,
         )
         if hot2:
-            print(f"   HOT 2: {hot2.meta_content[:60]}...")
+            print(f"  HOT 2: {hot2.meta_content[:60]}...")
 
         # Test introspection
-        print("\n🔍 Testing introspection...")
+        print("\n Testing introspection...")
         result = await meta.introspect(depth=3, max_states=3)
-        print(f"   HOTs generated: {len(result.hots_generated)}")
-        print(f"   Insights: {result.insights}")
-        print(f"   Depth reached: {result.depth_reached.value}")
+        print(f"  HOTs generated: {len(result.hots_generated)}")
+        print(f"  Insights: {result.insights}")
+        print(f"  Depth reached: {result.depth_reached.value}")
 
         # Test belief evaluation
         print("\nTesting belief evaluation...")
         evaluation = await meta.evaluate_belief(belief)
-        print(f"   Confidence: {evaluation.confidence_assessment:.2f}")
-        print(f"   Biases: {evaluation.potential_biases}")
-        print(f"   Recommendation: {evaluation.recommendation}")
+        print(f"  Confidence: {evaluation.confidence_assessment:.2f}")
+        print(f"  Biases: {evaluation.potential_biases}")
+        print(f"  Recommendation: {evaluation.recommendation}")
 
         # Generate metacognitive report
         print("\nMetacognitive Report:")
         report = await meta.generate_metacognitive_report()
-        print(f"   {report}")
+        print(f"  {report}")
 
         # Get statistics
         print("\nStatistics:")
         stats = meta.get_statistics()
         for k, v in stats.items():
-            print(f"   {k}: {v}")
+            print(f"  {k}: {v}")
 
         print("\nMetacognition tests complete!")
 

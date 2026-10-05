@@ -1,9 +1,11 @@
 """Tests for AKOrN Oscillatory Binding module."""
 
 import numpy as np
-import pytest
-from typing import Dict
-from mtc.neural.oscillatory_binding import OscillatoryBinding, BindingResult, OSCILLATOR_NAMES
+from mtc.neural.oscillatory_binding import (
+    OscillatoryBinding,
+    BindingResult,
+    OSCILLATOR_NAMES,
+)
 
 
 class TestOscillatoryBindingInit:
@@ -75,9 +77,9 @@ class TestKuramotoDynamics:
         zero_metrics = {name: 0.0 for name in OSCILLATOR_NAMES}
         result = ob.bind(zero_metrics)
         # Static coupling should push r well above random (1/sqrt(N) ~= 0.18)
-        assert result.global_order_parameter > 0.5, (
-            f"Static coupling should synchronize oscillators, got r={result.global_order_parameter:.4f}"
-        )
+        assert (
+            result.global_order_parameter > 0.5
+        ), f"Static coupling should synchronize oscillators, got r={result.global_order_parameter:.4f}"
 
     def test_bind_count_increments(self):
         ob = OscillatoryBinding()
@@ -182,9 +184,12 @@ class TestOscillatorTPM:
         assert 0 <= idx_mid <= 80
 
         # Boundary between low and mid
-        assert ob._discretize_group_state(
-            {"snn": 1.0 / 3.0, "lsm": 0.0, "htm": 0.0, "cross": 0.0}
-        ) != idx_low  # 1/3 should land in mid bucket
+        assert (
+            ob._discretize_group_state(
+                {"snn": 1.0 / 3.0, "lsm": 0.0, "htm": 0.0, "cross": 0.0}
+            )
+            != idx_low
+        )  # 1/3 should land in mid bucket
 
     def test_tpm_persists(self):
         """Oscillator TPM data survives a to_state_dict / from_state_dict round-trip."""

@@ -17,7 +17,7 @@ import logging
 import time
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from collections import deque
 
 logger = logging.getLogger(__name__)
@@ -38,14 +38,15 @@ AFFECT_LABELS = {
 @dataclass
 class PADSources:
     """Input sources for PAD computation. All pre-normalized."""
+
     somatic_valence: float = 0.0
     homeostatic_satisfaction: float = 0.0  # [-1, 1] rescaled
-    snn_valence: float = 0.0              # joy - sadness [-1, 1]
+    snn_valence: float = 0.0  # joy - sadness [-1, 1]
     protoself_arousal: float = 0.3
-    snn_spike_rate: float = 0.0           # [0, 1] normalized
-    ignition_rate: float = 0.0            # [0, 1]
-    prediction_error: float = 0.0         # [0, 1] clamped
-    agency_score: float = 0.5             # meta_confidence [0, 1]
+    snn_spike_rate: float = 0.0  # [0, 1] normalized
+    ignition_rate: float = 0.0  # [0, 1]
+    prediction_error: float = 0.0  # [0, 1] clamped
+    agency_score: float = 0.5  # meta_confidence [0, 1]
     voluntary_attention_ratio: float = 0.5
     epistemic_depth_normalized: float = 0.0  # depth / 5.0 [0, 1]
 
@@ -53,9 +54,10 @@ class PADSources:
 @dataclass
 class PADState:
     """Current PAD coordinate."""
-    pleasure: float       # [-1, 1]
-    arousal: float        # [0, 1]
-    dominance: float      # [0, 1]
+
+    pleasure: float  # [-1, 1]
+    arousal: float  # [0, 1]
+    dominance: float  # [0, 1]
     label: str = ""
     timestamp: float = field(default_factory=time.time)
 
@@ -93,27 +95,36 @@ class PADAffectModel:
         """
         self._computation_count += 1
 
-        pleasure = float(np.clip(
-            0.4 * sources.somatic_valence +
-            0.3 * sources.homeostatic_satisfaction +
-            0.3 * sources.snn_valence,
-            -1.0, 1.0,
-        ))
+        pleasure = float(
+            np.clip(
+                0.4 * sources.somatic_valence
+                + 0.3 * sources.homeostatic_satisfaction
+                + 0.3 * sources.snn_valence,
+                -1.0,
+                1.0,
+            )
+        )
 
-        arousal = float(np.clip(
-            0.3 * sources.protoself_arousal +
-            0.2 * sources.snn_spike_rate +
-            0.25 * sources.ignition_rate +
-            0.25 * sources.prediction_error,
-            0.0, 1.0,
-        ))
+        arousal = float(
+            np.clip(
+                0.3 * sources.protoself_arousal
+                + 0.2 * sources.snn_spike_rate
+                + 0.25 * sources.ignition_rate
+                + 0.25 * sources.prediction_error,
+                0.0,
+                1.0,
+            )
+        )
 
-        dominance = float(np.clip(
-            0.4 * sources.agency_score +
-            0.3 * sources.voluntary_attention_ratio +
-            0.3 * sources.epistemic_depth_normalized,
-            0.0, 1.0,
-        ))
+        dominance = float(
+            np.clip(
+                0.4 * sources.agency_score
+                + 0.3 * sources.voluntary_attention_ratio
+                + 0.3 * sources.epistemic_depth_normalized,
+                0.0,
+                1.0,
+            )
+        )
 
         label = get_affect_label(pleasure, arousal, dominance)
 
@@ -175,8 +186,13 @@ class PADAffectModel:
             "arrays": {},
             "histories": {
                 "pad_history": [
-                    {"p": s.pleasure, "a": s.arousal, "d": s.dominance,
-                     "label": s.label, "t": s.timestamp}
+                    {
+                        "p": s.pleasure,
+                        "a": s.arousal,
+                        "d": s.dominance,
+                        "label": s.label,
+                        "t": s.timestamp,
+                    }
                     for s in self._history
                 ],
             },
@@ -190,13 +206,15 @@ class PADAffectModel:
         if "pad_history" in histories:
             self._history.clear()
             for entry in histories["pad_history"]:
-                self._history.append(PADState(
-                    pleasure=entry["p"],
-                    arousal=entry["a"],
-                    dominance=entry["d"],
-                    label=entry.get("label", ""),
-                    timestamp=entry.get("t", 0.0),
-                ))
+                self._history.append(
+                    PADState(
+                        pleasure=entry["p"],
+                        arousal=entry["a"],
+                        dominance=entry["d"],
+                        label=entry.get("label", ""),
+                        timestamp=entry.get("t", 0.0),
+                    )
+                )
         logger.info(
             f"PADAffectModel restored: {self._computation_count} prior computations, "
             f"{len(self._history)} history entries"

@@ -16,26 +16,19 @@ This tests:
 8. Integration with EnhancedGlobalWorkspace
 
 
-they think ABOUT their thinking! That be the HOT secret!" 
+they think ABOUT their thinking! That be the HOT secret!"
 
 Created: December 5, 2025
 Author: Multi-Theory Consciousness Project
 """
 
 import pytest
-import asyncio
 import numpy as np
-import time
-from typing import Dict, Any, List, Optional
 
 from mtc.consciousness.metacognition import (
     MetaLevel,
     MetaType,
     FirstOrderStateType,
-    ConfidenceLevel,
-    FirstOrderState,
-    HigherOrderThought,
-    MetacognitiveState,
     IntrospectionResult,
     BeliefEvaluation,
     MetacognitionModule,
@@ -43,16 +36,13 @@ from mtc.consciousness.metacognition import (
 
 from mtc.consciousness.enhanced_global_workspace import (
     EnhancedGlobalWorkspace,
-    WorkspaceCandidate,
     WorkspaceCandidateSource,
-    ConsciousnessState,
-    WorkspaceContent,
 )
-
 
 # ============================================================================
 # FIXTURES
 # ============================================================================
+
 
 @pytest.fixture
 def metacognition():
@@ -113,6 +103,7 @@ def sample_perception_state(metacognition):
 # TEST: META LEVEL ENUM
 # ============================================================================
 
+
 class TestMetaLevel:
     """Test MetaLevel enum values and ordering."""
 
@@ -169,6 +160,7 @@ class TestMetaType:
 # ============================================================================
 # TEST: FIRST ORDER STATE REGISTRATION
 # ============================================================================
+
 
 class TestFirstOrderStateRegistration:
     """Test first-order state registration and tracking."""
@@ -234,11 +226,14 @@ class TestFirstOrderStateRegistration:
 # TEST: HIGHER-ORDER THOUGHT GENERATION
 # ============================================================================
 
+
 class TestHigherOrderThoughtGeneration:
     """Test HOT generation - the core of consciousness per Rosenthal."""
 
     @pytest.mark.asyncio
-    async def test_generate_hot_from_first_order(self, metacognition, sample_first_order_state):
+    async def test_generate_hot_from_first_order(
+        self, metacognition, sample_first_order_state
+    ):
         """Should generate a HOT from a first-order state."""
         hot = await metacognition.generate_hot(
             sample_first_order_state,
@@ -254,7 +249,9 @@ class TestHigherOrderThoughtGeneration:
         assert len(hot.meta_content) > 0
 
     @pytest.mark.asyncio
-    async def test_hot_makes_content_conscious(self, metacognition, sample_first_order_state):
+    async def test_hot_makes_content_conscious(
+        self, metacognition, sample_first_order_state
+    ):
         """HOT should mark target as conscious (the key HOT theory claim)."""
         hot = await metacognition.generate_hot(
             sample_first_order_state,
@@ -268,7 +265,9 @@ class TestHigherOrderThoughtGeneration:
         assert hot.level.value >= 2  # Level 2+ = conscious
 
     @pytest.mark.asyncio
-    async def test_hot_content_describes_target(self, metacognition, sample_emotion_state):
+    async def test_hot_content_describes_target(
+        self, metacognition, sample_emotion_state
+    ):
         """HOT content should describe the target state."""
         hot = await metacognition.generate_hot(
             sample_emotion_state,
@@ -278,7 +277,11 @@ class TestHigherOrderThoughtGeneration:
         )
 
         # The meta-content should reference the target state
-        assert "feeling" in hot.meta_content.lower() or "emotion" in hot.meta_content.lower() or "curious" in hot.meta_content.lower()
+        assert (
+            "feeling" in hot.meta_content.lower()
+            or "emotion" in hot.meta_content.lower()
+            or "curious" in hot.meta_content.lower()
+        )
 
     @pytest.mark.asyncio
     async def test_different_meta_types(self, metacognition, sample_first_order_state):
@@ -304,7 +307,9 @@ class TestHigherOrderThoughtGeneration:
         assert awareness_hot.meta_content != doubt_hot.meta_content
 
     @pytest.mark.asyncio
-    async def test_voluntary_vs_automatic_hot(self, metacognition, sample_first_order_state):
+    async def test_voluntary_vs_automatic_hot(
+        self, metacognition, sample_first_order_state
+    ):
         """Voluntary HOTs should have different characteristics."""
         auto_hot = await metacognition.generate_hot(
             sample_first_order_state,
@@ -320,13 +325,14 @@ class TestHigherOrderThoughtGeneration:
             trigger="deliberate",
         )
 
-        assert auto_hot.is_voluntary == False
-        assert voluntary_hot.is_voluntary == True
+        assert auto_hot.is_voluntary is False
+        assert voluntary_hot.is_voluntary is True
 
 
 # ============================================================================
 # TEST: INTROSPECTION
 # ============================================================================
+
 
 class TestIntrospection:
     """Test introspection - deliberate self-examination."""
@@ -346,7 +352,9 @@ class TestIntrospection:
         assert result.depth_reached.value >= 1
 
     @pytest.mark.asyncio
-    async def test_introspection_finds_states(self, metacognition, sample_emotion_state, sample_first_order_state):
+    async def test_introspection_finds_states(
+        self, metacognition, sample_emotion_state, sample_first_order_state
+    ):
         """Introspection should find registered states."""
         # Register both states are already in buffer from fixtures
         result = await metacognition.introspect(
@@ -359,7 +367,9 @@ class TestIntrospection:
         assert len(result.hots_generated) >= 0
 
     @pytest.mark.asyncio
-    async def test_introspection_generates_insights(self, metacognition, sample_first_order_state):
+    async def test_introspection_generates_insights(
+        self, metacognition, sample_first_order_state
+    ):
         """Introspection should generate insights."""
         result = await metacognition.introspect(
             target="beliefs",
@@ -396,6 +406,7 @@ class TestIntrospection:
 # TEST: BELIEF EVALUATION
 # ============================================================================
 
+
 class TestBeliefEvaluation:
     """Test belief evaluation - critical metacognitive assessment."""
 
@@ -430,7 +441,9 @@ class TestBeliefEvaluation:
         assert len(evaluation.potential_biases) >= 0  # May detect biases
 
     @pytest.mark.asyncio
-    async def test_evaluation_generates_hot(self, metacognition, sample_first_order_state):
+    async def test_evaluation_generates_hot(
+        self, metacognition, sample_first_order_state
+    ):
         """Evaluating should generate a HOT (metacognitive act)."""
         initial_count = metacognition.get_statistics()["total_hots_generated"]
 
@@ -445,6 +458,7 @@ class TestBeliefEvaluation:
 # TEST: SELF-MONITORING
 # ============================================================================
 
+
 class TestSelfMonitoring:
     """Test self-monitoring - ongoing metacognitive oversight."""
 
@@ -454,7 +468,7 @@ class TestSelfMonitoring:
         await metacognition.start_monitoring(focus="beliefs")
 
         state = metacognition.get_metacognitive_state()
-        assert state.self_monitoring_active == True
+        assert state.self_monitoring_active is True
 
     @pytest.mark.asyncio
     async def test_stop_monitoring(self, metacognition):
@@ -463,7 +477,7 @@ class TestSelfMonitoring:
         await metacognition.stop_monitoring()
 
         state = metacognition.get_metacognitive_state()
-        assert state.self_monitoring_active == False
+        assert state.self_monitoring_active is False
 
     @pytest.mark.asyncio
     async def test_monitoring_focus(self, metacognition):
@@ -477,6 +491,7 @@ class TestSelfMonitoring:
 # ============================================================================
 # TEST: METACOGNITIVE STATE
 # ============================================================================
+
 
 class TestMetacognitiveState:
     """Test overall metacognitive state tracking."""
@@ -533,6 +548,7 @@ class TestMetacognitiveState:
 # TEST: METACOGNITIVE REPORTS
 # ============================================================================
 
+
 class TestMetacognitiveReports:
     """Test verbal metacognitive reports."""
 
@@ -553,7 +569,9 @@ class TestMetacognitiveReports:
         assert isinstance(report, str)
 
     @pytest.mark.asyncio
-    async def test_report_describes_state(self, metacognition, sample_first_order_state):
+    async def test_report_describes_state(
+        self, metacognition, sample_first_order_state
+    ):
         """Report should describe current metacognitive state."""
         await metacognition.generate_hot(
             sample_first_order_state,
@@ -566,12 +584,16 @@ class TestMetacognitiveReports:
 
         # Report should mention something about awareness or state
         report_lower = report.lower()
-        assert any(word in report_lower for word in ["aware", "state", "thinking", "metacognitive"])
+        assert any(
+            word in report_lower
+            for word in ["aware", "state", "thinking", "metacognitive"]
+        )
 
 
 # ============================================================================
 # TEST: STATISTICS
 # ============================================================================
+
 
 class TestStatistics:
     """Test statistics tracking."""
@@ -584,7 +606,9 @@ class TestStatistics:
         assert stats["first_order_buffer_size"] == 0
 
     @pytest.mark.asyncio
-    async def test_statistics_after_activity(self, metacognition, sample_first_order_state):
+    async def test_statistics_after_activity(
+        self, metacognition, sample_first_order_state
+    ):
         """Statistics should update after activity."""
         initial_stats = metacognition.get_statistics()
 
@@ -597,12 +621,15 @@ class TestStatistics:
 
         final_stats = metacognition.get_statistics()
 
-        assert final_stats["total_hots_generated"] > initial_stats["total_hots_generated"]
+        assert (
+            final_stats["total_hots_generated"] > initial_stats["total_hots_generated"]
+        )
 
 
 # ============================================================================
 # TEST: INTEGRATION WITH ENHANCED GLOBAL WORKSPACE
 # ============================================================================
+
 
 class TestWorkspaceIntegration:
     """Test integration with EnhancedGlobalWorkspace."""
@@ -694,6 +721,7 @@ class TestWorkspaceIntegration:
 # TEST: CONSCIOUSNESS EMERGENCE VIA HOT
 # ============================================================================
 
+
 class TestConsciousnessEmergence:
     """Test the core HOT claim: consciousness emerges through HOTs."""
 
@@ -717,7 +745,9 @@ class TestConsciousnessEmergence:
         assert state.current_level == MetaLevel.SECOND_ORDER
 
     @pytest.mark.asyncio
-    async def test_hot_content_represents_being_in_state(self, metacognition, sample_first_order_state):
+    async def test_hot_content_represents_being_in_state(
+        self, metacognition, sample_first_order_state
+    ):
         """HOT content should represent being in the target state."""
         hot = await metacognition.generate_hot(
             sample_first_order_state,
@@ -729,12 +759,16 @@ class TestConsciousnessEmergence:
         # Per HOT theory, the HOT represents oneself as being in the state
         # It should contain self-referential language
         content_lower = hot.meta_content.lower()
-        assert any(word in content_lower for word in ["i ", "my", "myself", "am", "feeling", "thinking", "believing"])
+        assert any(
+            word in content_lower
+            for word in ["i ", "my", "myself", "am", "feeling", "thinking", "believing"]
+        )
 
 
 # ============================================================================
 # TEST: EDGE CASES
 # ============================================================================
+
 
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""

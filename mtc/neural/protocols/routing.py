@@ -16,7 +16,7 @@ Authors: Multi-Theory Consciousness Contributors
 """
 
 from enum import Enum
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Callable, Dict
 from fnmatch import fnmatch
 import logging

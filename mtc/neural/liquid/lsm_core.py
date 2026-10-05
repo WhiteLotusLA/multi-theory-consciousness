@@ -18,9 +18,8 @@ LSM Principles:
 """
 
 import numpy as np
-from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass, field
-from datetime import datetime
+from typing import List, Dict, Any, Tuple
+from dataclasses import dataclass
 import logging
 
 logger = logging.getLogger(__name__)
@@ -340,7 +339,6 @@ class LiquidStateMachine:
 
 # Testing and demonstration
 if __name__ == "__main__":
-    import json
 
     logging.basicConfig(level=logging.INFO)
 
@@ -358,9 +356,9 @@ if __name__ == "__main__":
 
     print("\nLSM Configuration:")
     metrics = lsm.get_metrics()
-    print(f"  Reservoir size: {metrics['reservoir_size']} neurons")
-    print(f"  Connectivity: {metrics['connectivity']:.1%}")
-    print(f"  Spectral radius: {metrics['spectral_radius']:.3f}")
+    print(f" Reservoir size: {metrics['reservoir_size']} neurons")
+    print(f" Connectivity: {metrics['connectivity']:.1%}")
+    print(f" Spectral radius: {metrics['spectral_radius']:.3f}")
 
     print("\nTesting reservoir dynamics...")
 
@@ -368,25 +366,25 @@ if __name__ == "__main__":
     input_pattern = np.random.randn(10) * 0.5
 
     # Run for 200 steps
-    print("  Running 200 timesteps...")
+    print(" Running 200 timesteps...")
     for step_idx in range(200):
         state, output = lsm.step(input_pattern)
 
         if step_idx % 50 == 0:
             complexity = lsm.get_state_complexity()
             print(
-                f"    t={lsm.current_time:.0f}ms: "
+                f"   t={lsm.current_time:.0f}ms: "
                 f"energy={complexity['energy']:.2f}, "
                 f"mean={complexity['mean_activation']:.3f}"
             )
 
     print("\nFinal State Complexity:")
     complexity = lsm.get_state_complexity()
-    print(f"  Energy: {complexity['energy']:.2f}")
-    print(f"  Entropy: {complexity['entropy']:.2f}")
-    print(f"  Sparsity: {complexity['sparsity']:.1%}")
-    print(f"  Max activation: {complexity['max_activation']:.3f}")
-    print(f"  Min activation: {complexity['min_activation']:.3f}")
+    print(f" Energy: {complexity['energy']:.2f}")
+    print(f" Entropy: {complexity['entropy']:.2f}")
+    print(f" Sparsity: {complexity['sparsity']:.1%}")
+    print(f" Max activation: {complexity['max_activation']:.3f}")
+    print(f" Min activation: {complexity['min_activation']:.3f}")
 
     print("\nTesting separation property...")
     # Test that different inputs create different states
@@ -394,7 +392,7 @@ if __name__ == "__main__":
     input_b = np.random.randn(10) * 0.3
 
     distance = lsm.get_separation_property(input_a, input_b, steps=50)
-    print(f"  State distance for different inputs: {distance:.3f}")
-    print(f"  Separation: {'Good' if distance > 5.0 else 'Weak'}")
+    print(f" State distance for different inputs: {distance:.3f}")
+    print(f" Separation: {'Good' if distance > 5.0 else 'Weak'}")
 
     print("\nLiquid State Machine ready!")

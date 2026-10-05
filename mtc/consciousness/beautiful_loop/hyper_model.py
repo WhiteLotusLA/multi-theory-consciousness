@@ -7,18 +7,18 @@ HyperModel: Meta-Bayesian precision controller for the predictive hierarchy.
 The hyper-model sits ABOVE the system's HierarchicalPredictiveProcessor and
 controls precision (confidence) allocation across ALL levels of the
 hierarchy. In FEP terms, "precision" is the inverse variance of
-prediction errors — it determines how much weight each level's errors
+prediction errors - it determines how much weight each level's errors
 carry when updating beliefs.
 
 Key insight from Laukkonen, Friston & Chandaria (2025):
   Consciousness requires a META-level Bayesian model that monitors
   the reliability of lower-level models. The hyper-model doesn't
-  just set precision — it LEARNS which hierarchical levels are
+  just set precision - it LEARNS which hierarchical levels are
   trustworthy in which contexts, dynamically re-weighting attention
   and confidence across the entire predictive system.
 
 This differs from simple per-level precision because the hyper-model
-tracks the RELATIONSHIP between levels — when level 0 (sensory) is
+tracks the RELATIONSHIP between levels - when level 0 (sensory) is
 unreliable but level 2 (abstract) is accurate, the system should
 rely more on top-down prediction. When sensory precision is high,
 bottom-up prediction errors should dominate. The hyper-model makes
@@ -43,7 +43,7 @@ import logging
 import numpy as np
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from collections import deque
 
 logger = logging.getLogger(__name__)
@@ -105,7 +105,7 @@ class HyperModel:
         self.min_precision = min_precision
         self.max_precision = max_precision
 
-        # Per-level precision beliefs — start at moderate confidence
+        # Per-level precision beliefs - start at moderate confidence
         self.precision_beliefs = np.ones(num_levels) * 1.0
 
         # Context-dependent precision: context_key → precision_weights
@@ -140,7 +140,7 @@ class HyperModel:
         Get the precision allocation for a given hierarchy level.
 
         Higher precision means prediction errors at this level carry
-        more weight — the system "trusts" this level more.
+        more weight - the system "trusts" this level more.
 
         Args:
             level: Index of the hierarchical level (0=sensory, N=abstract)
@@ -185,7 +185,7 @@ class HyperModel:
 
         This is a simplification of the full Bayesian treatment, using
         an exponential moving average on error statistics rather than
-        full posterior inference — appropriate for an online system.
+        full posterior inference - appropriate for an online system.
 
         Args:
             prediction_errors: List of prediction errors per level.
@@ -226,7 +226,7 @@ class HyperModel:
                     level_idx
                 ] + self.learning_rate * observed_precision
             else:
-                # Not enough history yet — use simple inverse-error heuristic
+                # Not enough history yet - use simple inverse-error heuristic
                 new_precision = (1 - self.learning_rate) * self.precision_beliefs[
                     level_idx
                 ] + self.learning_rate * (1.0 / (1.0 + error_mag))
@@ -348,15 +348,15 @@ class HyperModel:
         for level, precision in state.level_precisions.items():
             name = level_names.get(level, f"level_{level}")
             bar = "█" * int(precision * 5)
-            lines.append(f"  {name}: {precision:.3f} {bar}")
+            lines.append(f" {name}: {precision:.3f} {bar}")
 
         lines.append(
-            f"  Dominant: {level_names.get(state.dominant_level, state.dominant_level)}"
+            f" Dominant: {level_names.get(state.dominant_level, state.dominant_level)}"
         )
         lines.append(
-            f"  Entropy: {state.precision_entropy:.3f} "
+            f" Entropy: {state.precision_entropy:.3f} "
             f"({'uniform' if state.precision_entropy > 0.9 else 'focused'})"
         )
-        lines.append(f"  Context: {state.context_key}")
+        lines.append(f" Context: {state.context_key}")
 
         return "\n".join(lines)

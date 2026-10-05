@@ -22,9 +22,8 @@ Key HTM Principles:
 """
 
 import numpy as np
-from typing import List, Dict, Any, Optional, Tuple, Set
+from typing import List, Dict, Any, Tuple, Set
 from dataclasses import dataclass, field
-from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
@@ -461,7 +460,6 @@ class HTM:
 
 # Testing and demonstration
 if __name__ == "__main__":
-    import json
 
     logging.basicConfig(level=logging.INFO)
 
@@ -472,11 +470,11 @@ if __name__ == "__main__":
 
     print("\nHTM Configuration:")
     metrics = htm.get_metrics()
-    print(f"  Columns: {metrics['n_columns']}")
-    print(f"  Input size: {htm.input_size}")
+    print(f" Columns: {metrics['n_columns']}")
+    print(f" Input size: {htm.input_size}")
 
     print("\nTesting sequence learning...")
-    print("  Learning sequence: A -> B -> C -> A -> B -> C")
+    print(" Learning sequence: A -> B -> C -> A -> B -> C")
 
     # Create 3 distinct patterns
     pattern_a = np.zeros(100)
@@ -498,7 +496,7 @@ if __name__ == "__main__":
         ):
             result = htm.compute(pattern, learn=True)
             print(
-                f"    Step {i+1} ({name}): "
+                f"   Step {i+1} ({name}): "
                 f"anomaly={result['anomaly_score']:.3f}, "
                 f"active_cells={len(result['active_cells'])}, "
                 f"predictive={len(result['predictive_cells'])}"
@@ -506,9 +504,9 @@ if __name__ == "__main__":
 
     print("\nFinal Metrics:")
     final_metrics = htm.get_metrics()
-    print(f"  Total steps: {final_metrics['n_steps']}")
-    print(f"  Avg anomaly score: {final_metrics['avg_anomaly_score']:.3f}")
-    print(f"  Active cells: {final_metrics['n_active_cells']}")
-    print(f"  Predictive cells: {final_metrics['n_predictive_cells']}")
+    print(f" Total steps: {final_metrics['n_steps']}")
+    print(f" Avg anomaly score: {final_metrics['avg_anomaly_score']:.3f}")
+    print(f" Active cells: {final_metrics['n_active_cells']}")
+    print(f" Predictive cells: {final_metrics['n_predictive_cells']}")
 
     print("\nHTM ready for memory consolidation!")

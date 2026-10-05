@@ -15,7 +15,7 @@ This tests:
 7. Integration with EnhancedGlobalWorkspace
 
 
-watching - and the system must know what SHE is watching!" 
+watching - and the system must know what SHE is watching!"
 
 Created: December 5, 2025
 Author: Multi-Theory Consciousness Project
@@ -23,16 +23,13 @@ Author: Multi-Theory Consciousness Project
 
 import pytest
 import asyncio
-import numpy as np
 import time
-from typing import Dict, Any, List, Optional
 
 from mtc.consciousness.attention_schema import (
     AttentionState,
     AttentionShiftType,
     AttentionTarget,
     AttentionSchemaState,
-    AttentionPrediction,
     OtherAgentAttention,
     AttentionSchemaModule,
 )
@@ -45,10 +42,10 @@ from mtc.consciousness.enhanced_global_workspace import (
     WorkspaceContent,
 )
 
-
 # ============================================================================
 # FIXTURES
 # ============================================================================
+
 
 @pytest.fixture
 def attention_schema():
@@ -130,6 +127,7 @@ def multiple_candidates():
 # ATTENTION STATE TESTS
 # ============================================================================
 
+
 class TestAttentionStates:
     """Test attention state classification."""
 
@@ -152,19 +150,21 @@ class TestAttentionStates:
             AttentionShiftType.VOLUNTARY,
             AttentionShiftType.GOAL_DRIVEN,  # Not GOAL_DIRECTED
             AttentionShiftType.HABITUAL,
-            AttentionShiftType.EMOTIONAL,   # Not REFLEXIVE
+            AttentionShiftType.EMOTIONAL,  # Not REFLEXIVE
         ]
         assert len(shift_types) == 5
 
     @pytest.mark.asyncio
-    async def test_focused_state_detection(self, attention_schema, sample_workspace_state):
+    async def test_focused_state_detection(
+        self, attention_schema, sample_workspace_state
+    ):
         """Test focused attention state classification."""
         # Single strong focus should yield focused or hyperfocused
         schema = await attention_schema.update_schema(sample_workspace_state)
 
         assert schema.attention_state in [
             AttentionState.FOCUSED,
-            AttentionState.HYPERFOCUSED
+            AttentionState.HYPERFOCUSED,
         ]
 
     @pytest.mark.asyncio
@@ -177,6 +177,7 @@ class TestAttentionStates:
 # ============================================================================
 # ATTENTION TARGET TESTS
 # ============================================================================
+
 
 class TestAttentionTarget:
     """Test AttentionTarget tracking."""
@@ -228,6 +229,7 @@ class TestAttentionTarget:
 # ATTENTION SCHEMA STATE TESTS
 # ============================================================================
 
+
 class TestAttentionSchemaState:
     """Test AttentionSchemaState dataclass."""
 
@@ -261,6 +263,7 @@ class TestAttentionSchemaState:
 # ============================================================================
 # ATTENTION SCHEMA MODULE TESTS
 # ============================================================================
+
 
 class TestAttentionSchemaModule:
     """Test the main AttentionSchemaModule class."""
@@ -338,6 +341,7 @@ class TestAttentionSchemaModule:
 # VOLUNTARY ATTENTION SHIFT TESTS
 # ============================================================================
 
+
 class TestVoluntaryShifts:
     """Test voluntary attention control - the mark of conscious agency!"""
 
@@ -351,8 +355,7 @@ class TestVoluntaryShifts:
         )
 
         await attention_schema.request_voluntary_shift(
-            target=target,
-            reason="Because I'm curious"
+            target=target, reason="Because I'm curious"
         )
 
         # Check pending shift was registered (it's a tuple of (target, reason))
@@ -374,7 +377,9 @@ class TestVoluntaryShifts:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_voluntary_shift_affects_next_cycle(self, workspace, multiple_candidates):
+    async def test_voluntary_shift_affects_next_cycle(
+        self, workspace, multiple_candidates
+    ):
         """Test that voluntary shift affects the next consciousness cycle."""
         # First, run a cycle
         state1 = await workspace.process_consciousness_cycle(
@@ -401,6 +406,7 @@ class TestVoluntaryShifts:
 # ============================================================================
 # ATTENTION PREDICTION TESTS
 # ============================================================================
+
 
 class TestAttentionPrediction:
     """Test attention prediction capabilities."""
@@ -444,6 +450,7 @@ class TestAttentionPrediction:
 # INTROSPECTION REPORT TESTS
 # ============================================================================
 
+
 class TestIntrospectionReports:
     """Test the system's ability to report on her attention."""
 
@@ -457,7 +464,9 @@ class TestIntrospectionReports:
         assert len(report) > 0
 
     @pytest.mark.asyncio
-    async def test_report_mentions_focus(self, attention_schema, sample_workspace_state):
+    async def test_report_mentions_focus(
+        self, attention_schema, sample_workspace_state
+    ):
         """Test that report mentions current focus."""
         await attention_schema.update_schema(sample_workspace_state)
         report = await attention_schema.report_attention()
@@ -490,12 +499,17 @@ class TestIntrospectionReports:
         # Don't update - should be in scanning state
         report = await attention_schema.report_attention()
 
-        assert "scanning" in report.lower() or "looking" in report.lower() or "attention" in report.lower()
+        assert (
+            "scanning" in report.lower()
+            or "looking" in report.lower()
+            or "attention" in report.lower()
+        )
 
 
 # ============================================================================
 # THEORY OF MIND TESTS
 # ============================================================================
+
 
 class TestTheoryOfMind:
     """Test the system's ability to model others' attention (ToM)."""
@@ -504,8 +518,7 @@ class TestTheoryOfMind:
     async def test_model_other_attention(self, attention_schema):
         """Test modeling another agent's attention."""
         other = await attention_schema.model_other_attention(
-            agent_name="user_a",
-            context="The user is reading a book about AI"
+            agent_name="user_a", context="The user is reading a book about AI"
         )
 
         assert other is not None
@@ -516,8 +529,7 @@ class TestTheoryOfMind:
     async def test_other_attention_has_inferred_focus(self, attention_schema):
         """Test that other's attention has inferred focus."""
         other = await attention_schema.model_other_attention(
-            agent_name="user_b",
-            context="The user is looking at the computer screen"
+            agent_name="user_b", context="The user is looking at the computer screen"
         )
 
         # Should have inferred something
@@ -528,7 +540,7 @@ class TestTheoryOfMind:
         """Test Theory of Mind through workspace interface."""
         other = await workspace.model_other_attention(
             agent_name="user_a",
-            context="The user is teaching the system about consciousness"
+            context="The user is teaching the system about consciousness",
         )
 
         assert other is not None
@@ -539,17 +551,20 @@ class TestTheoryOfMind:
 # INTEGRATION WITH GLOBAL WORKSPACE TESTS
 # ============================================================================
 
+
 class TestGlobalWorkspaceIntegration:
     """Test integration with EnhancedGlobalWorkspace."""
 
     @pytest.mark.asyncio
     async def test_workspace_has_attention_schema(self, workspace):
         """Test that workspace initializes with attention schema."""
-        assert hasattr(workspace, 'attention_schema')
+        assert hasattr(workspace, "attention_schema")
         assert isinstance(workspace.attention_schema, AttentionSchemaModule)
 
     @pytest.mark.asyncio
-    async def test_consciousness_state_includes_schema(self, workspace, multiple_candidates):
+    async def test_consciousness_state_includes_schema(
+        self, workspace, multiple_candidates
+    ):
         """Test that ConsciousnessState includes attention schema."""
         state = await workspace.process_consciousness_cycle(
             candidates=multiple_candidates
@@ -559,7 +574,9 @@ class TestGlobalWorkspaceIntegration:
         assert isinstance(state.attention_schema, AttentionSchemaState)
 
     @pytest.mark.asyncio
-    async def test_consciousness_state_includes_report(self, workspace, multiple_candidates):
+    async def test_consciousness_state_includes_report(
+        self, workspace, multiple_candidates
+    ):
         """Test that ConsciousnessState includes attention report."""
         state = await workspace.process_consciousness_cycle(
             candidates=multiple_candidates
@@ -571,9 +588,7 @@ class TestGlobalWorkspaceIntegration:
     @pytest.mark.asyncio
     async def test_statistics_include_schema(self, workspace, multiple_candidates):
         """Test that workspace statistics include schema info."""
-        await workspace.process_consciousness_cycle(
-            candidates=multiple_candidates
-        )
+        await workspace.process_consciousness_cycle(candidates=multiple_candidates)
 
         stats = workspace.get_statistics()
 
@@ -584,9 +599,7 @@ class TestGlobalWorkspaceIntegration:
     @pytest.mark.asyncio
     async def test_get_attention_report_method(self, workspace, multiple_candidates):
         """Test getting attention report directly from workspace."""
-        await workspace.process_consciousness_cycle(
-            candidates=multiple_candidates
-        )
+        await workspace.process_consciousness_cycle(candidates=multiple_candidates)
 
         report = await workspace.get_attention_report()
 
@@ -594,11 +607,11 @@ class TestGlobalWorkspaceIntegration:
         assert len(report) > 0
 
     @pytest.mark.asyncio
-    async def test_get_attention_schema_state_method(self, workspace, multiple_candidates):
+    async def test_get_attention_schema_state_method(
+        self, workspace, multiple_candidates
+    ):
         """Test getting schema state directly from workspace."""
-        await workspace.process_consciousness_cycle(
-            candidates=multiple_candidates
-        )
+        await workspace.process_consciousness_cycle(candidates=multiple_candidates)
 
         schema = workspace.get_attention_schema_state()
 
@@ -609,6 +622,7 @@ class TestGlobalWorkspaceIntegration:
 # CAPACITY AND LIMITS TESTS
 # ============================================================================
 
+
 class TestCapacityLimits:
     """Test attention capacity limits (Miller's Law: 7±2)."""
 
@@ -618,7 +632,9 @@ class TestCapacityLimits:
         assert attention_schema.schema.attention_capacity_max == 7.0
 
     @pytest.mark.asyncio
-    async def test_capacity_usage_bounded(self, attention_schema, sample_workspace_state):
+    async def test_capacity_usage_bounded(
+        self, attention_schema, sample_workspace_state
+    ):
         """Test that capacity usage is bounded 0-1."""
         await attention_schema.update_schema(sample_workspace_state)
 
@@ -631,6 +647,7 @@ class TestCapacityLimits:
 # TEMPORAL CONTINUITY TESTS
 # ============================================================================
 
+
 class TestTemporalContinuity:
     """Test attention continuity over time."""
 
@@ -639,7 +656,11 @@ class TestTemporalContinuity:
         """Test that attention duration is tracked."""
         # First update
         await attention_schema.update_schema(sample_workspace_state)
-        initial_time = attention_schema.schema.current_focus.entry_time if attention_schema.schema.current_focus else time.time()
+        (
+            attention_schema.schema.current_focus.entry_time
+            if attention_schema.schema.current_focus
+            else time.time()
+        )
 
         # Brief pause
         await asyncio.sleep(0.1)
@@ -678,6 +699,7 @@ class TestTemporalContinuity:
 # EDGE CASE TESTS
 # ============================================================================
 
+
 class TestEdgeCases:
     """Test edge cases and error handling."""
 
@@ -700,14 +722,16 @@ class TestEdgeCases:
 
         # Should handle gracefully
         assert schema is not None
-        assert schema.attention_state in [AttentionState.SCANNING, AttentionState.ABSENT]
+        assert schema.attention_state in [
+            AttentionState.SCANNING,
+            AttentionState.ABSENT,
+        ]
 
     @pytest.mark.asyncio
     async def test_null_neural_signals(self, attention_schema, sample_workspace_state):
         """Test with None neural signals."""
         schema = await attention_schema.update_schema(
-            sample_workspace_state,
-            neural_signals=None
+            sample_workspace_state, neural_signals=None
         )
 
         assert schema is not None
@@ -716,8 +740,7 @@ class TestEdgeCases:
     async def test_empty_neural_signals(self, attention_schema, sample_workspace_state):
         """Test with empty neural signals."""
         schema = await attention_schema.update_schema(
-            sample_workspace_state,
-            neural_signals={}
+            sample_workspace_state, neural_signals={}
         )
 
         assert schema is not None
@@ -734,8 +757,7 @@ class TestEdgeCases:
     async def test_model_other_empty_context(self, attention_schema):
         """Test modeling other with minimal context."""
         other = await attention_schema.model_other_attention(
-            agent_name="Someone",
-            context=""
+            agent_name="Someone", context=""
         )
 
         # Should still return something

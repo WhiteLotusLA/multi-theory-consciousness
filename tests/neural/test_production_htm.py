@@ -5,13 +5,7 @@ Tests for Production HTM (Hierarchical Temporal Memory).
 All tests use mocks -- no real database or LLM connections required.
 """
 
-import sys
-from pathlib import Path
-
-
 import numpy as np
-import pytest
-from unittest.mock import patch, MagicMock
 
 from mtc.neural.htm.production_htm import (
     HTMConfig,
@@ -20,10 +14,10 @@ from mtc.neural.htm.production_htm import (
     ProductionHTM,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _small_config(**overrides) -> HTMConfig:
     """Return a small HTMConfig suitable for fast unit tests."""
@@ -57,6 +51,7 @@ def _random_sdr(size: int, sparsity: float = 0.05) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # SpatialPooler tests
 # ---------------------------------------------------------------------------
+
 
 class TestSpatialPooler:
     """Tests for the SpatialPooler component."""
@@ -123,6 +118,7 @@ class TestSpatialPooler:
 # ---------------------------------------------------------------------------
 # TemporalMemory tests
 # ---------------------------------------------------------------------------
+
 
 class TestTemporalMemory:
     """Tests for the TemporalMemory component."""
@@ -202,6 +198,7 @@ class TestTemporalMemory:
 # ---------------------------------------------------------------------------
 # ProductionHTM tests
 # ---------------------------------------------------------------------------
+
 
 class TestProductionHTM:
     """Tests for the top-level ProductionHTM."""
@@ -287,8 +284,13 @@ class TestProductionHTM:
 
         metrics = htm.get_metrics()
 
-        for key in ["anomaly_score", "active_columns", "predicted_columns",
-                     "cells_per_column", "total_cells"]:
+        for key in [
+            "anomaly_score",
+            "active_columns",
+            "predicted_columns",
+            "cells_per_column",
+            "total_cells",
+        ]:
             assert key in metrics
 
     def test_input_size_compatibility_property(self):

@@ -17,7 +17,6 @@ Authors: Multi-Theory Consciousness Contributors
 """
 
 from enum import Enum
-from typing import Optional
 import struct
 import json
 import numpy as np
@@ -194,7 +193,7 @@ class NeuralSerializer:
             raise ValueError(f"Invalid magic bytes: {magic!r}")
 
         # Version
-        version = struct.unpack_from("B", data, offset)[0]
+        struct.unpack_from("B", data, offset)[0]
         offset += 1
 
         # Message type

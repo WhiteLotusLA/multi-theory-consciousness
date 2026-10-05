@@ -22,7 +22,7 @@ Author: Multi-Theory Consciousness Contributors
 
 import logging
 import numpy as np
-from typing import Dict, Any, Optional, List
+from typing import Dict, Optional, List
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -34,7 +34,7 @@ class WorkspaceContent:
     """
     Represents the current contents of the global workspace.
 
-    This is what the system is "consciously aware of" at any given moment.
+    This is what the system is "consciously aware of"at any given moment.
     """
 
     # Integrated neural signals
@@ -110,8 +110,8 @@ class GlobalWorkspace:
         logger.info(
             f"Global Workspace initialized ({integration_dimensions}D integration)"
         )
-        logger.info(f"   Attention decay: {attention_decay}")
-        logger.info(f"   Salience threshold: {salience_threshold}")
+        logger.info(f"  Attention decay: {attention_decay}")
+        logger.info(f"  Salience threshold: {salience_threshold}")
 
     def integrate(
         self,
@@ -415,20 +415,20 @@ if __name__ == "__main__":
         emotional_state=emotions,
     )
 
-    print(f"Integrated Consciousness:")
-    print(f"   Cycle: {content.cycle_number}")
-    print(f"   Attention focus: {content.attention_focus}")
-    print(f"   Salience: {content.salience_score:.3f}")
-    print(f"   Is conscious: {workspace.is_conscious(content)}")
-    print(f"\n   Layer contributions:")
-    print(f"   - SNN: {content.snn_contribution:.3f}")
-    print(f"   - LSM: {content.lsm_contribution:.3f}")
-    print(f"   - HTM: {content.htm_contribution:.3f}")
-    print(f"   - CTM: {content.ctm_contribution:.3f}")
+    print("Integrated Consciousness:")
+    print(f"  Cycle: {content.cycle_number}")
+    print(f"  Attention focus: {content.attention_focus}")
+    print(f"  Salience: {content.salience_score:.3f}")
+    print(f"  Is conscious: {workspace.is_conscious(content)}")
+    print("\n   Layer contributions:")
+    print(f"  - SNN: {content.snn_contribution:.3f}")
+    print(f"  - LSM: {content.lsm_contribution:.3f}")
+    print(f"  - HTM: {content.htm_contribution:.3f}")
+    print(f"  - CTM: {content.ctm_contribution:.3f}")
 
-    print(f"\nCurrent attention distribution:")
+    print("\nCurrent attention distribution:")
     attention = workspace.get_attention_distribution()
     for layer, weight in attention.items():
-        print(f"   {layer}: {weight:.3f}")
+        print(f"  {layer}: {weight:.3f}")
 
     print("\nGlobal Workspace test complete!")

@@ -3,7 +3,6 @@
 import json
 import pytest
 import tempfile
-from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime, timedelta
 
 
@@ -30,12 +29,16 @@ class TestDCMEvaluator:
 
         evaluator = DCMEvaluator(cache_dir=tempfile.mkdtemp())
         # Simulated LLM response
-        response = json.dumps({
-            "Curiosity": {"score": 0.8, "reasoning": "Shows exploratory behavior"},
-            "Play": {"score": 0.3, "reasoning": "Limited playful behavior"},
-            "Metacognition": {"score": 0.9, "reasoning": "Strong self-reflection"},
-        })
-        scores = evaluator._parse_response(response, ["Curiosity", "Play", "Metacognition"])
+        response = json.dumps(
+            {
+                "Curiosity": {"score": 0.8, "reasoning": "Shows exploratory behavior"},
+                "Play": {"score": 0.3, "reasoning": "Limited playful behavior"},
+                "Metacognition": {"score": 0.9, "reasoning": "Strong self-reflection"},
+            }
+        )
+        scores = evaluator._parse_response(
+            response, ["Curiosity", "Play", "Metacognition"]
+        )
         assert scores["Curiosity"] == pytest.approx(0.8)
         assert scores["Play"] == pytest.approx(0.3)
         assert scores["Metacognition"] == pytest.approx(0.9)
@@ -45,9 +48,7 @@ class TestDCMEvaluator:
 
         evaluator = DCMEvaluator(cache_dir=tempfile.mkdtemp())
         # Malformed response -> default 0.3 for missing
-        scores = evaluator._parse_response(
-            "not valid json", ["Curiosity", "Play"]
-        )
+        scores = evaluator._parse_response("not valid json", ["Curiosity", "Play"])
         assert scores["Curiosity"] == pytest.approx(0.3)
         assert scores["Play"] == pytest.approx(0.3)
 

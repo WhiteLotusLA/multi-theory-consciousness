@@ -18,11 +18,10 @@ Key Features:
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Any, Set
+from typing import Dict, List, Optional, Any, Set
 from dataclasses import dataclass
 import logging
 import time
-from scipy.sparse import csr_matrix, lil_matrix
 
 logger = logging.getLogger(__name__)
 
@@ -418,11 +417,11 @@ class ProductionHTM:
         # Compatibility property (toy HTM uses input_size)
         self.input_size = self.config.input_bits
 
-        logger.info(f"Production HTM initialized:")
-        logger.info(f"   Columns: {self.config.num_columns}")
-        logger.info(f"   Cells per column: {self.config.cells_per_column}")
+        logger.info("Production HTM initialized:")
+        logger.info(f"  Columns: {self.config.num_columns}")
+        logger.info(f"  Cells per column: {self.config.cells_per_column}")
         logger.info(
-            f"   Total cells: {self.config.num_columns * self.config.cells_per_column}"
+            f"  Total cells: {self.config.num_columns * self.config.cells_per_column}"
         )
 
     def reset(self) -> None:
@@ -738,10 +737,10 @@ def test_production_htm():
 
     result = htm.process(pattern)
 
-    print(f"   Processed in {result['processing_time_ms']:.2f}ms")
-    print(f"   Active columns: {result['num_active_columns']}")
-    print(f"   Predicted cells: {result['num_predicted_cells']}")
-    print(f"   Anomaly score: {result['anomaly_score']:.3f}")
+    print(f"  Processed in {result['processing_time_ms']:.2f}ms")
+    print(f"  Active columns: {result['num_active_columns']}")
+    print(f"  Predicted cells: {result['num_predicted_cells']}")
+    print(f"  Anomaly score: {result['anomaly_score']:.3f}")
 
     # Test sequence learning
     print("\n2. Testing sequence learning...")
@@ -758,23 +757,23 @@ def test_production_htm():
             result = htm.process(pattern, learn=True)
             anomalies.append(result["anomaly_score"])
 
-    print(f"   Final anomaly scores: {[f'{a:.3f}' for a in anomalies]}")
-    print(f"   Learning successful: {'YES' if anomalies[-1] < anomalies[0] else 'NO'}")
+    print(f"  Final anomaly scores: {[f'{a:.3f}' for a in anomalies]}")
+    print(f"  Learning successful: {'YES' if anomalies[-1] < anomalies[0] else 'NO'}")
 
     # Benchmark
     print("\n3. Running performance benchmark...")
     metrics = htm.benchmark_performance()
 
-    print(f"   Mean latency: {metrics['mean_latency_ms']:.2f}ms")
-    print(f"   Total cells: {metrics['total_cells']:,}")
+    print(f"  Mean latency: {metrics['mean_latency_ms']:.2f}ms")
+    print(f"  Total cells: {metrics['total_cells']:,}")
 
     print("\n" + "=" * 60)
     print("Production HTM test complete!")
-    print(f"   4,096 columns with 32 cells each = {4096 * 32:,} total cells")
+    print(f"  4,096 columns with 32 cells each = {4096 * 32:,} total cells")
     print(
-        f"   Achieved <50ms target: {'YES' if metrics['mean_latency_ms'] < 50 else 'NO'}"
+        f"  Achieved <50ms target: {'YES' if metrics['mean_latency_ms'] < 50 else 'NO'}"
     )
-    print("   Research-grade HTM ready!")
+    print("  Research-grade HTM ready!")
 
 
 if __name__ == "__main__":

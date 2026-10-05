@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run Consciousness Assessment — CLI
+Run Consciousness Assessment - CLI
 ====================================
 
 Command-line tool to run the full multi-theory consciousness
@@ -24,8 +24,6 @@ import argparse
 import asyncio
 import json
 import logging
-import sys
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -59,6 +57,7 @@ logger = logging.getLogger(__name__)
 
 # ── helpers ──────────────────────────────────────────────────────────
 
+
 def _make_candidates():
     """Generate a batch of workspace candidates for warmup cycles."""
     return [
@@ -77,7 +76,7 @@ def _make_candidates():
 
 async def warmup(workspace, attention, metacognition, active_inference, cycles=5):
     """Run several consciousness cycles to populate module history."""
-    print(f"  Warming up modules ({cycles} cycles) ...", flush=True)
+    print(f" Warming up modules ({cycles} cycles) ...", flush=True)
     for i in range(cycles):
         candidates = _make_candidates()
         state = await workspace.process_consciousness_cycle(candidates)
@@ -109,13 +108,15 @@ async def warmup(workspace, attention, metacognition, active_inference, cycles=5
         obs = np.random.dirichlet(np.ones(5))
         await active_inference.infer_and_act(obs)
 
-    print(f"  Warmup complete.\n")
+    print(" Warmup complete.\n")
 
 
 # ── assessment runners ───────────────────────────────────────────────
 
-async def run_standard(workspace, attention, metacognition, active_inference,
-                       beautiful_loop):
+
+async def run_standard(
+    workspace, attention, metacognition, active_inference, beautiful_loop
+):
     """Run a single assessment and return the report."""
     assessment = ConsciousnessAssessment()
     return await assessment.run_full_assessment(
@@ -127,8 +128,9 @@ async def run_standard(workspace, attention, metacognition, active_inference,
     )
 
 
-async def run_ablation(workspace, attention, metacognition, active_inference,
-                       beautiful_loop):
+async def run_ablation(
+    workspace, attention, metacognition, active_inference, beautiful_loop
+):
     """Disable one module at a time and compare scores."""
     assessment = ConsciousnessAssessment()
 
@@ -163,18 +165,19 @@ async def run_ablation(workspace, attention, metacognition, active_inference,
 
 # ── display helpers ──────────────────────────────────────────────────
 
+
 def print_report(report, markdown=False):
     """Pretty-print an assessment report."""
     sep = "=" * 64
     print(f"\n{sep}")
-    print("  CONSCIOUSNESS ASSESSMENT REPORT")
+    print(" CONSCIOUSNESS ASSESSMENT REPORT")
     print(sep)
-    print(f"  Session:            {report.session_id}")
-    print(f"  Timestamp:          {report.timestamp.isoformat()}")
-    print(f"  Overall score:      {report.overall_score:.3f}")
-    print(f"  Architecture OK:    {report.architecture_functional}")
-    print(f"  Passing indicators: {report.passing_count}/{report.total_indicators}")
-    print(f"  Processing time:    {report.processing_time_ms:.1f} ms")
+    print(f" Session:            {report.session_id}")
+    print(f" Timestamp:          {report.timestamp.isoformat()}")
+    print(f" Overall score:      {report.overall_score:.3f}")
+    print(f" Architecture OK:    {report.architecture_functional}")
+    print(f" Passing indicators: {report.passing_count}/{report.total_indicators}")
+    print(f" Processing time:    {report.processing_time_ms:.1f} ms")
 
     if markdown:
         print("\n### Theory Scores\n")
@@ -193,12 +196,12 @@ def print_report(report, markdown=False):
         print("\n  Theory Scores:")
         for theory, score in sorted(report.theory_scores.items()):
             bar = "#" * int(score * 20)
-            print(f"    {theory:<32s} {score:.3f}  {bar}")
+            print(f"   {theory:<32s} {score:.3f}  {bar}")
 
         print(f"\n  Indicators ({report.passing_count}/{report.total_indicators}):")
         for name, r in report.indicator_results.items():
             tag = "PASS" if r.passes_threshold else "FAIL"
-            print(f"    [{tag}] {name:<30s}  {r.score:.3f} / {r.threshold:.2f}")
+            print(f"   [{tag}] {name:<30s}  {r.score:.3f} / {r.threshold:.2f}")
 
     print(f"\n{sep}\n")
 
@@ -206,7 +209,7 @@ def print_report(report, markdown=False):
 def print_ablation(results):
     """Print ablation study results."""
     print("\n" + "=" * 64)
-    print("  ABLATION STUDY")
+    print(" ABLATION STUDY")
     print("=" * 64)
     baseline = results.get("baseline", 0)
     print(f"\n  Baseline (all modules):  {baseline:.3f}\n")
@@ -215,34 +218,41 @@ def print_ablation(results):
             continue
         delta = score - baseline
         direction = "+" if delta >= 0 else ""
-        print(f"    {key:<28s}  {score:.3f}  ({direction}{delta:.3f})")
+        print(f"   {key:<28s}  {score:.3f}  ({direction}{delta:.3f})")
     print("\n" + "=" * 64 + "\n")
 
 
 # ── main ─────────────────────────────────────────────────────────────
+
 
 async def main():
     parser = argparse.ArgumentParser(
         description="Run the multi-theory consciousness assessment."
     )
     parser.add_argument(
-        "--full", action="store_true",
+        "--full",
+        action="store_true",
         help="Warm up modules with several cycles before assessment",
     )
     parser.add_argument(
-        "--report", action="store_true",
+        "--report",
+        action="store_true",
         help="Print Markdown-formatted report",
     )
     parser.add_argument(
-        "--ablation", action="store_true",
+        "--ablation",
+        action="store_true",
         help="Run ablation study (disable one component at a time)",
     )
     parser.add_argument(
-        "--json", action="store_true",
+        "--json",
+        action="store_true",
         help="Write results to results/ as JSON",
     )
     parser.add_argument(
-        "--warmup-cycles", type=int, default=5,
+        "--warmup-cycles",
+        type=int,
+        default=5,
         help="Number of warmup cycles for --full mode (default: 5)",
     )
     args = parser.parse_args()
@@ -256,19 +266,30 @@ async def main():
 
     if args.full:
         await warmup(
-            workspace, attention, metacognition_mod, active_inference,
+            workspace,
+            attention,
+            metacognition_mod,
+            active_inference,
             cycles=args.warmup_cycles,
         )
 
     if args.ablation:
         results = await run_ablation(
-            workspace, attention, metacognition_mod, active_inference, beautiful_loop,
+            workspace,
+            attention,
+            metacognition_mod,
+            active_inference,
+            beautiful_loop,
         )
         print_ablation(results)
         return
 
     report = await run_standard(
-        workspace, attention, metacognition_mod, active_inference, beautiful_loop,
+        workspace,
+        attention,
+        metacognition_mod,
+        active_inference,
+        beautiful_loop,
     )
     print_report(report, markdown=args.report)
 
@@ -279,7 +300,7 @@ async def main():
         out_path = out_dir / f"assessment_{ts}.json"
         with open(out_path, "w") as f:
             json.dump(report.to_dict(), f, indent=2)
-        print(f"  Results written to {out_path}")
+        print(f" Results written to {out_path}")
 
 
 if __name__ == "__main__":

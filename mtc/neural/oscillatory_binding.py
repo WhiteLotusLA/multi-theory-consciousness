@@ -32,8 +32,8 @@ Author: MTC Contributors
 import logging
 import time
 import numpy as np
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 from collections import deque
 
 logger = logging.getLogger(__name__)
@@ -46,13 +46,36 @@ OSCILLATOR_GROUPS = [
 ]
 
 OSCILLATOR_NAMES = [
-    "joy", "curiosity", "fear", "sadness",
-    "surprise", "anger", "calm", "interest",
-    "low_freq_energy", "mid_freq_energy", "high_freq_energy", "spectral_entropy",
-    "fading_memory", "input_sensitivity", "nonlinear_response", "echo_state",
-    "active_columns", "sequence_strength", "anomaly_score", "prediction_accuracy",
-    "burst_fraction", "overlap_stability", "semantic_density", "consolidation",
-    "attention_focus", "valence", "novelty", "arousal", "goal_relevance", "temporal_urgency",
+    "joy",
+    "curiosity",
+    "fear",
+    "sadness",
+    "surprise",
+    "anger",
+    "calm",
+    "interest",
+    "low_freq_energy",
+    "mid_freq_energy",
+    "high_freq_energy",
+    "spectral_entropy",
+    "fading_memory",
+    "input_sensitivity",
+    "nonlinear_response",
+    "echo_state",
+    "active_columns",
+    "sequence_strength",
+    "anomaly_score",
+    "prediction_accuracy",
+    "burst_fraction",
+    "overlap_stability",
+    "semantic_density",
+    "consolidation",
+    "attention_focus",
+    "valence",
+    "novelty",
+    "arousal",
+    "goal_relevance",
+    "temporal_urgency",
 ]
 
 NUM_OSCILLATORS = 30
@@ -109,7 +132,9 @@ class OscillatoryBinding:
         self.proj_vectors = rng.standard_normal((num_oscillators, phase_dim)) * 0.1
 
         self.J_static = self._build_static_coupling()
-        self.J_learned = np.zeros((num_oscillators, num_oscillators, phase_dim, phase_dim))
+        self.J_learned = np.zeros(
+            (num_oscillators, num_oscillators, phase_dim, phase_dim)
+        )
 
         self.group_slices = {
             "snn": slice(0, 8),
@@ -138,18 +163,27 @@ class OscillatoryBinding:
         eye = np.eye(D)
 
         strengths = {
-            ("snn", "snn"): 0.3, ("lsm", "lsm"): 0.3, ("htm", "htm"): 0.3,
+            ("snn", "snn"): 0.3,
+            ("lsm", "lsm"): 0.3,
+            ("htm", "htm"): 0.3,
             ("cross", "cross"): 0.15,
-            ("snn", "lsm"): 0.15, ("lsm", "snn"): 0.15,
-            ("snn", "htm"): 0.1, ("htm", "snn"): 0.1,
-            ("lsm", "htm"): 0.1, ("htm", "lsm"): 0.1,
+            ("snn", "lsm"): 0.15,
+            ("lsm", "snn"): 0.15,
+            ("snn", "htm"): 0.1,
+            ("htm", "snn"): 0.1,
+            ("lsm", "htm"): 0.1,
+            ("htm", "lsm"): 0.1,
         }
         for g in ["snn", "lsm", "htm"]:
             strengths[("cross", g)] = 0.2
             strengths[(g, "cross")] = 0.2
 
-        groups = {"snn": range(0, 8), "lsm": range(8, 16),
-                  "htm": range(16, 24), "cross": range(24, 30)}
+        groups = {
+            "snn": range(0, 8),
+            "lsm": range(8, 16),
+            "htm": range(16, 24),
+            "cross": range(24, 30),
+        }
 
         for (g1, g2), strength in strengths.items():
             for i in groups[g1]:
@@ -215,7 +249,7 @@ class OscillatoryBinding:
 
     def _global_order_parameter(self) -> float:
         if np.any(np.isnan(self.phases)):
-            # Corrupted phases (e.g., from state restoration) — reset to random
+            # Corrupted phases (e.g., from state restoration) - reset to random
             self.phases = np.random.uniform(0, 2 * np.pi, self.phases.shape)
         r = float(np.linalg.norm(np.mean(self.phases, axis=0)))
         return 0.0 if np.isnan(r) else r
@@ -264,9 +298,13 @@ class OscillatoryBinding:
                 visited.add(i)
         return clusters
 
-    def _compute_salience(self, clusters: List[List[int]], global_r: float) -> Dict[str, float]:
+    def _compute_salience(
+        self, clusters: List[List[int]], global_r: float
+    ) -> Dict[str, float]:
         group_to_module = {"snn": "snn", "lsm": "lsm", "htm": "htm"}
-        module_scores: Dict[str, List[float]] = {m: [] for m in group_to_module.values()}
+        module_scores: Dict[str, List[float]] = {
+            m: [] for m in group_to_module.values()
+        }
         mean_coherence = global_r
         for cluster in clusters:
             if len(cluster) < 2:
@@ -281,7 +319,9 @@ class OscillatoryBinding:
         for module, scores in module_scores.items():
             if scores:
                 avg_cluster_r = np.mean(scores)
-                result[module] = 1.0 + self.salience_alpha * (avg_cluster_r - mean_coherence)
+                result[module] = 1.0 + self.salience_alpha * (
+                    avg_cluster_r - mean_coherence
+                )
             else:
                 result[module] = 1.0
         return result
@@ -293,7 +333,9 @@ class OscillatoryBinding:
             if len(largest) >= 2:
                 names = [OSCILLATOR_NAMES[i] for i in largest[:4]]
                 cluster_r = float(np.linalg.norm(np.mean(self.phases[largest], axis=0)))
-                parts.append(f"Oscillatory binding: {' + '.join(names)} synchronized (r={cluster_r:.2f})")
+                parts.append(
+                    f"Oscillatory binding: {' + '.join(names)} synchronized (r={cluster_r:.2f})"
+                )
         for pair, val in cross_r.items():
             if val > 0.5:
                 a, b = pair.split("_")
@@ -304,7 +346,7 @@ class OscillatoryBinding:
     def _hebbian_update(self) -> None:
         outer = np.einsum("ik,jl->ijkl", self.phases, self.phases)
         self.J_learned += self.hebbian_lr * (outer - self.J_learned)
-        self.J_learned *= (1.0 - self.hebbian_decay)
+        self.J_learned *= 1.0 - self.hebbian_decay
         np.clip(self.J_learned, -self.hebbian_cap, self.hebbian_cap, out=self.J_learned)
         for i in range(self.num_oscillators):
             self.J_learned[i, i] = 0.0

@@ -16,7 +16,7 @@ Performance Philosophy:
 
 import torch
 import numpy as np
-from typing import Optional, Union, List, Tuple
+from typing import Optional, Union, List
 import logging
 from dataclasses import dataclass
 from enum import Enum
@@ -68,16 +68,16 @@ class MPSManager:
         self.total_gpu_ops = 0
         self.total_cpu_ops = 0
 
-        logger.info(f"MPS Manager initialized")
-        logger.info(f"   Device: {self.device}")
-        logger.info(f"   MPS Enabled: {self.enabled}")
-        logger.info(f"   Min GPU Size: {self.min_gpu_size} elements")
+        logger.info("MPS Manager initialized")
+        logger.info(f"  Device: {self.device}")
+        logger.info(f"  MPS Enabled: {self.enabled}")
+        logger.info(f"  Min GPU Size: {self.min_gpu_size} elements")
 
         if self.enabled:
-            logger.info(f"   GPU acceleration ready!")
+            logger.info("  GPU acceleration ready!")
             self._log_gpu_info()
         else:
-            logger.warning(f"   Running on CPU only")
+            logger.warning("  Running on CPU only")
 
     def _get_device(self) -> torch.device:
         """Determine the best device to use"""
@@ -97,7 +97,7 @@ class MPSManager:
             allocated = torch.mps.current_allocated_memory() / (1024**3)
             driver = torch.mps.driver_allocated_memory() / (1024**3)
             logger.info(
-                f"   GPU Memory: {allocated:.2f}GB allocated, {driver:.2f}GB driver"
+                f"  GPU Memory: {allocated:.2f}GB allocated, {driver:.2f}GB driver"
             )
         except Exception as e:
             logger.debug(f"Could not get GPU memory info: {e}")
@@ -336,28 +336,28 @@ if __name__ == "__main__":
     print("Test 1: Small vector operation (100 elements)")
     small_size = 100
     should_gpu = mps_manager.should_use_gpu("embedding", small_size, is_batch=False)
-    print(f"  Should use GPU: {should_gpu} (Expected: False - too small)")
+    print(f" Should use GPU: {should_gpu} (Expected: False - too small)")
     print()
 
     # Test 2: Large operation (should use GPU)
     print("Test 2: Large vector operation (100,000 elements)")
     large_size = 100000
     should_gpu = mps_manager.should_use_gpu("embedding", large_size, is_batch=False)
-    print(f"  Should use GPU: {should_gpu} (Expected: True - large enough)")
+    print(f" Should use GPU: {should_gpu} (Expected: True - large enough)")
     print()
 
     # Test 3: Batch operation (should use GPU even if small)
     print("Test 3: Batch operation (small but batched)")
     batch_size = 10
     should_gpu = mps_manager.should_use_gpu("batch_embed", batch_size, is_batch=True)
-    print(f"  Should use GPU: {should_gpu} (Expected: True - batch operation)")
+    print(f" Should use GPU: {should_gpu} (Expected: True - batch operation)")
     print()
 
     # Test 4: GPU memory stats
     print("Test 4: GPU Memory Statistics")
     mem_stats = mps_manager.get_memory_stats()
     for key, value in mem_stats.items():
-        print(f"  {key}: {value}")
+        print(f" {key}: {value}")
     print()
 
     if mps_manager.enabled:
@@ -371,7 +371,7 @@ if __name__ == "__main__":
         start = time.time()
         cpu_sim = cosine_similarity_gpu(cpu_a, cpu_b)
         cpu_time = (time.time() - start) * 1000
-        print(f"  CPU: {cpu_time:.2f}ms for {n}x{m} similarity matrix (8192D)")
+        print(f" CPU: {cpu_time:.2f}ms for {n}x{m} similarity matrix (8192D)")
 
         # GPU
         gpu_a = cpu_a.to(mps_manager.device)
@@ -380,15 +380,15 @@ if __name__ == "__main__":
         gpu_sim = cosine_similarity_gpu(gpu_a, gpu_b)
         torch.mps.synchronize()
         gpu_time = (time.time() - start) * 1000
-        print(f"  GPU: {gpu_time:.2f}ms for {n}x{m} similarity matrix (8192D)")
-        print(f"  Speedup: {cpu_time/gpu_time:.2f}x")
+        print(f" GPU: {gpu_time:.2f}ms for {n}x{m} similarity matrix (8192D)")
+        print(f" Speedup: {cpu_time/gpu_time:.2f}x")
         print()
 
     # Test 6: Performance summary
     print("Test 6: Performance Summary")
     summary = mps_manager.get_performance_summary()
     for key, value in summary.items():
-        print(f"  {key}: {value}")
+        print(f" {key}: {value}")
 
     print()
     print("=" * 70)

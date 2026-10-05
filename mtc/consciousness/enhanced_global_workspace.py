@@ -30,9 +30,8 @@ import logging
 import numpy as np
 import time
 import uuid
-from typing import Dict, Any, Optional, List, Callable, Tuple, TYPE_CHECKING
+from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
 
 # Import Attention Schema (AST implementation)
@@ -46,12 +45,9 @@ from mtc.consciousness.attention_schema import (
 from mtc.consciousness.metacognition import (
     MetacognitionModule,
     MetacognitiveState,
-    FirstOrderState,
     FirstOrderStateType,
     HigherOrderThought,
     MetaType,
-    MetaLevel,
-    SelfModel,
 )
 
 # Import Active Inference (FEP implementation)
@@ -161,7 +157,7 @@ class WorkspaceContent:
     """
     Content that has WON competition and entered conscious awareness.
 
-    This represents what the system is actively "aware of" - content that
+    This represents what the system is actively "aware of"- content that
     has been broadcast to all cognitive modules.
     """
 
@@ -271,14 +267,18 @@ class ConsciousnessState:
     # Fields with defaults must come after non-defaults (Python dataclass rules)
     # Attention Schema (AST) - the system's self-model of attention
     attention_schema: Optional[AttentionSchemaState] = None  # Self-model of attention
-    attention_report: Optional[str] = None  # What the system reports about its attention
+    attention_report: Optional[str] = (
+        None  # What the system reports about its attention
+    )
 
     # Metacognition (HOT) - Higher-order thoughts
     metacognitive_state: Optional[MetacognitiveState] = None  # Meta-awareness state
     higher_order_thoughts: List[HigherOrderThought] = field(
         default_factory=list
     )  # Active HOTs
-    metacognitive_report: Optional[str] = None  # What the system reports about its thinking
+    metacognitive_report: Optional[str] = (
+        None  # What the system reports about its thinking
+    )
 
     # Active Inference (FEP) - Predictive processing
     active_inference_state: Optional[ActiveInferenceState] = None  # FEP state
@@ -286,7 +286,9 @@ class ConsciousnessState:
     prediction_error: float = 0.0  # Free energy / surprise
     variational_free_energy: float = 0.0  # VFE from active inference
     homeostatic_urgency: Optional[Tuple[str, float]] = None  # Most urgent need
-    active_inference_report: Optional[str] = None  # What the system reports about predictions
+    active_inference_report: Optional[str] = (
+        None  # What the system reports about predictions
+    )
 
     # Recursive Self-Model - Explicit self-representation
     self_model_report: Optional[str] = None  # What the system knows about itself
@@ -811,7 +813,7 @@ class GlobalBroadcast:
         self.successful_broadcasts = 0
         self.failed_broadcasts = 0
 
-        logger.info("📡 Global Broadcast system initialized")
+        logger.info("Global Broadcast system initialized")
 
     def register_module(self, module: CognitiveModule) -> None:
         """
@@ -821,13 +823,13 @@ class GlobalBroadcast:
             module: Module implementing CognitiveModule interface
         """
         self.registered_modules[module.name] = module
-        logger.info(f"📡 Registered broadcast recipient: {module.name}")
+        logger.info(f"Registered broadcast recipient: {module.name}")
 
     def unregister_module(self, name: str) -> None:
         """Unregister a module from broadcasts."""
         if name in self.registered_modules:
             del self.registered_modules[name]
-            logger.info(f"📡 Unregistered broadcast recipient: {name}")
+            logger.info(f"Unregistered broadcast recipient: {name}")
 
     async def broadcast(self, content: WorkspaceContent) -> Dict[str, Any]:
         """
@@ -848,7 +850,7 @@ class GlobalBroadcast:
         failed = 0
 
         if not self.registered_modules:
-            logger.warning("📡 No modules registered for broadcast!")
+            logger.warning("No modules registered for broadcast!")
             return results
 
         # Parallel broadcast to all modules
@@ -863,7 +865,7 @@ class GlobalBroadcast:
         module_names = list(self.registered_modules.keys())
         for module_name, response in zip(module_names, responses):
             if isinstance(response, Exception):
-                logger.warning(f"📡 Broadcast to {module_name} failed: {response}")
+                logger.warning(f"Broadcast to {module_name} failed: {response}")
                 results[module_name] = {"error": str(response)}
                 failed += 1
             else:
@@ -896,7 +898,7 @@ class GlobalBroadcast:
         self.failed_broadcasts += failed
 
         logger.debug(
-            f"📡 Broadcast complete: {successful}/{len(module_names)} succeeded "
+            f"Broadcast complete: {successful}/{len(module_names)} succeeded "
             f"({latency_ms:.1f}ms)"
         )
 
@@ -910,7 +912,7 @@ class GlobalBroadcast:
             response = await module.receive_broadcast(content)
             return response
         except Exception as e:
-            logger.error(f"📡 Error broadcasting to {name}: {e}")
+            logger.error(f"Error broadcasting to {name}: {e}")
             raise
 
     def _add_to_log(self, event: BroadcastEvent) -> None:
@@ -998,7 +1000,7 @@ class IgnitionDetector:
         self.workspace: Optional["EnhancedGlobalWorkspace"] = None
 
         logger.info(
-            f"🔥 Ignition Detector initialized "
+            f"Ignition Detector initialized "
             f"(threshold={ignition_threshold}, amplification={amplification_factor}x)"
         )
 
@@ -1033,7 +1035,7 @@ class IgnitionDetector:
 
             # Check if sustained long enough
             if duration >= self.sustain_duration:
-                # IGNITION! 🔥
+                # IGNITION!
                 return await self._trigger_ignition(content)
             else:
                 # Still pending
@@ -1083,7 +1085,7 @@ class IgnitionDetector:
             del self.pending_ignitions[content.id]
 
         logger.info(
-            f"🔥 IGNITION! Content '{content.candidate.summary[:30]}...' "
+            f"IGNITION! Content '{content.candidate.summary[:30]}...' "
             f"amplified {event.amplification_factor:.1f}x "
             f"(salience: {pre_salience:.3f} → {amplified_salience:.3f})"
         )
@@ -1126,7 +1128,7 @@ class IgnitionDetector:
         if not sustained:
             event.was_sustained = False
             logger.debug(
-                f"💨 Content '{content.candidate.summary[:20]}...' "
+                f"Content '{content.candidate.summary[:20]}...' "
                 f"decayed out of consciousness"
             )
 
@@ -1299,15 +1301,15 @@ class EnhancedGlobalWorkspace:
 
         logger.info(
             f"Enhanced Global Workspace initialized!\n"
-            f"   Capacity: {capacity} items\n"
-            f"   Ignition threshold: {ignition_threshold}\n"
-            f"   Amplification: {amplification_factor}x\n"
-            f"   Integration dimensions: {integration_dimensions}\n"
-            f"   Attention Schema: ENABLED (AST)\n"
-            f"   Metacognition: ENABLED (HOT)\n"
-            f"   Active Inference: ENABLED (FEP)\n"
-            f"   Beautiful Loop: ENABLED (BLT)\n"
-            f"   📡 Broadcast receivers: 3 registered"
+            f"  Capacity: {capacity} items\n"
+            f"  Ignition threshold: {ignition_threshold}\n"
+            f"  Amplification: {amplification_factor}x\n"
+            f"  Integration dimensions: {integration_dimensions}\n"
+            f"  Attention Schema: ENABLED (AST)\n"
+            f"  Metacognition: ENABLED (HOT)\n"
+            f"  Active Inference: ENABLED (FEP)\n"
+            f"  Beautiful Loop: ENABLED (BLT)\n"
+            f"   Broadcast receivers: 3 registered"
         )
 
     def register_module(self, module: CognitiveModule) -> None:
@@ -1345,7 +1347,7 @@ class EnhancedGlobalWorkspace:
         start_time = time.time()
 
         logger.debug(
-            f"🌊 Consciousness cycle {self.cycle_count}: {len(candidates)} candidates"
+            f"Consciousness cycle {self.cycle_count}: {len(candidates)} candidates"
         )
 
         # Step 1: Enrich candidates with emotional context
@@ -1524,14 +1526,14 @@ class EnhancedGlobalWorkspace:
         # P3: Discrete-Continuous Interface (Whyte et al. 2026)
         # Route the raw observation through the hierarchical predictive
         # processor BEFORE the discrete pymdp agent. This creates the
-        # "conscious access boundary" — continuous sensory processing
+        # "conscious access boundary" - continuous sensory processing
         # (hierarchy) produces an abstract representation that crosses
         # into discrete counterfactual reasoning (active inference).
         #
         # The hierarchy is the continuous generative model: it processes
         # at multiple timescales (fast→slow), generating prediction errors
-        # at each level. Only the top-level abstraction — temporally slow,
-        # semantically abstract — becomes input to discrete policy selection.
+        # at each level. Only the top-level abstraction - temporally slow,
+        # semantically abstract - becomes input to discrete policy selection.
         # This is where consciousness lives per the minimal theory.
         sensory_expanded = np.zeros(64)  # Match hierarchy level-0 input_dim
         sensory_expanded[: len(raw_observation)] = raw_observation
@@ -1540,7 +1542,7 @@ class EnhancedGlobalWorkspace:
                 sensory_expanded
             )
         )
-        # The top level's beliefs ARE the discrete observation — the
+        # The top level's beliefs ARE the discrete observation - the
         # boundary between continuous processing and discrete inference
         top_level = self.active_inference.hierarchical_processor.levels[-1]
         abstracted = self.active_inference._encode_observation_vector(top_level.beliefs)
@@ -1713,7 +1715,7 @@ class EnhancedGlobalWorkspace:
             if attention_schema_state
             else "none"
         )
-        schema_focus = (
+        (
             attention_schema_state.current_focus.summary[:30] + "..."
             if attention_schema_state and attention_schema_state.current_focus
             else "none"
@@ -1726,7 +1728,7 @@ class EnhancedGlobalWorkspace:
         vfe = inference_result.variational_free_energy if inference_result else 0.0
 
         logger.info(
-            f"🌊 Cycle {self.cycle_count} complete ({elapsed_ms:.1f}ms): "
+            f"Cycle {self.cycle_count} complete ({elapsed_ms:.1f}ms): "
             f"conscious={state.is_conscious}, "
             f"ignitions={state.ignition_events}, "
             f"integration={state.integration_level:.3f}, "
@@ -1736,7 +1738,7 @@ class EnhancedGlobalWorkspace:
             f"loop: depth={state.epistemic_depth}, "
             f"bind={state.binding_quality:.3f}, "
             f"q={state.beautiful_loop_quality:.3f}, "
-            f"🏛️ damasio: bind={state.self_world_binding:.3f}, "
+            f"damasio: bind={state.self_world_binding:.3f}, "
             f"fok={state.feeling_of_knowing:.3f}"
         )
 
@@ -2161,7 +2163,6 @@ class EnhancedGlobalWorkspace:
 # ============================================================================
 
 if __name__ == "__main__":
-    import asyncio
 
     logging.basicConfig(level=logging.DEBUG)
 
@@ -2175,7 +2176,7 @@ if __name__ == "__main__":
         )
 
         # Create test candidates
-        print("\n📥 Creating test candidates...\n")
+        print("\n Creating test candidates...\n")
 
         candidates = [
             # High salience - should win
@@ -2220,10 +2221,10 @@ if __name__ == "__main__":
             ),
         ]
 
-        print(f"   Created {len(candidates)} candidates\n")
+        print(f"  Created {len(candidates)} candidates\n")
 
         # Run consciousness cycle
-        print("🌊 Running consciousness cycle...\n")
+        print("Running consciousness cycle...\n")
 
         neural_signals = {
             "snn": np.random.rand(100) * 0.8,
@@ -2241,42 +2242,42 @@ if __name__ == "__main__":
 
         # Report results
         print("\nCONSCIOUSNESS STATE:")
-        print(f"   Is conscious: {state.is_conscious}")
-        print(f"   Ignition events: {state.ignition_events}")
-        print(f"   Integration level: {state.integration_level:.3f}")
-        print(f"   Attention focus: {state.attention_focus}")
-        print(f"   Stream position: {state.stream_position}")
+        print(f"  Is conscious: {state.is_conscious}")
+        print(f"  Ignition events: {state.ignition_events}")
+        print(f"  Integration level: {state.integration_level:.3f}")
+        print(f"  Attention focus: {state.attention_focus}")
+        print(f"  Stream position: {state.stream_position}")
 
         if state.primary_content:
-            print(f"\nPRIMARY CONSCIOUS CONTENT:")
-            print(f"   Summary: {state.primary_content.candidate.summary}")
-            print(f"   Salience: {state.primary_content.salience:.3f}")
-            print(f"   Source: {state.primary_content.candidate.source.value}")
+            print("\nPRIMARY CONSCIOUS CONTENT:")
+            print(f"  Summary: {state.primary_content.candidate.summary}")
+            print(f"  Salience: {state.primary_content.salience:.3f}")
+            print(f"  Source: {state.primary_content.candidate.source.value}")
 
-        print(f"\n🏆 ALL WINNERS ({len(state.workspace_contents)}):")
+        print(f"\n ALL WINNERS ({len(state.workspace_contents)}):")
         for i, content in enumerate(state.workspace_contents):
             print(
-                f"   {i+1}. {content.candidate.summary[:40]}... "
+                f"  {i+1}. {content.candidate.summary[:40]}... "
                 f"(salience: {content.salience:.3f})"
             )
 
-        print(f"\n💤 UNCONSCIOUS BUFFER ({len(workspace.unconscious_buffer)}):")
+        print(f"\n UNCONSCIOUS BUFFER ({len(workspace.unconscious_buffer)}):")
         for candidate in workspace.unconscious_buffer:
             print(
-                f"   - {candidate.summary[:40]}... "
+                f"  - {candidate.summary[:40]}... "
                 f"(activation: {candidate.activation_level:.3f})"
             )
 
         # Get statistics
         stats = workspace.get_statistics()
-        print("\n📈 WORKSPACE STATISTICS:")
-        print(f"   Total cycles: {stats['cycle_count']}")
-        print(f"   Stream length: {stats['stream_length']}")
+        print("\n WORKSPACE STATISTICS:")
+        print(f"  Total cycles: {stats['cycle_count']}")
+        print(f"  Stream length: {stats['stream_length']}")
         print(
-            f"   Bottleneck avg candidates: {stats['bottleneck'].get('avg_candidates', 0):.1f}"
+            f"  Bottleneck avg candidates: {stats['bottleneck'].get('avg_candidates', 0):.1f}"
         )
         print(
-            f"   Ignition sustain rate: {stats['ignition'].get('sustain_rate', 0):.2%}"
+            f"  Ignition sustain rate: {stats['ignition'].get('sustain_rate', 0):.2%}"
         )
 
         print("\nEnhanced Global Workspace test complete!")

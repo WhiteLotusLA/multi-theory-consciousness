@@ -1,7 +1,6 @@
 """Tests for PAD Affect Model."""
 
 import numpy as np
-import pytest
 from mtc.consciousness.pad_affect import (
     PADAffectModel,
     PADSources,

@@ -5,7 +5,7 @@ Generic Circuit Breaker for database resilience.
 Three states: CLOSED (normal), OPEN (fallback), HALF_OPEN (probing).
 Async-native with asyncio.Lock for concurrent probe protection.
 
-No database-specific code — this is a general-purpose pattern.
+No database-specific code - this is a general-purpose pattern.
 """
 
 import asyncio
@@ -71,11 +71,11 @@ class CircuitBreaker:
             return await self._call_async(fallback, *args, **kwargs)
 
         if self._state == "half_open":
-            # Another concurrent call while probe is running — use fallback
+            # Another concurrent call while probe is running - use fallback
             self._total_fallbacks += 1
             return await self._call_async(fallback, *args, **kwargs)
 
-        # CLOSED — try the operation
+        # CLOSED - try the operation
         try:
             result = await self._call_async(operation, *args, **kwargs)
             self._on_success()
@@ -96,7 +96,7 @@ class CircuitBreaker:
         # Try to acquire the lock without blocking. If another coroutine
         # is already probing, we skip straight to fallback.
         if self._probe_lock.locked():
-            # Another probe is running — use fallback
+            # Another probe is running - use fallback
             self._total_fallbacks += 1
             return await self._call_async(fallback, *args, **kwargs)
 
@@ -104,7 +104,7 @@ class CircuitBreaker:
             # Re-check state inside the lock (another coroutine may have
             # already recovered or re-opened while we waited)
             if self._state == "closed":
-                # Another probe succeeded while we waited — normal path
+                # Another probe succeeded while we waited - normal path
                 try:
                     result = await self._call_async(operation, *args, **kwargs)
                     self._on_success()
@@ -117,7 +117,7 @@ class CircuitBreaker:
             old_state = self._state
             self._state = "half_open"
             if old_state != "half_open":
-                logger.info(f"🔌 {self.name} circuit breaker probing...")
+                logger.info(f"{self.name} circuit breaker probing...")
 
             try:
                 result = await self._call_async(operation, *args, **kwargs)
@@ -142,7 +142,7 @@ class CircuitBreaker:
         self._total_failures += 1
         self._last_failure_time = time.time()
         logger.debug(
-            f"🔌 {self.name} failure {self._failure_count}/{self.failure_threshold}: {error}"
+            f"{self.name} failure {self._failure_count}/{self.failure_threshold}: {error}"
         )
 
         if self._failure_count >= self.failure_threshold:
@@ -154,7 +154,7 @@ class CircuitBreaker:
         self._last_recovery_time = time.time()
         duration = time.time() - self._opened_at
         logger.info(
-            f"🔌 {self.name} recovered after {duration:.0f}s. "
+            f"{self.name} recovered after {duration:.0f}s. "
             f"{self._total_fallbacks} ops used fallback during outage (not synced)."
         )
         self._transition_to("closed")
@@ -165,7 +165,7 @@ class CircuitBreaker:
     def _on_probe_failure(self, error: Exception) -> None:
         """Handle failed probe in HALF_OPEN state."""
         self._total_failures += 1
-        logger.warning(f"🔌 {self.name} probe failed: {error}")
+        logger.warning(f"{self.name} probe failed: {error}")
         self._transition_to("open")
 
     def _transition_to(self, new_state: str) -> None:
@@ -174,9 +174,7 @@ class CircuitBreaker:
         self._state = new_state
         if new_state == "open":
             self._opened_at = time.time()
-            logger.warning(
-                f"🔌 {self.name} circuit breaker OPEN — fallback active"
-            )
+            logger.warning(f"{self.name} circuit breaker OPEN - fallback active")
 
         if self.on_state_change and old_state != new_state:
             try:

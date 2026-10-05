@@ -1,5 +1,5 @@
 """
-Causal Emergence Analyzer — Effective Information (Hoel 2013) & CE 2.0 (2025)
+Causal Emergence Analyzer - Effective Information (Hoel 2013) & CE 2.0 (2025)
 ==============================================================================
 
 Computes Effective Information across consciousness modules to test
@@ -30,9 +30,8 @@ Author: MTC Contributors
 import logging
 import time
 import numpy as np
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
-from collections import deque
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +165,7 @@ def build_macro_tpm(
     """
     n_micro = micro_tpm.shape[0]
     k = len(partition)  # number of macro nodes
-    n_macro = 2 ** k
+    n_macro = 2**k
 
     # Build micro-to-macro state mapping
     def micro_to_macro(micro_state: int) -> int:
@@ -175,7 +174,7 @@ def build_macro_tpm(
             # Macro node g is ON if any member node is ON
             for node in group:
                 if (micro_state >> node) & 1:
-                    macro_state |= (1 << g)
+                    macro_state |= 1 << g
                     break
         return macro_state
 
@@ -261,6 +260,7 @@ def compute_causal_primitives(tpm: np.ndarray) -> float:
 @dataclass
 class CausalEmergenceResult:
     """Result of a causal emergence analysis."""
+
     micro_ei: float
     optimal_macro_ei: float
     optimal_partition: List[set]
@@ -331,14 +331,16 @@ class CausalEmergenceAnalyzer:
                 ei = compute_ei(macro_tpm)
                 cp = compute_causal_primitives(macro_tpm)
 
-            partition_results.append({
-                "partition": partition,
-                "label": partition_to_label(partition),
-                "n_groups": n_groups,
-                "n_macro_states": 2 ** n_groups,
-                "ei": ei,
-                "cp": cp,
-            })
+            partition_results.append(
+                {
+                    "partition": partition,
+                    "label": partition_to_label(partition),
+                    "n_groups": n_groups,
+                    "n_macro_states": 2**n_groups,
+                    "ei": ei,
+                    "cp": cp,
+                }
+            )
 
         # Step 4: Find optimal
         partition_results.sort(key=lambda r: r["ei"], reverse=True)
@@ -397,7 +399,6 @@ class CausalEmergenceAnalyzer:
         # Global bin = bin(mean(snn_bin, lsm_bin, htm_bin, cross_bin))
         macro_tpm = np.zeros((3, 3), dtype=np.float64)
         macro_counts = np.zeros(3, dtype=np.float64)
-        alpha = 1.0
 
         for s in range(81):
             # Extract per-group bins from state index
@@ -463,16 +464,24 @@ class CausalEmergenceAnalyzer:
                 "causal_emergence": r.causal_emergence,
                 "ce2_delta_cp": r.ce2_delta_cp,
                 "all_partitions": [
-                    {"label": p["label"], "ei": p["ei"], "cp": p["cp"],
-                     "n_groups": p["n_groups"]}
+                    {
+                        "label": p["label"],
+                        "ei": p["ei"],
+                        "cp": p["cp"],
+                        "n_groups": p["n_groups"],
+                    }
                     for p in r.all_partitions
                 ],
                 "phi_comparison": r.phi_comparison,
             },
-            "oscillator_level": osc if osc else {
-                "warming_up": True,
-                "transitions_recorded": 0,
-            },
+            "oscillator_level": (
+                osc
+                if osc
+                else {
+                    "warming_up": True,
+                    "transitions_recorded": 0,
+                }
+            ),
             "warming_up": False,
             "analysis_count": self._analysis_count,
             "computation_time_ms": r.computation_time_ms,

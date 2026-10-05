@@ -3,8 +3,7 @@
 
 import asyncio
 import pytest
-import time
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 
 class TestCircuitBreakerStates:
@@ -40,7 +39,7 @@ class TestCircuitBreakerStates:
 
         # 3 failures -> opens
         for _ in range(3):
-            result = await cb.call(op, fb)
+            await cb.call(op, fb)
         assert cb.state == "open"
 
     @pytest.mark.asyncio
@@ -187,12 +186,13 @@ class TestCircuitBreakerConcurrency:
             return "probed"
 
         call_count = 0
+
         async def counting_fallback(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             return "fallback"
 
-        # Launch 5 concurrent calls — only 1 should probe
+        # Launch 5 concurrent calls - only 1 should probe
         results = await asyncio.gather(
             cb.call(slow_probe, counting_fallback),
             cb.call(slow_probe, counting_fallback),
@@ -214,6 +214,7 @@ class TestCircuitBreakerNotification:
         from mtc.core.circuit_breaker import CircuitBreaker
 
         changes = []
+
         def on_change(name, old_state, new_state, stats):
             changes.append((name, old_state, new_state))
 

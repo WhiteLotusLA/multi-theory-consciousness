@@ -19,6 +19,7 @@ Key Features:
 """
 
 import numpy as np
+
 try:
     import torch
 except ImportError:
@@ -28,9 +29,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import logging
-from scipy import stats
-from scipy.spatial import distance
-from scipy.signal import hilbert, coherence
 import asyncio
 from collections import deque
 from enum import Enum
@@ -141,9 +139,9 @@ class ConsciousnessMeasurementFramework:
             "metacognitive_depth": 0.4,
         }
 
-        logger.info(f"Consciousness Measurement Framework initialized")
+        logger.info("Consciousness Measurement Framework initialized")
         logger.info(
-            f"   Tracking 20 indicators across {snn_neurons + lsm_neurons + htm_columns*32} neural units"
+            f"  Tracking 20 indicators across {snn_neurons + lsm_neurons + htm_columns*32} neural units"
         )
 
     async def measure_consciousness(
@@ -295,7 +293,6 @@ class ConsciousnessMeasurementFramework:
         2. Compute Transition Probability Matrix (TPM) from recent history
         3. Use PyPhi to calculate exact Phi of this macro-system
         """
-        import pyphi
 
         try:
             full_state = np.concatenate(
@@ -656,7 +653,7 @@ class ConsciousnessMeasurementFramework:
         if len(self.measurement_history) > 30:
             for attr in metric_attrs:
                 historical_values = [getattr(m, attr) for m in self.measurement_history]
-                mean = np.mean(historical_values)
+                np.mean(historical_values)
                 std = np.std(historical_values)
                 margin = 1.96 * std / np.sqrt(len(historical_values))
 
@@ -892,7 +889,7 @@ def test_consciousness_measurement():
     print("=" * 60)
 
     # Initialize framework
-    framework = ConsciousnessMeasurementFramework()
+    ConsciousnessMeasurementFramework()
 
     # CRITICAL: Tests must use real neural data or be clearly marked as unit tests!
     print("WARNING: This test requires real neural data from production networks!")

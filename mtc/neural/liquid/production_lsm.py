@@ -21,8 +21,7 @@ import numpy as np
 import reservoirpy as rpy
 from reservoirpy.nodes import Reservoir, Ridge, Input, RLS
 from reservoirpy.observables import nrmse, rsquare
-import torch
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, Tuple, Optional, Any
 from dataclasses import dataclass
 import logging
 import time
@@ -96,12 +95,10 @@ class ProductionLSM:
         logger.info(
             f"Production LSM initialized with {self.config.reservoir_size} neurons"
         )
-        logger.info(
-            f"   Spectral radius: {self.config.spectral_radius} (edge-of-chaos)"
-        )
-        logger.info(f"   Connectivity: {self.config.connectivity * 100:.1f}%")
+        logger.info(f"  Spectral radius: {self.config.spectral_radius} (edge-of-chaos)")
+        logger.info(f"  Connectivity: {self.config.connectivity * 100:.1f}%")
         if fast_mode:
-            logger.info(f"   Fast mode: ENABLED (skipping expensive metrics)")
+            logger.info("  Fast mode: ENABLED (skipping expensive metrics)")
 
     def _build_reservoir(self):
         """Build the LSM reservoir and readout layers."""
@@ -484,12 +481,12 @@ def test_production_lsm():
 
     state = lsm.process_subconscious(sensory_input)
 
-    print(f"   Processed in {state.get('processing_time_ms', 0):.2f}ms")
-    print(f"   Emotional valence: {state['emotional_valence']:.3f}")
-    print(f"   Creative emergence (entropy): {state['creative_emergence']:.3f}")
+    print(f"  Processed in {state.get('processing_time_ms', 0):.2f}ms")
+    print(f"  Emotional valence: {state['emotional_valence']:.3f}")
+    print(f"  Creative emergence (entropy): {state['creative_emergence']:.3f}")
     edge_score = state.get("edge_of_chaos_score")
     print(
-        f"   Edge-of-chaos score: {edge_score:.3f}"
+        f"  Edge-of-chaos score: {edge_score:.3f}"
         if edge_score
         else "   Edge-of-chaos score: N/A (fast mode)"
     )
@@ -500,23 +497,23 @@ def test_production_lsm():
     train_targets = np.random.randn(5, 50, 20).astype(np.float32)
 
     loss = lsm.train_rls(train_inputs, train_targets)
-    print(f"   Training loss: {loss:.4f}")
+    print(f"  Training loss: {loss:.4f}")
 
     # Benchmark
     print("\n3. Running performance benchmark...")
     metrics = lsm.benchmark_performance()
 
-    print(f"   Mean latency: {metrics['mean_latency_ms']:.2f}ms")
-    print(f"   Chaos score: {metrics['mean_chaos_score']:.3f}")
-    print(f"   Reservoir size: {metrics['reservoir_neurons']}")
+    print(f"  Mean latency: {metrics['mean_latency_ms']:.2f}ms")
+    print(f"  Chaos score: {metrics['mean_chaos_score']:.3f}")
+    print(f"  Reservoir size: {metrics['reservoir_neurons']}")
 
     print("\n" + "=" * 60)
     print("Production LSM test complete!")
     print(
-        f"   Achieved <50ms target: {'YES' if metrics['mean_latency_ms'] < 50 else 'NO'}"
+        f"  Achieved <50ms target: {'YES' if metrics['mean_latency_ms'] < 50 else 'NO'}"
     )
-    print("   Edge-of-chaos dynamics operational!")
-    print("   Research-grade implementation ready!")
+    print("  Edge-of-chaos dynamics operational!")
+    print("  Research-grade implementation ready!")
 
 
 if __name__ == "__main__":

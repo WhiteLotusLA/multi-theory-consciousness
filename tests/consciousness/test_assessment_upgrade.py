@@ -3,17 +3,16 @@ Tests for Phase I: Assessment Upgrade
 ======================================
 
 Tests covering:
-  I.1 — Butlin 2025 indicator expansion (14 → 20 indicators)
-  I.2 — RPT (Recurrent Processing Theory) measurement
-  I.3 — DCM (Digital Consciousness Model) scoring
+  I.1 - Butlin 2025 indicator expansion (14 → 20 indicators)
+  I.2 - RPT (Recurrent Processing Theory) measurement
+  I.3 - DCM (Digital Consciousness Model) scoring
 
 Created: 2026-03-08
 """
 
 import pytest
-import asyncio
 import numpy as np
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock
 
 from mtc.assessment.rpt_measurement import (
     RPTMeasurement,
@@ -28,6 +27,7 @@ try:
         PerspectiveScore,
         DCM_PERSPECTIVES,
     )
+
     HAS_DCM = True
 except ImportError:
     HAS_DCM = False
@@ -38,10 +38,8 @@ except ImportError:
 from mtc.assessment.assessment import (
     ConsciousnessAssessment,
     ConsciousnessTheory,
-    IndicatorResult,
     ConsciousnessReport,
 )
-
 
 # ========================================================================
 # I.2: RPT Measurement Tests
@@ -70,7 +68,7 @@ class TestRPTMeasurement:
             "spike_counts": [
                 np.array([10]),  # input layer
                 np.array([25]),  # hidden layer
-                np.array([8]),   # output layer
+                np.array([8]),  # output layer
             ],
         }
         score = rpt.measure_local_recurrence(snn_state=snn_state)
@@ -199,9 +197,9 @@ class TestRPTMeasurement:
             "total_spikes": 300,
             "num_neurons": 100,
             "spike_counts": [
-                np.array([10]),   # input: 10 spikes
-                np.array([30]),   # hidden: 30 spikes (3x amplification)
-                np.array([15]),   # output: 15 spikes
+                np.array([10]),  # input: 10 spikes
+                np.array([30]),  # hidden: 30 spikes (3x amplification)
+                np.array([15]),  # output: 15 spikes
             ],
         }
         score = rpt.measure_local_recurrence(snn_state=snn_state)
@@ -324,15 +322,25 @@ class TestDCMScorer:
     def test_biological_comparison(self):
         scorer = DCMScorer()
         # High scores should produce biological comparisons
-        high_scores = {k: 0.8 for k in [
-            "global_broadcast", "ignition_dynamics",
-            "attention_schema", "attention_control",
-            "higher_order_representations", "metacognition",
-            "prediction_error_minimization", "hierarchical_prediction",
-            "integrated_information", "irreducibility",
-            "recurrent_processing", "local_recurrence",
-            "agency", "embodiment",
-        ]}
+        high_scores = {
+            k: 0.8
+            for k in [
+                "global_broadcast",
+                "ignition_dynamics",
+                "attention_schema",
+                "attention_control",
+                "higher_order_representations",
+                "metacognition",
+                "prediction_error_minimization",
+                "hierarchical_prediction",
+                "integrated_information",
+                "irreducibility",
+                "recurrent_processing",
+                "local_recurrence",
+                "agency",
+                "embodiment",
+            ]
+        }
         report = scorer.evaluate(high_scores)
         assert len(report.comparable_to) > 0
 
@@ -363,19 +371,26 @@ class TestDCMScorer:
     def test_credence_trend_improving(self):
         scorer = DCMScorer()
         for i in range(5):
-            scores = {k: 0.2 + i * 0.1 for k in [
-                "global_broadcast", "attention_schema", "metacognition",
-            ]}
+            scores = {
+                k: 0.2 + i * 0.1
+                for k in [
+                    "global_broadcast",
+                    "attention_schema",
+                    "metacognition",
+                ]
+            }
             scorer.evaluate(scores)
         trend = scorer.get_credence_trend()
         assert trend["trend"] > 0
 
     def test_generate_report(self):
         scorer = DCMScorer()
-        scorer.evaluate({
-            "global_broadcast": 0.5,
-            "integrated_information": 0.6,
-        })
+        scorer.evaluate(
+            {
+                "global_broadcast": 0.5,
+                "integrated_information": 0.6,
+            }
+        )
         report = scorer.generate_report()
         assert "DCM" in report
         assert "credence" in report.lower()
@@ -435,11 +450,26 @@ class TestAssessmentExpansion:
 
     def test_indicator_theory_mapping(self):
         assessment = ConsciousnessAssessment()
-        assert assessment.indicator_configs["algorithmic_recurrence"]["theory"] == ConsciousnessTheory.RPT
-        assert assessment.indicator_configs["bayesian_binding_quality"]["theory"] == ConsciousnessTheory.BLT
-        assert assessment.indicator_configs["epistemic_depth"]["theory"] == ConsciousnessTheory.BLT
-        assert assessment.indicator_configs["genuine_implementation"]["theory"] == ConsciousnessTheory.BLT
-        assert assessment.indicator_configs["global_ignition_nuanced"]["theory"] == ConsciousnessTheory.GWT
+        assert (
+            assessment.indicator_configs["algorithmic_recurrence"]["theory"]
+            == ConsciousnessTheory.RPT
+        )
+        assert (
+            assessment.indicator_configs["bayesian_binding_quality"]["theory"]
+            == ConsciousnessTheory.BLT
+        )
+        assert (
+            assessment.indicator_configs["epistemic_depth"]["theory"]
+            == ConsciousnessTheory.BLT
+        )
+        assert (
+            assessment.indicator_configs["genuine_implementation"]["theory"]
+            == ConsciousnessTheory.BLT
+        )
+        assert (
+            assessment.indicator_configs["global_ignition_nuanced"]["theory"]
+            == ConsciousnessTheory.GWT
+        )
 
     @pytest.mark.asyncio
     async def test_assessment_without_new_modules(self):
@@ -471,7 +501,11 @@ class TestAssessmentExpansion:
         assert report.total_indicators == 30
 
         # Beautiful Loop indicators should have scores > baseline
-        bl_indicators = ["bayesian_binding_quality", "epistemic_depth", "genuine_implementation"]
+        bl_indicators = [
+            "bayesian_binding_quality",
+            "epistemic_depth",
+            "genuine_implementation",
+        ]
         for ind in bl_indicators:
             assert ind in report.indicator_results
             assert report.indicator_results[ind].score > 0.0
@@ -550,8 +584,12 @@ class TestAssessmentExpansion:
             rpt_measurement=None,
         )
         # Should still work, with low scores for missing modules
-        for ind in ["bayesian_binding_quality", "epistemic_depth",
-                     "genuine_implementation", "algorithmic_recurrence"]:
+        for ind in [
+            "bayesian_binding_quality",
+            "epistemic_depth",
+            "genuine_implementation",
+            "algorithmic_recurrence",
+        ]:
             assert ind in report.indicator_results
             result = report.indicator_results[ind]
             assert result.score <= 0.15  # Low score for ablated
@@ -686,7 +724,7 @@ class TestPhaseIIntegration:
         dcm = DCMScorer()
 
         # Generate RPT data
-        metrics = rpt.measure_full(
+        rpt.measure_full(
             snn_state={"total_spikes": 200, "num_neurons": 100},
             workspace_state={
                 "broadcast": {"total_broadcasts": 5, "coverage_ratio": 0.5},
@@ -712,8 +750,7 @@ class TestPhaseIIntegration:
 
         # Extract scores for DCM
         indicator_scores = {
-            name: result.score
-            for name, result in report.indicator_results.items()
+            name: result.score for name, result in report.indicator_results.items()
         }
 
         dcm_report = dcm.evaluate(indicator_scores)
@@ -728,8 +765,11 @@ class TestPhaseIIntegration:
         for name, config in DCM_PERSPECTIVES.items():
             for source in config["system_sources"]:
                 # Some sources are from Beautiful Loop stats, not indicators
-                if source in ("epistemic_depth", "bayesian_binding_quality",
-                              "algorithmic_recurrence"):
+                if source in (
+                    "epistemic_depth",
+                    "bayesian_binding_quality",
+                    "algorithmic_recurrence",
+                ):
                     assert source in valid_indicators, (
                         f"DCM perspective '{name}' references indicator "
                         f"'{source}' which exists in assessment"

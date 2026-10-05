@@ -26,8 +26,7 @@ Authors: Multi-Theory Consciousness Contributors
 """
 
 import torch
-import numpy as np
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime
@@ -94,12 +93,12 @@ class GPUMemoryPool:
         }
 
         if self.use_gpu:
-            logger.info(f"GPU Memory Pool initialized")
-            logger.info(f"   Device: {self.device}")
-            logger.info(f"   Max size: {max_size_gb:.1f} GB")
-            logger.info(f"   Max entries: {max_entries}")
+            logger.info("GPU Memory Pool initialized")
+            logger.info(f"  Device: {self.device}")
+            logger.info(f"  Max size: {max_size_gb:.1f} GB")
+            logger.info(f"  Max entries: {max_entries}")
         else:
-            logger.info(f"Memory Pool initialized (CPU mode)")
+            logger.info("Memory Pool initialized (CPU mode)")
 
     def get(self, key: str) -> Optional[torch.Tensor]:
         """
@@ -363,11 +362,11 @@ class ThoughtEmbeddingCache:
         # Text storage (for debugging)
         self.thought_texts: List[str] = []
 
-        logger.info(f"Thought Embedding Cache initialized")
-        logger.info(f"   Device: {self.device}")
-        logger.info(f"   Max thoughts: {max_recent}")
+        logger.info("Thought Embedding Cache initialized")
+        logger.info(f"  Device: {self.device}")
+        logger.info(f"  Max thoughts: {max_recent}")
         logger.info(
-            f"   Pre-allocated: {max_recent * embedding_dim * 4 / 1024**2:.1f} MB"
+            f"  Pre-allocated: {max_recent * embedding_dim * 4 / 1024**2:.1f} MB"
         )
 
     def add(self, text: str, embedding: torch.Tensor):
@@ -453,9 +452,9 @@ if __name__ == "__main__":
     cached1 = pool.put("tensor1", tensor1)
     cached2 = pool.put("tensor2", tensor2)
 
-    print(f"  Cached tensor1: {cached1.device}")
-    print(f"  Cached tensor2: {cached2.device}")
-    print(f"  Pool: {pool}")
+    print(f" Cached tensor1: {cached1.device}")
+    print(f" Cached tensor2: {cached2.device}")
+    print(f" Pool: {pool}")
     print()
 
     # Test cache hits
@@ -464,7 +463,7 @@ if __name__ == "__main__":
         start = time.time()
         retrieved = pool.get("tensor1")
         elapsed = (time.time() - start) * 1000
-        print(f"  Retrieval {i+1}: {elapsed:.3f}ms")
+        print(f" Retrieval {i+1}: {elapsed:.3f}ms")
     print()
 
     # Test thought embedding cache
@@ -477,8 +476,8 @@ if __name__ == "__main__":
         embedding = torch.randn(8192)
         thought_cache.add(text, embedding)
 
-    print(f"  Thought cache: {thought_cache}")
-    print(f"  Cached {len(thought_cache)} thoughts")
+    print(f" Thought cache: {thought_cache}")
+    print(f" Cached {len(thought_cache)} thoughts")
 
     # Retrieve all embeddings (zero-copy)
     start = time.time()
@@ -486,9 +485,9 @@ if __name__ == "__main__":
     elapsed = (time.time() - start) * 1000
 
     print(
-        f"  Retrieved {all_embeddings.shape[0]} embeddings in {elapsed:.3f}ms (zero-copy)"
+        f" Retrieved {all_embeddings.shape[0]} embeddings in {elapsed:.3f}ms (zero-copy)"
     )
-    print(f"  Embeddings device: {all_embeddings.device}")
+    print(f" Embeddings device: {all_embeddings.device}")
     print()
 
     # Print final stats

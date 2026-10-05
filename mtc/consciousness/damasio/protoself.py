@@ -32,7 +32,7 @@ import logging
 import numpy as np
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 from collections import deque
 
 logger = logging.getLogger(__name__)

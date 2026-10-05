@@ -9,7 +9,6 @@ Task 7 of the consciousness expansion plan.
 """
 
 import asyncio
-import numpy as np
 import pytest
 
 from mtc.assessment.assessment import (
@@ -17,10 +16,10 @@ from mtc.assessment.assessment import (
     NormalizedAssessmentResult,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def assessment():
@@ -32,17 +31,18 @@ def assessment():
 # Unit tests for get_normalized_score (pure math, no async)
 # ---------------------------------------------------------------------------
 
+
 class TestGetNormalizedScore:
     """Tests for the static get_normalized_score method."""
 
     def test_noise_baseline_method_exists(self, assessment):
         """The ConsciousnessAssessment class must expose run_noise_baseline."""
-        assert hasattr(assessment, "run_noise_baseline"), (
-            "ConsciousnessAssessment is missing the run_noise_baseline method"
-        )
-        assert asyncio.iscoroutinefunction(assessment.run_noise_baseline), (
-            "run_noise_baseline must be an async method"
-        )
+        assert hasattr(
+            assessment, "run_noise_baseline"
+        ), "ConsciousnessAssessment is missing the run_noise_baseline method"
+        assert asyncio.iscoroutinefunction(
+            assessment.run_noise_baseline
+        ), "run_noise_baseline must be an async method"
 
     def test_get_normalized_score_subtracts_baseline(self):
         """
@@ -50,9 +50,7 @@ class TestGetNormalizedScore:
         normalized = (0.8 - 0.3) / (1.0 - 0.3) = 0.5 / 0.7 ~= 0.714
         """
         result = ConsciousnessAssessment.get_normalized_score(0.8, 0.3)
-        assert abs(result - 0.7142857142857143) < 1e-6, (
-            f"Expected ~0.714, got {result}"
-        )
+        assert abs(result - 0.7142857142857143) < 1e-6, f"Expected ~0.714, got {result}"
 
     def test_get_normalized_score_floors_at_zero(self):
         """
@@ -91,6 +89,7 @@ class TestGetNormalizedScore:
 # Async tests for noise baseline
 # ---------------------------------------------------------------------------
 
+
 class TestNoiseBaseline:
     """Tests that verify the noise baseline machinery."""
 
@@ -109,21 +108,17 @@ class TestNoiseBaseline:
         baselines = await assessment.run_noise_baseline(iterations=3)
 
         # Must return a score for every configured indicator
-        assert set(baselines.keys()) == set(assessment.indicator_configs.keys()), (
-            "Baseline keys must match indicator config keys"
-        )
+        assert set(baselines.keys()) == set(
+            assessment.indicator_configs.keys()
+        ), "Baseline keys must match indicator config keys"
 
         high_baseline_count = 0
         for name, score in baselines.items():
-            assert 0.0 <= score <= 1.0, (
-                f"Baseline for '{name}' out of range: {score}"
-            )
+            assert 0.0 <= score <= 1.0, f"Baseline for '{name}' out of range: {score}"
             if score >= 0.85:
                 high_baseline_count += 1
                 # A noise-saturated indicator must normalize to 0
-                normalized = ConsciousnessAssessment.get_normalized_score(
-                    score, score
-                )
+                normalized = ConsciousnessAssessment.get_normalized_score(score, score)
                 assert normalized == 0.0, (
                     f"Broken indicator '{name}' (baseline={score:.3f}) "
                     f"should normalize to 0.0, got {normalized}"
@@ -165,6 +160,7 @@ class TestNoiseBaseline:
 # ---------------------------------------------------------------------------
 # Async tests for the full normalized assessment pipeline
 # ---------------------------------------------------------------------------
+
 
 class TestNormalizedAssessment:
     """Tests for run_normalized_assessment end-to-end."""
@@ -231,6 +227,4 @@ class TestNormalizedAssessment:
         )
         assert result.raw_report is not None
         assert result.raw_report.overall_score >= 0.0
-        assert result.raw_report.total_indicators == len(
-            assessment.indicator_configs
-        )
+        assert result.raw_report.total_indicators == len(assessment.indicator_configs)

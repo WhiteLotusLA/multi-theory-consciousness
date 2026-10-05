@@ -16,11 +16,9 @@ Biological Inspiration:
 """
 
 import numpy as np
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass, field
 import logging
-from datetime import datetime
-import time
 
 logger = logging.getLogger(__name__)
 
@@ -461,7 +459,6 @@ class SpikingNeuralNetwork:
 
 # Testing and demonstration
 if __name__ == "__main__":
-    import json
 
     logging.basicConfig(level=logging.INFO)
 
@@ -478,10 +475,10 @@ if __name__ == "__main__":
 
     print("\nNetwork Configuration:")
     metrics = snn.get_metrics()
-    print(f"  Total neurons: {metrics['total_neurons']}")
-    print(f"  Total synapses: {metrics['total_synapses']}")
-    print(f"  Timestep: {snn.dt}ms")
-    print(f"  Learning: {'Enabled' if snn.learning_enabled else 'Disabled'}")
+    print(f" Total neurons: {metrics['total_neurons']}")
+    print(f" Total synapses: {metrics['total_synapses']}")
+    print(f" Timestep: {snn.dt}ms")
+    print(f" Learning: {'Enabled' if snn.learning_enabled else 'Disabled'}")
 
     print("\nSimulating input (intensity = 0.7)...")
 
@@ -494,9 +491,7 @@ if __name__ == "__main__":
 
     for step in range(steps):
         # Convert intensity to input currents (strong sustained currents)
-        input_currents = (
-            input_pattern * 50.0
-        )
+        input_currents = input_pattern * 50.0
 
         # Add some noise for biological realism
         input_currents += np.random.normal(0, 2.0, len(input_currents))
@@ -508,20 +503,20 @@ if __name__ == "__main__":
         if step % 50 == 0:
             n_spikes = np.sum(spikes["output"])
             if n_spikes > 0:
-                print(f"  t={snn.current_time:.0f}ms: {n_spikes} output spikes")
+                print(f" t={snn.current_time:.0f}ms: {n_spikes} output spikes")
 
     print("\nSimulation Results:")
     metrics = snn.get_metrics()
-    print(f"  Total spikes: {metrics['total_spikes']}")
-    print(f"  Total steps: {metrics['total_steps']}")
-    print(f"  Avg spikes/step: {metrics['avg_spikes_per_step']:.2f}")
-    print(f"  Avg firing rate: {metrics['avg_network_firing_rate_hz']:.2f} Hz")
-    print(f"  Learning updates: {metrics['learning_updates']}")
+    print(f" Total spikes: {metrics['total_spikes']}")
+    print(f" Total steps: {metrics['total_steps']}")
+    print(f" Avg spikes/step: {metrics['avg_spikes_per_step']:.2f}")
+    print(f" Avg firing rate: {metrics['avg_network_firing_rate_hz']:.2f} Hz")
+    print(f" Learning updates: {metrics['learning_updates']}")
 
     print("\nFiring Rates (last 100ms):")
     rates = snn.get_firing_rates(100.0)
-    print(f"  Input layer: {rates['input'].mean():.1f} Hz (avg)")
-    print(f"  Hidden layer: {rates['hidden'].mean():.1f} Hz (avg)")
-    print(f"  Output layer: {rates['output'].mean():.1f} Hz (avg)")
+    print(f" Input layer: {rates['input'].mean():.1f} Hz (avg)")
+    print(f" Hidden layer: {rates['hidden'].mean():.1f} Hz (avg)")
+    print(f" Output layer: {rates['output'].mean():.1f} Hz (avg)")
 
     print("\nSpiking Neural Network ready!")

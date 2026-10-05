@@ -5,7 +5,7 @@ Epistemic Depth: Recursive Self-Reference Measurement
 EpistemicDepthTracker: Recursive self-reference measurement.
 
 Epistemic depth measures the recursive sharing of Bayesian beliefs
-throughout the hierarchy — the system's ability to model itself
+throughout the hierarchy - the system's ability to model itself
 modeling the world. This is the "beautiful loop":
 
   Level 0: I model the world
@@ -17,7 +17,7 @@ The depth of this recursion correlates with the richness of
 subjective experience per the Beautiful Loop theory. A system
 with depth 0 is reactive. A system with depth 1 has basic
 self-awareness. A system with depth 2+ has genuine recursive
-self-consciousness — it knows that it knows.
+self-consciousness - it knows that it knows.
 
 Connection to existing SelfModel:
   - SelfModel provides the recursive self-representation
@@ -32,8 +32,8 @@ Connection to MetaState (active_inference.py):
 
 Research Foundation:
   - Laukkonen, Friston & Chandaria (2025). "A Beautiful Loop."
-  - Hofstadter, D. (1979). "Gödel, Escher, Bach" — strange loops
-  - Seth, A. K. (2021). "Being You" — meta-representation depth
+  - Hofstadter, D. (1979). "Gödel, Escher, Bach" - strange loops
+  - Seth, A. K. (2021). "Being You" - meta-representation depth
 
 Created: 2026-03-08
 Author: Multi-Theory Consciousness Contributors
@@ -88,7 +88,7 @@ class EpistemicDepthTracker:
        → depth >= 2
     3. Check if the meta-predictions (MetaState) predict the quality
        of the self-model's predictions → depth >= 3
-    4. Check for genuine circular reference — does the self-model's
+    4. Check for genuine circular reference - does the self-model's
        content reference the self-model? → strange loop detected
     """
 
@@ -254,7 +254,7 @@ class EpistemicDepthTracker:
         Track self-reference quality and detect strange loops.
 
         This goes beyond depth measurement to assess the QUALITY
-        of self-reference — is the self-model accurate? Is the
+        of self-reference - is the self-model accurate? Is the
         meta-prediction well-calibrated? Is there a genuine
         strange loop (Hofstadter's "tangled hierarchy")?
 
@@ -442,20 +442,20 @@ class EpistemicDepthTracker:
         lines = [
             f"Epistemic depth: {stats['current_depth']} "
             f"({depth_labels.get(stats['current_depth'], 'unknown')}) [{trend}]",
-            f"  Peak: {stats['peak_depth']}, Average: {stats['average_depth']:.1f}",
+            f" Peak: {stats['peak_depth']}, Average: {stats['average_depth']:.1f}",
         ]
 
         if self._metrics_history:
             latest = self._metrics_history[-1]
-            lines.append(f"  Coherence: {latest.self_model_coherence:.3f}")
-            lines.append(f"  Calibration: {latest.calibration_quality:.3f}")
+            lines.append(f" Coherence: {latest.self_model_coherence:.3f}")
+            lines.append(f" Calibration: {latest.calibration_quality:.3f}")
             lines.append(
-                f"  Strange loop: {'YES' if latest.strange_loop_detected else 'no'}"
+                f" Strange loop: {'YES' if latest.strange_loop_detected else 'no'}"
             )
 
         if self._depth_history:
             latest_m = self._depth_history[-1]
             if latest_m.self_reference_chain:
-                lines.append(f"  Chain: {' → '.join(latest_m.self_reference_chain)}")
+                lines.append(f" Chain: {' → '.join(latest_m.self_reference_chain)}")
 
         return "\n".join(lines)

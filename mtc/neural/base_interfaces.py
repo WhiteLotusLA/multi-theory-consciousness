@@ -239,9 +239,7 @@ class NeuralSystemRegistry:
     def register(self, system: NeuralSystem) -> None:
         """Register a neural system."""
         self._systems[system.system_id] = system
-        logger.info(
-            f"Registered {system.system_type.value} system: {system.system_id}"
-        )
+        logger.info(f"Registered {system.system_type.value} system: {system.system_id}")
 
     def unregister(self, system_id: str) -> None:
         """Unregister a neural system."""

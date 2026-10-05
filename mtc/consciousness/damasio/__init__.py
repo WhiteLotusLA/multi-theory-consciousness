@@ -205,28 +205,28 @@ class DamasioLayers:
 
         if self._latest_protoself:
             ps = self._latest_protoself
-            lines.append(f"  Protoself:")
-            lines.append(f"    Stability: {ps.stability:.3f}")
-            lines.append(f"    Body delta: {ps.body_delta:.3f}")
-            lines.append(f"    Energy: {ps.body_state.energy_level:.3f}")
-            lines.append(f"    Pain: {ps.body_state.pain_signals:.3f}")
+            lines.append(" Protoself:")
+            lines.append(f"   Stability: {ps.stability:.3f}")
+            lines.append(f"   Body delta: {ps.body_delta:.3f}")
+            lines.append(f"   Energy: {ps.body_state.energy_level:.3f}")
+            lines.append(f"   Pain: {ps.body_state.pain_signals:.3f}")
 
         if self._latest_core:
             ce = self._latest_core
-            lines.append(f"  Core Consciousness:")
-            lines.append(f"    Self-world binding: {ce.self_world_binding:.3f}")
-            lines.append(f"    Feeling of knowing: {ce.feeling_of_knowing:.3f}")
-            lines.append(f"    Here-now salience: {ce.here_now_salience:.3f}")
-            lines.append(f"    Somatic markers: {len(ce.somatic_markers)}")
+            lines.append(" Core Consciousness:")
+            lines.append(f"   Self-world binding: {ce.self_world_binding:.3f}")
+            lines.append(f"   Feeling of knowing: {ce.feeling_of_knowing:.3f}")
+            lines.append(f"   Here-now salience: {ce.here_now_salience:.3f}")
+            lines.append(f"   Somatic markers: {len(ce.somatic_markers)}")
 
         if self._latest_extended:
             ext = self._latest_extended
             auto = ext.autobiographic_self
-            lines.append(f"  Extended Consciousness:")
-            lines.append(f"    Identity continuity: {auto.identity_continuity:.3f}")
-            lines.append(f"    Narrative coherence: {auto.narrative_coherence:.3f}")
-            lines.append(f"    Growth trajectory: {auto.growth_trajectory}")
-            lines.append(f"    Episodic resonance: {ext.episodic_resonance:.3f}")
+            lines.append(" Extended Consciousness:")
+            lines.append(f"   Identity continuity: {auto.identity_continuity:.3f}")
+            lines.append(f"   Narrative coherence: {auto.narrative_coherence:.3f}")
+            lines.append(f"   Growth trajectory: {auto.growth_trajectory}")
+            lines.append(f"   Episodic resonance: {ext.episodic_resonance:.3f}")
 
         return "\n".join(lines)
 

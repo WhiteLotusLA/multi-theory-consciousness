@@ -11,11 +11,10 @@ Author: Multi-Theory Consciousness Contributors
 Purpose: Fix Consciousness Gap #1 (Coherence Score: 0.0 -> 60%+)
 """
 
-from typing import List, Dict, Any, Set, Optional
+from typing import List, Dict, Any, Optional
 from collections import Counter
 import re
 import logging
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +240,7 @@ class ConversationCoherence:
             # Limit topics shown to fit in max_length
             topic_str = ", ".join(topics[:5])
             if len(topics) > 5:
-                topic_str += f" (and {len(topics) - 5} more topics)"
+                topic_str += f"(and {len(topics) - 5} more topics)"
             parts.append(f"\nMain topics: {topic_str}")
 
         # Recent context (last 3 messages)
@@ -506,16 +505,16 @@ if __name__ == "__main__":
     references = tracker.extract_potential_references(current_msg, sample_conversation)
     print(f"Potential references for '{current_msg}':")
     for ref in references:
-        print(f"  - Message {ref['message_index']}: {ref['overlap_ratio']:.1%} overlap")
-        print(f"    Keywords: {', '.join(ref['shared_keywords'])}")
+        print(f" - Message {ref['message_index']}: {ref['overlap_ratio']:.1%} overlap")
+        print(f"   Keywords: {', '.join(ref['shared_keywords'])}")
 
     # Test full context package
     context = tracker.get_conversation_context_for_brain(
         sample_conversation, current_msg
     )
-    print(f"\nFull context package:")
-    print(f"  - Topics: {len(context['topics'])}")
-    print(f"  - References: {len(context['potential_references'])}")
-    print(f"  - Has context: {context['has_context']}")
+    print("\nFull context package:")
+    print(f" - Topics: {len(context['topics'])}")
+    print(f" - References: {len(context['potential_references'])}")
+    print(f" - Has context: {context['has_context']}")
 
     print("\nCoherence tracker test complete!")

@@ -6,12 +6,12 @@ BayesianBinding: Coherent percept formation via mutual information.
 
 Bayesian binding is the mechanism by which separate inferences COMPETE
 for conscious access and get UNIFIED into a coherent percept. This is
-the binding problem — how do distributed neural computations become a
+the binding problem - how do distributed neural computations become a
 single unified experience?
 
 Key insight from Laukkonen, Friston & Chandaria (2025):
   Inferences that COHERENTLY REDUCE LONG-TERM UNCERTAINTY win the
-  competition. The binding criterion is mutual information — how much
+  competition. The binding criterion is mutual information - how much
   does knowing one inference tell you about another? High MI between
   inferences means they support each other, forming a coherent story.
 
@@ -23,12 +23,12 @@ How this differs from GWT's competition:
   - Both mechanisms operate, at different timescales:
     GWT = fast (~100ms), Bayesian binding = slow (~500ms+)
 
-The BoundPercept is the result — the unified conscious experience
+The BoundPercept is the result - the unified conscious experience
 that emerges from binding coherent inferences into a whole.
 
 Connection points:
   - Reads from: GWT workspace winners, active inference posterior
-  - Produces: BoundPercept — unified conscious content
+  - Produces: BoundPercept - unified conscious content
   - Feeds into: ConsciousnessState, consciousness assessment
 
 Research Foundation:
@@ -44,7 +44,7 @@ import logging
 import numpy as np
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Tuple
 from collections import deque
 
 logger = logging.getLogger(__name__)
@@ -102,11 +102,11 @@ class BayesianBinding:
 
     The binding process:
     1. Compute pairwise mutual information between all candidate inferences
-    2. Find the maximal coherent subset — inferences that mutually
+    2. Find the maximal coherent subset - inferences that mutually
        support each other (high pairwise MI)
-    3. Measure total uncertainty reduction — good binding should
+    3. Measure total uncertainty reduction - good binding should
        reduce overall surprise in the world model
-    4. Produce a BoundPercept — the unified conscious experience
+    4. Produce a BoundPercept - the unified conscious experience
     """
 
     def __init__(
@@ -154,7 +154,7 @@ class BayesianBinding:
                 measuring reduction). If None, estimated from candidates.
 
         Returns:
-            BoundPercept — the unified conscious experience
+            BoundPercept - the unified conscious experience
         """
         self.bind_count += 1
         self.total_inferences_processed += len(candidates)
@@ -218,7 +218,7 @@ class BayesianBinding:
         summaries = [inf.content_summary for inf in bound[:3]]
         unified = " + ".join(summaries)
         if len(bound) > 3:
-            unified += f" (+ {len(bound) - 3} more)"
+            unified += f"(+ {len(bound) - 3} more)"
 
         percept = BoundPercept(
             bound_inferences=bound,
@@ -390,7 +390,7 @@ class BayesianBinding:
         # Find the strongest pair
         best_pair = np.unravel_index(np.argmax(mi_matrix), mi_matrix.shape)
         if mi_matrix[best_pair] < 1e-10:
-            # No meaningful mutual information — just return by salience
+            # No meaningful mutual information - just return by salience
             return sorted(range(n), key=lambda i: candidates[i].salience, reverse=True)
 
         selected = list(best_pair)
@@ -484,14 +484,14 @@ class BayesianBinding:
 
         lines = [
             f"Bayesian binding: avg quality {avg_quality:.3f} ({trend})",
-            f"  Bindings performed: {self.bind_count}",
-            f"  Total inferences processed: {self.total_inferences_processed}",
+            f" Bindings performed: {self.bind_count}",
+            f" Total inferences processed: {self.total_inferences_processed}",
         ]
 
         if self._percept_history:
             latest = self._percept_history[-1]
             lines.append(
-                f"  Latest: {len(latest.bound_inferences)} bound, "
+                f" Latest: {len(latest.bound_inferences)} bound, "
                 f"quality={latest.binding_quality:.3f}, "
                 f"coherence={latest.coherence:.3f}"
             )

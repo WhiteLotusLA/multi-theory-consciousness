@@ -39,19 +39,16 @@ import logging
 import numpy as np
 import time
 import uuid
-from typing import Dict, Any, Optional, List, Tuple, Callable
+from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime
-from enum import Enum
-from collections import deque
 
 # pymdp for Active Inference
 # pymdp v1.0 ships a JAX-based Agent (pymdp.agent) and preserves the original
 # NumPy Agent in pymdp.legacy. We use the legacy API because:
-#   1. the system's model is small (8 states, 5 obs) — JAX XLA overhead makes it 4x slower
+#   1. the system's model is small (8 states, 5 obs) - JAX XLA overhead makes it 4x slower
 #   2. jax-metal (Apple Silicon GPU) doesn't support default_memory_space yet
 #   3. Legacy Agent is mutable, allowing attention precision modulation (agent.A = A_mod)
-#   4. The JAX Agent (equinox.Module) is immutable — would require full reconstruction per cycle
+#   4. The JAX Agent (equinox.Module) is immutable - would require full reconstruction per cycle
 # When the model scales or Metal backend matures, migrate to pymdp.agent.
 try:
     from pymdp.legacy import utils as pymdp_utils
@@ -234,7 +231,7 @@ class ConsciousPosteriorMapping:
 
     Per Whyte et al. (2026) minimal theory: all changes in conscious content
     must result from a change in the approximate posterior q(s). This dataclass
-    makes that commitment explicit — each piece of conscious content is paired
+    makes that commitment explicit - each piece of conscious content is paired
     with the posterior belief state that accompanied it.
 
     This enables testing the theory's prediction: no change in posterior →
@@ -243,7 +240,7 @@ class ConsciousPosteriorMapping:
 
     content_summary: str  # GWT winner's content description
     content_type: str  # Type of content (thought, emotion, etc.)
-    posterior_beliefs: np.ndarray  # q(s) — the inferred hidden states
+    posterior_beliefs: np.ndarray  # q(s) - the inferred hidden states
     most_likely_state: int  # argmax of posterior
     belief_entropy: float  # Entropy of posterior (uncertainty)
     prediction_error: float  # PE that accompanied this content
@@ -434,7 +431,7 @@ class HomeostaticDrives:
         self.valence_history: List[Dict[str, float]] = []
         self.free_energy_history: List[float] = []
 
-        logger.info(f"🫀 Homeostatic Drives initialized with {len(self.drives)} drives")
+        logger.info(f"Homeostatic Drives initialized with {len(self.drives)} drives")
 
     async def update_drives(self, activity: Dict[str, Any]) -> Dict[str, float]:
         """
@@ -448,7 +445,6 @@ class HomeostaticDrives:
             impact = self._calculate_activity_impact(activity, drive)
 
             # Update drive level
-            old_level = drive.current_level
             drive.current_level += impact
             drive.current_level = np.clip(drive.current_level, 0, 1)
 
@@ -848,12 +844,12 @@ class ActiveInferenceModule:
 
         logger.info(
             f"Active Inference Module initialized (FEP)\n"
-            f"   Hidden states: {self.num_states}\n"
-            f"   Observations: {self.num_observations}\n"
-            f"   Actions: {self.num_actions}\n"
-            f"   Planning horizon: {self.config.planning_horizon}\n"
-            f"   Homeostasis: {'ENABLED' if self.homeostatic_drives else 'DISABLED'}\n"
-            f"   Meta-inference (Beautiful Loop): {'ENABLED' if self.meta_state else 'DISABLED'}"
+            f"  Hidden states: {self.num_states}\n"
+            f"  Observations: {self.num_observations}\n"
+            f"  Actions: {self.num_actions}\n"
+            f"  Planning horizon: {self.config.planning_horizon}\n"
+            f"  Homeostasis: {'ENABLED' if self.homeostatic_drives else 'DISABLED'}\n"
+            f"  Meta-inference (Beautiful Loop): {'ENABLED' if self.meta_state else 'DISABLED'}"
         )
 
     def _initialize_observation_model(self) -> List[np.ndarray]:
@@ -1004,7 +1000,7 @@ class ActiveInferenceModule:
         # Beautiful Loop: update the self-referential meta-state
         # Use adaptive threshold: prediction is "accurate" when PE is below
         # the running median. This ensures the loop is sensitive to relative
-        # changes — after a calm stretch, even modest surprise registers.
+        # changes - after a calm stretch, even modest surprise registers.
         if self.meta_state is not None:
             if len(self.prediction_errors) >= 3:
                 recent_pe = list(self.prediction_errors)[-20:]
@@ -1082,10 +1078,12 @@ class ActiveInferenceModule:
         # Online learning: update the generative model after each inference.
         # Active inference agents continuously learn from experience.
         if self.total_inferences >= 2:
-            await self.update_generative_model({
-                "observation": observation,
-                "action": action,
-            })
+            await self.update_generative_model(
+                {
+                    "observation": observation,
+                    "action": action,
+                }
+            )
 
         return result
 
@@ -1171,7 +1169,7 @@ class ActiveInferenceModule:
         # The outer product obs_dist ⊗ beliefs gives the target: for each
         # state s, the expected observation distribution. The A matrix is
         # pulled toward this target, so ALL observation channels update
-        # proportionally — preventing the argmax-only overshoot bug.
+        # proportionally - preventing the argmax-only overshoot bug.
         if self.belief_history:
             current_beliefs = self.belief_history[-1]
             target = np.outer(obs_dist, current_beliefs)  # [num_obs, num_states]
@@ -1468,7 +1466,6 @@ class ActiveInferenceModule:
 # ============================================================================
 
 if __name__ == "__main__":
-    import asyncio
 
     logging.basicConfig(level=logging.INFO)
 
@@ -1504,7 +1501,7 @@ if __name__ == "__main__":
         print("\n--- Testing predictions ---")
         predictions = await module.predict_next(horizon=3)
         for i, pred in enumerate(predictions):
-            print(f"  t+{i+1}: {pred}")
+            print(f" t+{i+1}: {pred}")
 
         # Test homeostasis
         print("\n--- Testing homeostasis ---")
@@ -1538,7 +1535,7 @@ if __name__ == "__main__":
         print("\n--- Statistics ---")
         stats = module.get_statistics()
         for k, v in stats.items():
-            print(f"  {k}: {v}")
+            print(f" {k}: {v}")
 
         print("\n" + "=" * 60)
         print("Active Inference Module Test PASSED!")

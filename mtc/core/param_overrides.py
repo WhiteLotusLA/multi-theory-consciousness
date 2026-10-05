@@ -7,9 +7,7 @@ thread overrides into module constructors.
 """
 
 import tomllib
-from pathlib import Path
 from typing import Any
-
 
 _TYPE_MAP = {
     "int": int,

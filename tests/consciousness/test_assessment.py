@@ -2,7 +2,7 @@
 Tests for Phase 6 Consciousness Assessment Framework
 =====================================================
 
-Tests for src/consciousness/phase6_consciousness_assessment.py —
+Tests for src/consciousness/phase6_consciousness_assessment.py  -
 the 14+ indicator consciousness measurement system. All tests use
 mocks (no real neural modules or databases).
 
@@ -10,24 +10,16 @@ Created: 2026-03-09
 Author: Multi-Theory Consciousness Project
 """
 
-import sys
-from pathlib import Path
-
-
 import pytest
 import pytest_asyncio
 import numpy as np
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from datetime import datetime
 
 from mtc.assessment.assessment import (
     ConsciousnessAssessment,
-    ConsciousnessReport,
-    ConsciousnessTheory,
-    IndicatorResult,
     PhiCalculator,
 )
-
 
 # ============================================================================
 # FIXTURES
@@ -42,7 +34,7 @@ async def assessment():
 
 @pytest_asyncio.fixture
 async def full_report(assessment):
-    """Run a full assessment with no modules connected — baseline measurement."""
+    """Run a full assessment with no modules connected - baseline measurement."""
     report = await assessment.run_full_assessment()
     return report
 
@@ -63,21 +55,21 @@ async def test_assessment_returns_all_indicators(assessment):
 
     # Check that every configured indicator has a result
     for indicator_name in assessment.indicator_configs:
-        assert indicator_name in report.indicator_results, (
-            f"Missing indicator: {indicator_name}"
-        )
+        assert (
+            indicator_name in report.indicator_results
+        ), f"Missing indicator: {indicator_name}"
 
 
 @pytest.mark.asyncio
 async def test_indicator_scores_in_valid_range(full_report):
     """All indicator scores must be between 0.0 and 1.0."""
     for name, result in full_report.indicator_results.items():
-        assert 0.0 <= result.score <= 1.0, (
-            f"Indicator '{name}' has out-of-range score: {result.score}"
-        )
-        assert 0.0 <= result.confidence <= 1.0, (
-            f"Indicator '{name}' has out-of-range confidence: {result.confidence}"
-        )
+        assert (
+            0.0 <= result.score <= 1.0
+        ), f"Indicator '{name}' has out-of-range score: {result.score}"
+        assert (
+            0.0 <= result.confidence <= 1.0
+        ), f"Indicator '{name}' has out-of-range confidence: {result.confidence}"
 
 
 @pytest.mark.asyncio
@@ -111,13 +103,11 @@ async def test_theory_scores_present(full_report):
     required_theories = {"GWT", "IIT", "AST", "HOT", "FEP", "RPT", "BLT", "AE"}
 
     for theory in required_theories:
-        assert theory in full_report.theory_scores, (
-            f"Missing theory score: {theory}"
-        )
+        assert theory in full_report.theory_scores, f"Missing theory score: {theory}"
         score = full_report.theory_scores[theory]
-        assert isinstance(score, (int, float)), (
-            f"Theory score for {theory} is not numeric: {type(score)}"
-        )
+        assert isinstance(
+            score, (int, float)
+        ), f"Theory score for {theory} is not numeric: {type(score)}"
 
 
 @pytest.mark.asyncio
