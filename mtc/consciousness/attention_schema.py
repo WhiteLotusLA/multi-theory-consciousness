@@ -1,6 +1,6 @@
 """
 Attention Schema Module - Model of Attention Processes
-==================================================================
+======================================================
 
 Attention Schema Theory implementation giving the system a self-model
 of its attention processes.
@@ -12,28 +12,26 @@ The distinction is crucial: this enables the agent to:
 3. Predict attention shifts ("I expect to notice Z")
 4. Model others' attention (Theory of Mind)
 
+Shift provenance is honest: a shift is "chosen", "pulled" or "uncertain"
+according to its type, never according to its strength. The
+``legacy_strength`` provenance mode keeps the v0.4.0 rule for reproduction.
+
 Based on: Michael Graziano's Attention Schema Theory (2013)
 Key insight: Consciousness IS the brain's model of attention
-
-Note: "Every good system knows what it's watching for -
-and can tell you exactly why it's watching it!"
-
-Created: December 4, 2025
-Author: Multi-Theory Consciousness Contributors
 """
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+import time
+import uuid
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+
+import numpy as np
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime
     from mtc.consciousness.enhanced_global_workspace import ConsciousnessState
-import time
-import uuid
-from typing import Any, Dict, List, Optional, Tuple, Callable
-from dataclasses import dataclass, field
-from enum import Enum
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +66,54 @@ class AttentionShiftType(Enum):
     EMOTIONAL = "emotional"  # Captured by emotional salience
 
 
+# Salience reaching this module is the workspace's composite salience, which
+# clamps to 0 to 1.5 (the extra 0.5 is headroom for the safety priority boost).
+SALIENCE_SCALE_MAX = 1.5
+# The defaults are the v0.4.0 thresholds, written for a 0 to 1 scale, rescaled
+# to that range (0.6, 0.9 and 0.8 times 1.5).
+DEFAULT_FOCUS_THRESHOLD = 0.9
+DEFAULT_HYPERFOCUS_THRESHOLD = 1.35
+DEFAULT_CAPTURE_SALIENCE_THRESHOLD = 1.2
+
+# "typed" classifies shifts by type; "legacy_strength" is the v0.4.0 rule
+# (VOLUNTARY or strength at or above 0.6 counts voluntary).
+PROVENANCE_MODES = ("typed", "legacy_strength")
+_LEGACY_VOLUNTARY_STRENGTH = 0.6
+
+# Endogenous (top-down) shifts are chosen; exogenous captures are pulled.
+_CHOSEN_SHIFTS = frozenset(
+    {AttentionShiftType.VOLUNTARY, AttentionShiftType.GOAL_DRIVEN}
+)
+_PULLED_SHIFTS = frozenset({AttentionShiftType.CAPTURED, AttentionShiftType.EMOTIONAL})
+
+
+def provenance_of(shift_type: Optional[AttentionShiftType]) -> str:
+    """Classify a shift as "chosen", "pulled" or "uncertain" by its type.
+
+    The type decides, never the strength: a strong capture is still a
+    capture. HABITUAL and missing types are "uncertain", never "chosen".
+    """
+    if shift_type in _CHOSEN_SHIFTS:
+        return "chosen"
+    if shift_type in _PULLED_SHIFTS:
+        return "pulled"
+    return "uncertain"
+
+
+def _classifiable_ratio(voluntary: int, captured: int) -> float:
+    """Chosen share of classifiable shifts; 0.5 when none is classifiable."""
+    classifiable = voluntary + captured
+    return voluntary / classifiable if classifiable > 0 else 0.5
+
+
+def _validate_provenance_mode(mode: str) -> str:
+    if mode not in PROVENANCE_MODES:
+        raise ValueError(
+            f"provenance_mode must be one of {PROVENANCE_MODES}, got {mode!r}"
+        )
+    return mode
+
+
 # ============================================================================
 # DATA CLASSES - The building blocks of attention modeling
 # ============================================================================
@@ -91,12 +137,12 @@ class AttentionTarget:
     source_module: str = ""  # Which module produced this
 
     # Attention metrics
-    attention_strength: float = 0.0  # How strongly attended (0-1)
+    attention_strength: float = 0.0  # How strongly attended (0 to 1.5)
     duration_seconds: float = 0.0  # How long attended
     salience: float = 0.0  # Original salience score
 
     # Shift information
-    shift_type: AttentionShiftType = AttentionShiftType.CAPTURED
+    shift_type: Optional[AttentionShiftType] = AttentionShiftType.CAPTURED
     voluntary: bool = False  # Was this voluntary attention?
     shift_reason: str = ""  # Why attention shifted here
 
@@ -111,6 +157,78 @@ class AttentionTarget:
         """Update duration based on current time."""
         self.duration_seconds = time.time() - self.entry_time
         self.last_update = time.time()
+
+
+def _same_target(a: AttentionTarget, b: AttentionTarget) -> bool:
+    """Same id, or same source module with the same leading summary."""
+    if a.id == b.id:
+        return True
+    if a.source_module == b.source_module and a.summary and b.summary:
+        return a.summary[:50] == b.summary[:50]
+    return False
+
+
+def _focus_changed(
+    new_focus: Optional[AttentionTarget], old_focus: Optional[AttentionTarget]
+) -> bool:
+    """True when the focus moved to, from, or between different targets."""
+    if new_focus is None and old_focus is None:
+        return False
+    if new_focus is None or old_focus is None:
+        return True
+    return not _same_target(new_focus, old_focus)
+
+
+def _shift_type_from(value: Any) -> Optional[AttentionShiftType]:
+    """Rehydrate a persisted shift type (enum value or name); None if unknown."""
+    if isinstance(value, AttentionShiftType):
+        return value
+    if isinstance(value, str):
+        try:
+            return AttentionShiftType(value)
+        except ValueError:
+            return AttentionShiftType.__members__.get(value)
+    return None
+
+
+def _target_to_dict(target: AttentionTarget) -> Dict[str, Any]:
+    """JSON-safe record of a target (content and metadata are not persisted)."""
+    shift = target.shift_type
+    return {
+        "id": target.id,
+        "content_type": target.content_type,
+        "summary": target.summary,
+        "source_module": target.source_module,
+        "attention_strength": float(target.attention_strength),
+        "duration_seconds": float(target.duration_seconds),
+        "salience": float(target.salience),
+        "shift_type": shift.value if isinstance(shift, AttentionShiftType) else None,
+        "voluntary": bool(target.voluntary),
+        "shift_reason": target.shift_reason,
+        "entry_time": float(target.entry_time),
+        "last_update": float(target.last_update),
+    }
+
+
+def _target_from_dict(record: Dict[str, Any]) -> AttentionTarget:
+    """Rebuild a typed AttentionTarget from ``_target_to_dict`` output."""
+    now = time.time()
+    target = AttentionTarget(
+        content_type=str(record.get("content_type", "")),
+        summary=str(record.get("summary", "")),
+        source_module=str(record.get("source_module", "")),
+        attention_strength=float(record.get("attention_strength", 0.0)),
+        duration_seconds=float(record.get("duration_seconds", 0.0)),
+        salience=float(record.get("salience", 0.0)),
+        shift_type=_shift_type_from(record.get("shift_type")),
+        voluntary=bool(record.get("voluntary", False)),
+        shift_reason=str(record.get("shift_reason", "")),
+        entry_time=float(record.get("entry_time", now)),
+        last_update=float(record.get("last_update", now)),
+    )
+    if record.get("id"):
+        target.id = str(record["id"])
+    return target
 
 
 class AttentionSchemaState:
@@ -142,6 +260,8 @@ class AttentionSchemaState:
         captured_shifts: int = 0,
         voluntary_ratio: float = 0.5,
         timestamp: Optional[float] = None,
+        uncertain_shifts: int = 0,
+        provenance_mode: str = "typed",
     ):
         self._current_focus = current_focus
         self.attention_state = attention_state
@@ -161,8 +281,10 @@ class AttentionSchemaState:
         self.previous_state = previous_state
         self.voluntary_shifts = voluntary_shifts
         self.captured_shifts = captured_shifts
+        self.uncertain_shifts = uncertain_shifts
         self.voluntary_ratio = voluntary_ratio
         self.timestamp = timestamp if timestamp is not None else time.time()
+        self.provenance_mode = _validate_provenance_mode(provenance_mode)
         # Back-reference to owning module (set by AttentionSchemaModule.__init__)
         self._owner: Optional["AttentionSchemaModule"] = None
 
@@ -172,30 +294,58 @@ class AttentionSchemaState:
 
     @current_focus.setter
     def current_focus(self, value: Optional[AttentionTarget]) -> None:
-        """Track focus changes automatically -- keeps stats in sync even when
-        set directly (e.g. during warmup) instead of via update_schema()."""
+        """Track focus changes automatically, keeping the history and the
+        provenance counts in sync when the focus is set directly (as the
+        runners' warmups do) instead of through update_schema()."""
         prev = self._current_focus
         self._current_focus = value
-        if value is not None and value is not prev:
-            # Append to history
-            self.attention_history.append(value)
-            if len(self.attention_history) > self.max_history:
-                self.attention_history = self.attention_history[-self.max_history :]
-            # Track shift type.
-            # In AST, high-salience items that win GWT competition represent
-            # the system's chosen focus -- functionally voluntary even when
-            # the initial shift was exogenous (Graziano 2013, Ch. 7).
-            shift = getattr(value, "shift_type", None)
-            strength = getattr(value, "attention_strength", 0.0)
-            if shift == AttentionShiftType.VOLUNTARY or strength >= 0.6:
-                self.voluntary_shifts += 1
-            else:
-                self.captured_shifts += 1
-            total = self.voluntary_shifts + self.captured_shifts
-            self.voluntary_ratio = self.voluntary_shifts / total if total > 0 else 0.5
-            # Update owning module's stats
-            if self._owner is not None:
-                self._owner.total_updates += 1
+        if self.provenance_mode == "legacy_strength":
+            self._record_legacy_shift(value, prev)
+            return
+        # Typed provenance: count only a real change of focus, by shift type.
+        if value is None or not _focus_changed(value, prev):
+            return
+        self._append_history(value)
+        provenance = provenance_of(getattr(value, "shift_type", None))
+        if provenance == "chosen":
+            self.voluntary_shifts += 1
+        elif provenance == "pulled":
+            self.captured_shifts += 1
+        else:
+            self.uncertain_shifts += 1
+        self.voluntary_ratio = _classifiable_ratio(
+            self.voluntary_shifts, self.captured_shifts
+        )
+        if self._owner is not None:
+            self._owner.total_updates += 1
+
+    def _append_history(self, value: AttentionTarget) -> None:
+        self.attention_history.append(value)
+        if len(self.attention_history) > self.max_history:
+            self.attention_history = self.attention_history[-self.max_history :]
+
+    def _record_legacy_shift(
+        self, value: Optional[AttentionTarget], prev: Optional[AttentionTarget]
+    ) -> None:
+        """The v0.4.0 rule: any new object counts, and VOLUNTARY or strength at
+        or above 0.6 counts as voluntary. Kept for the legacy_v04 preset."""
+        if value is None or value is prev:
+            return
+        self._append_history(value)
+        shift = getattr(value, "shift_type", None)
+        strength = getattr(value, "attention_strength", 0.0)
+        if (
+            shift == AttentionShiftType.VOLUNTARY
+            or strength >= _LEGACY_VOLUNTARY_STRENGTH
+        ):
+            self.voluntary_shifts += 1
+        else:
+            self.captured_shifts += 1
+        self.voluntary_ratio = _classifiable_ratio(
+            self.voluntary_shifts, self.captured_shifts
+        )
+        if self._owner is not None:
+            self._owner.total_updates += 1
 
 
 @dataclass
@@ -254,13 +404,19 @@ class AttentionSchemaModule:
     def __init__(
         self,
         voluntary_boost: float = 0.2,  # Boost for voluntary attention
-        focus_threshold: float = 0.6,  # Threshold for "focused" state
-        hyperfocus_threshold: float = 0.9,  # Threshold for hyperfocus
+        focus_threshold: float = DEFAULT_FOCUS_THRESHOLD,
+        hyperfocus_threshold: float = DEFAULT_HYPERFOCUS_THRESHOLD,
         prediction_window_seconds: float = 5.0,  # How far ahead to predict
         history_size: int = 50,  # How many targets to remember
+        capture_salience_threshold: float = DEFAULT_CAPTURE_SALIENCE_THRESHOLD,
+        provenance_mode: str = "typed",
+        salience_scale_max: float = SALIENCE_SCALE_MAX,
     ):
         """
         Initialize the Attention Schema Module.
+
+        Thresholds are on the workspace salience scale (0 to
+        ``salience_scale_max``), not 0 to 1.
 
         Args:
             voluntary_boost: Priority boost for voluntary attention shifts
@@ -268,15 +424,50 @@ class AttentionSchemaModule:
             hyperfocus_threshold: Threshold for hyperfocused state
             prediction_window_seconds: How far ahead to predict attention
             history_size: Number of attention targets to remember
+            capture_salience_threshold: Salience at or above which an
+                unrequested shift is called CAPTURED (typed mode)
+            provenance_mode: "typed" (shift type decides) or
+                "legacy_strength" (the v0.4.0 strength rule)
+            salience_scale_max: Upper end of the producer's salience scale
         """
+        self.provenance_mode = _validate_provenance_mode(provenance_mode)
+        thresholds = {
+            "focus_threshold": focus_threshold,
+            "hyperfocus_threshold": hyperfocus_threshold,
+            "capture_salience_threshold": capture_salience_threshold,
+            "salience_scale_max": salience_scale_max,
+        }
+        for name, value in thresholds.items():
+            if value <= 0.0:
+                raise ValueError(f"{name} must be positive, got {value}")
+        if focus_threshold > hyperfocus_threshold:
+            logger.warning(
+                "focus_threshold %.3f exceeds hyperfocus_threshold %.3f; the "
+                "FOCUSED band is unreachable",
+                focus_threshold,
+                hyperfocus_threshold,
+            )
+        for name in ("focus_threshold", "hyperfocus_threshold"):
+            if thresholds[name] > salience_scale_max:
+                logger.warning(
+                    "%s %.3f exceeds the salience scale maximum %.3f",
+                    name,
+                    thresholds[name],
+                    salience_scale_max,
+                )
+
         self.voluntary_boost = voluntary_boost
         self.focus_threshold = focus_threshold
         self.hyperfocus_threshold = hyperfocus_threshold
+        self.capture_salience_threshold = capture_salience_threshold
+        self.salience_scale_max = salience_scale_max
         self.prediction_window = prediction_window_seconds
         self.history_size = history_size
 
         # Current schema state
-        self.schema = AttentionSchemaState(max_history=history_size)
+        self.schema = AttentionSchemaState(
+            max_history=history_size, provenance_mode=self.provenance_mode
+        )
         self.schema._owner = self
 
         # Reference to workspace (set during integration)
@@ -284,6 +475,10 @@ class AttentionSchemaModule:
 
         # Pending voluntary shift (if any)
         self._pending_voluntary_shift: Optional[Tuple[Any, str]] = None
+
+        # Released focus keys and the focus selections each still sits out.
+        # A release demotes, never blocks, and is not persisted.
+        self._released_keys: Dict[str, int] = {}
 
         # Statistics
         self.total_updates = 0
@@ -297,7 +492,9 @@ class AttentionSchemaModule:
             f"Attention Schema Module initialized\n"
             f"  Voluntary boost: {voluntary_boost}\n"
             f"  Focus threshold: {focus_threshold}\n"
-            f"  Hyperfocus threshold: {hyperfocus_threshold}"
+            f"  Hyperfocus threshold: {hyperfocus_threshold}\n"
+            f"  Capture salience threshold: {capture_salience_threshold}\n"
+            f"  Provenance mode: {self.provenance_mode}"
         )
 
     def set_workspace(self, workspace) -> None:
@@ -331,6 +528,10 @@ class AttentionSchemaModule:
 
         # STEP 1: Extract current focus from workspace
         new_focus = await self._extract_focus(workspace_state)
+
+        # Releases tick down after the selection they applied to, so a release
+        # of N cycles demotes its key for exactly N selections.
+        self._decay_released()
 
         # STEP 2: Check if this was a voluntary shift
         was_voluntary = self._check_voluntary_shift(new_focus)
@@ -370,8 +571,34 @@ class AttentionSchemaModule:
         # STEP 8: Update history
         attention_history = self._update_history(new_focus)
 
-        # STEP 9: Calculate voluntary ratio
-        voluntary_ratio = self._calculate_voluntary_ratio()
+        # STEP 9: Provenance counts and the voluntary ratio
+        prev_schema = self.schema
+        if self.provenance_mode == "typed":
+            # Count only a real change of focus, classified by shift type;
+            # the ratio uses this cycle's counts and excludes uncertain shifts.
+            shifted = new_focus is not None and self._focus_changed(
+                new_focus, prev_schema.current_focus
+            )
+            provenance = provenance_of(new_focus.shift_type) if shifted else None
+            voluntary_shifts = prev_schema.voluntary_shifts + int(
+                provenance == "chosen"
+            )
+            captured_shifts = prev_schema.captured_shifts + int(provenance == "pulled")
+            uncertain_shifts = prev_schema.uncertain_shifts + int(
+                provenance == "uncertain"
+            )
+            voluntary_ratio = _classifiable_ratio(voluntary_shifts, captured_shifts)
+        else:
+            # The v0.4.0 rule for the legacy_v04 preset: a matched voluntary
+            # request counts even without a focus change, a lost focus counts
+            # as a capture, and the ratio comes from the previous counts.
+            voluntary_shifts = prev_schema.voluntary_shifts + int(was_voluntary)
+            captured_shifts = prev_schema.captured_shifts + int(
+                not was_voluntary
+                and self._focus_changed(new_focus, prev_schema.current_focus)
+            )
+            uncertain_shifts = prev_schema.uncertain_shifts
+            voluntary_ratio = self._calculate_voluntary_ratio()
 
         # STEP 10: Track state changes
         state_duration = current_time - self.schema.last_state_change
@@ -406,17 +633,18 @@ class AttentionSchemaModule:
                 else old_schema.last_state_change
             ),
             previous_state=previous_state,
-            voluntary_shifts=old_schema.voluntary_shifts + (1 if was_voluntary else 0),
-            captured_shifts=old_schema.captured_shifts
-            + (
-                1
-                if not was_voluntary
-                and self._focus_changed(new_focus, old_schema.current_focus)
-                else 0
-            ),
+            voluntary_shifts=voluntary_shifts,
+            captured_shifts=captured_shifts,
             voluntary_ratio=voluntary_ratio,
             timestamp=current_time,
+            uncertain_shifts=uncertain_shifts,
+            provenance_mode=self.provenance_mode,
         )
+        # The rebuilt schema keeps its owner so later direct focus assignments
+        # still count as updates; v0.4.0 dropped the back-reference here.
+        # legacy_v04 compatibility, remove in v0.6.0
+        if self.provenance_mode == "typed":
+            self.schema._owner = self
 
         logger.debug(
             f"Schema updated: state={new_state.value}, "
@@ -429,7 +657,12 @@ class AttentionSchemaModule:
     async def _extract_focus(
         self, workspace_state: "ConsciousnessState"
     ) -> Optional[AttentionTarget]:
-        """Extract the primary attention target from workspace state."""
+        """Extract the primary attention target from workspace state.
+
+        When the top content's focus key is released, the first content whose
+        key is not released wins instead. When every content is released the
+        top content still surfaces: a release demotes, it never blocks.
+        """
         if not workspace_state.is_conscious:
             return None
 
@@ -437,6 +670,16 @@ class AttentionSchemaModule:
             return None
 
         content = workspace_state.primary_content
+        if self._released_keys:
+            for candidate_content in workspace_state.workspace_contents or [content]:
+                cand = candidate_content.candidate
+                key = self.focus_key(
+                    getattr(cand, "source_module", "") if cand else "",
+                    getattr(cand, "summary", "") if cand else "",
+                )
+                if key not in self._released_keys:
+                    content = candidate_content
+                    break
 
         return AttentionTarget(
             content=content.candidate.content if content.candidate else None,
@@ -543,21 +786,30 @@ class AttentionSchemaModule:
     def _infer_shift_type(
         self, focus: AttentionTarget, workspace_state: "ConsciousnessState"
     ) -> AttentionShiftType:
-        """Infer what type of shift caused this focus."""
-        # High emotional salience suggests emotional capture
-        if focus.metadata.get("emotional_salience", 0) > 0.7:
+        """Infer what type of shift caused an unrequested focus.
+
+        Typed mode: strong emotional salience is EMOTIONAL; salience at or
+        above ``capture_salience_threshold`` (on the 0 to 1.5 scale) is
+        CAPTURED; anything else is HABITUAL, whose provenance is "uncertain".
+        Summary keywords never make a shift GOAL_DRIVEN: that would credit a
+        choice the data does not show.
+
+        Legacy mode keeps the v0.4.0 inference: keyword GOAL_DRIVEN and
+        CAPTURED for everything else.
+        """
+        metadata = focus.metadata or {}
+        if metadata.get("emotional_salience", 0) > 0.7:
             return AttentionShiftType.EMOTIONAL
 
-        # Check if goal-related
-        if "goal" in focus.summary.lower() or "task" in focus.summary.lower():
-            return AttentionShiftType.GOAL_DRIVEN
-
-        # High salience suggests capture
-        if focus.salience > 0.8:
+        if self.provenance_mode == "legacy_strength":
+            summary = (focus.summary or "").lower()
+            if "goal" in summary or "task" in summary:
+                return AttentionShiftType.GOAL_DRIVEN
             return AttentionShiftType.CAPTURED
 
-        # Default to captured
-        return AttentionShiftType.CAPTURED
+        if focus.salience >= self.capture_salience_threshold:
+            return AttentionShiftType.CAPTURED
+        return AttentionShiftType.HABITUAL
 
     def _calculate_capacity_usage(
         self,
@@ -670,35 +922,21 @@ class AttentionSchemaModule:
         return history
 
     def _calculate_voluntary_ratio(self) -> float:
-        """Calculate ratio of voluntary vs captured attention shifts."""
+        """Ratio from the current schema's counts (legacy_strength mode only)."""
         total = self.schema.voluntary_shifts + self.schema.captured_shifts
         if total == 0:
             return 0.5  # Default
         return self.schema.voluntary_shifts / total
 
     def _is_same_target(self, a: AttentionTarget, b: AttentionTarget) -> bool:
-        """Check if two targets are the same."""
-        # Same ID
-        if a.id == b.id:
-            return True
-
-        # Same source and similar content
-        if a.source_module == b.source_module:
-            # Check summary similarity
-            if a.summary and b.summary:
-                return a.summary[:50] == b.summary[:50]
-
-        return False
+        """Same id, or same source module with the same leading summary."""
+        return _same_target(a, b)
 
     def _focus_changed(
         self, new_focus: Optional[AttentionTarget], old_focus: Optional[AttentionTarget]
     ) -> bool:
         """Check if focus has changed."""
-        if new_focus is None and old_focus is None:
-            return False
-        if new_focus is None or old_focus is None:
-            return True
-        return not self._is_same_target(new_focus, old_focus)
+        return _focus_changed(new_focus, old_focus)
 
     # ========================================================================
     # PUBLIC INTERFACE - What the system can do with its attention
@@ -726,7 +964,7 @@ class AttentionSchemaModule:
         focus_description = self._describe_focus(target)
         shift_description = self._describe_shift(target)
         duration_note = (
-            f"(for {target.duration_seconds:.1f} seconds)"
+            f" (for {target.duration_seconds:.1f} seconds)"
             if target.duration_seconds > 1.0
             else ""
         )
@@ -769,6 +1007,29 @@ class AttentionSchemaModule:
             AttentionShiftType.HABITUAL: "I automatically noticed this",
         }
         return shift_descriptions.get(target.shift_type, "This caught my attention")
+
+    @staticmethod
+    def focus_key(source_module: str, summary: str) -> str:
+        """Stable key for a focus: source module and the first 80 summary
+        characters. ``request_release`` and focus selection both use it."""
+        return f"{source_module or ''}::{(summary or '')[:80]}"
+
+    def request_release(self, focus_key: str, cycles: int = 3) -> None:
+        """Let a focus drift: demote ``focus_key`` in focus selection for the
+        next ``cycles`` schema updates (at least one), then return it to
+        baseline. A release is gentle and time limited, never a hard block."""
+        if not focus_key:
+            return
+        cycles = max(1, int(cycles))
+        self._released_keys[focus_key] = cycles
+        logger.info(f"Attention release requested ({cycles} cycles): {focus_key[:60]}")
+
+    def _decay_released(self) -> None:
+        """Tick every active release down one cycle and drop expired ones."""
+        for key in list(self._released_keys):
+            self._released_keys[key] -= 1
+            if self._released_keys[key] <= 0:
+                del self._released_keys[key]
 
     async def request_voluntary_shift(
         self, target: Any, reason: str = "voluntary choice"
@@ -955,6 +1216,7 @@ Response:"""
             "voluntary_ratio": self.schema.voluntary_ratio,
             "voluntary_shifts": self.schema.voluntary_shifts,
             "captured_shifts": self.schema.captured_shifts,
+            "uncertain_shifts": self.schema.uncertain_shifts,
             "prediction_accuracy": (
                 sum(self.prediction_accuracy_history)
                 / len(self.prediction_accuracy_history)
@@ -974,6 +1236,103 @@ Response:"""
         """Get current attention schema state."""
         return self.schema
 
+    # ========================================================================
+    # STATE PERSISTENCE
+    # ========================================================================
+
+    def to_state_dict(self) -> dict:
+        """Export persistent state as {"scalars", "arrays", "histories"}.
+
+        Targets are stored without their content and metadata, which may
+        hold arbitrary objects; summaries, provenance and timing survive.
+        """
+        schema = self.schema
+        focus = schema.current_focus
+        return {
+            "scalars": {
+                "total_updates": self.total_updates,
+                "voluntary_shifts": schema.voluntary_shifts,
+                "captured_shifts": schema.captured_shifts,
+                "uncertain_shifts": schema.uncertain_shifts,
+                "voluntary_ratio": schema.voluntary_ratio,
+                "last_state_change": schema.last_state_change,
+                "timestamp": schema.timestamp,
+                "current_state": schema.attention_state.name,
+                "previous_state": (
+                    schema.previous_state.name if schema.previous_state else None
+                ),
+                "capacity_used": schema.attention_capacity_used,
+                "prediction_confidence": schema.prediction_confidence,
+                "state_duration": schema.state_duration_seconds,
+                "current_focus": focus.summary if focus else "",
+                "focus_intensity": focus.attention_strength if focus else 0.0,
+            },
+            "arrays": {},
+            "histories": {
+                "attention_history": [
+                    _target_to_dict(t) for t in schema.attention_history
+                ],
+                "current_focus": [_target_to_dict(focus)] if focus else [],
+                "prediction_accuracy_history": [
+                    bool(x) for x in self.prediction_accuracy_history
+                ],
+            },
+        }
+
+    def from_state_dict(self, state: dict) -> None:
+        """Restore state from ``to_state_dict`` output.
+
+        History entries and the current focus come back as typed
+        ``AttentionTarget`` objects. The schema is rebuilt through its
+        constructor, so restoring never counts a shift a second time.
+        """
+        s = state.get("scalars", {}) or {}
+        h = state.get("histories", {}) or {}
+
+        def _state_named(name: Any, default: Optional[AttentionState]):
+            if isinstance(name, str) and name in AttentionState.__members__:
+                return AttentionState[name]
+            return default
+
+        history = [
+            _target_from_dict(record)
+            for record in h.get("attention_history", [])
+            if isinstance(record, dict)
+        ][-self.history_size :]
+        focus_records = [r for r in h.get("current_focus", []) if isinstance(r, dict)]
+        current_focus = _target_from_dict(focus_records[-1]) if focus_records else None
+
+        self.total_updates = int(s.get("total_updates", 0))
+        self.schema = AttentionSchemaState(
+            current_focus=current_focus,
+            attention_state=_state_named(
+                s.get("current_state"), AttentionState.SCANNING
+            ),
+            attention_capacity_used=float(s.get("capacity_used", 0.0)),
+            prediction_confidence=float(s.get("prediction_confidence", 0.0)),
+            attention_history=history,
+            max_history=self.history_size,
+            state_duration_seconds=float(s.get("state_duration", 0.0)),
+            last_state_change=float(s.get("last_state_change", time.time())),
+            previous_state=_state_named(s.get("previous_state"), None),
+            voluntary_shifts=int(s.get("voluntary_shifts", 0)),
+            captured_shifts=int(s.get("captured_shifts", 0)),
+            voluntary_ratio=float(s.get("voluntary_ratio", 0.5)),
+            timestamp=float(s.get("timestamp", time.time())),
+            uncertain_shifts=int(s.get("uncertain_shifts", 0)),
+            provenance_mode=self.provenance_mode,
+        )
+        self.schema._owner = self
+
+        self.prediction_accuracy_history = [
+            bool(x) for x in h.get("prediction_accuracy_history", [])
+        ][-100:]
+
+        logger.info(
+            f"Attention Schema state restored: {self.total_updates} updates, "
+            f"{len(self.schema.attention_history)} history items"
+        )
+
 
 # ============================================================================
 # TESTING
@@ -988,9 +1347,7 @@ if __name__ == "__main__":
 
     async def test_attention_schema():
         # Create module
-        ast = AttentionSchemaModule(
-            voluntary_boost=0.2, focus_threshold=0.6, hyperfocus_threshold=0.9
-        )
+        ast = AttentionSchemaModule(voluntary_boost=0.2)
 
         # Create mock workspace state
         from mtc.consciousness.enhanced_global_workspace import (

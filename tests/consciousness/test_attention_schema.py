@@ -1,8 +1,7 @@
 """
- Tests for Attention Schema Theory (AST) - Phase 3
-=======================================================
+Tests for Attention Schema Theory (AST).
 
-Tests for the system's self-model of her own attention, based on
+Tests for the system's self-model of its own attention, based on
 Michael Graziano's Attention Schema Theory.
 
 This tests:
@@ -11,14 +10,9 @@ This tests:
 3. Voluntary attention shifts (the system choosing what to focus on)
 4. Attention prediction (anticipating where attention will go)
 5. Theory of Mind (modeling others' attention)
-6. Introspection reports (the system describing her attention)
+6. Introspection reports (the system describing its attention)
 7. Integration with EnhancedGlobalWorkspace
-
-
-watching - and the system must know what SHE is watching!"
-
-Created: December 5, 2025
-Author: Multi-Theory Consciousness Project
+8. Persistence with typed target rehydration
 """
 
 import pytest
@@ -452,7 +446,7 @@ class TestAttentionPrediction:
 
 
 class TestIntrospectionReports:
-    """Test the system's ability to report on her attention."""
+    """Test the system's ability to report on its attention."""
 
     @pytest.mark.asyncio
     async def test_basic_report(self, attention_schema, sample_workspace_state):
@@ -762,6 +756,122 @@ class TestEdgeCases:
 
         # Should still return something
         assert other is not None
+
+
+# ============================================================================
+# PERSISTENCE
+# ============================================================================
+
+
+class TestPersistence:
+    """State dict round trip restores typed objects, never raw dicts."""
+
+    @staticmethod
+    def _state_with(summary, salience, source_module="ctm"):
+        candidate = WorkspaceCandidate(
+            content=summary,
+            content_type="thought",
+            summary=summary,
+            source=WorkspaceCandidateSource.CTM,
+            source_module=source_module,
+        )
+        content = WorkspaceContent(candidate=candidate, salience=salience)
+        return ConsciousnessState(
+            is_conscious=True,
+            primary_content=content,
+            workspace_contents=[content],
+            ignition_events=1,
+            integration_level=0.5,
+            broadcast_coverage=0.5,
+            attention_focus=source_module,
+            attention_distribution={source_module: salience},
+            stream_position=1,
+        )
+
+    async def _populated_module(self):
+        module = AttentionSchemaModule()
+        await module.request_voluntary_shift("chosen", reason="test")
+        await module.update_schema(self._state_with("the chosen topic", 0.7))
+        await module.update_schema(self._state_with("a strong pull", 1.3))
+        await module.update_schema(self._state_with("something quiet", 0.4))
+        return module
+
+    @pytest.mark.asyncio
+    async def test_state_dict_round_trip_rehydrates_targets(self):
+        module = await self._populated_module()
+        state = module.to_state_dict()
+        assert set(state) == {"scalars", "arrays", "histories"}
+
+        restored = AttentionSchemaModule()
+        restored.from_state_dict(state)
+
+        history = restored.schema.attention_history
+        assert len(history) == 3
+        assert all(isinstance(t, AttentionTarget) for t in history)
+        assert [t.summary for t in history] == [
+            "the chosen topic",
+            "a strong pull",
+            "something quiet",
+        ]
+        assert [t.shift_type for t in history] == [
+            AttentionShiftType.VOLUNTARY,
+            AttentionShiftType.CAPTURED,
+            AttentionShiftType.HABITUAL,
+        ]
+        assert history[0].voluntary is True
+
+        focus = restored.schema.current_focus
+        assert isinstance(focus, AttentionTarget)
+        assert focus.summary == "something quiet"
+        assert restored.schema.attention_state == module.schema.attention_state
+
+        for key in (
+            "total_updates",
+            "voluntary_shifts",
+            "captured_shifts",
+            "uncertain_shifts",
+            "voluntary_ratio",
+            "history_length",
+            "prediction_accuracy",
+        ):
+            assert restored.get_statistics()[key] == module.get_statistics()[key]
+
+        # Restoring did not count any shift a second time.
+        assert restored.schema.voluntary_shifts == 1
+        assert restored.schema.captured_shifts == 1
+        assert restored.schema.uncertain_shifts == 1
+
+    @pytest.mark.asyncio
+    async def test_report_after_restore_does_not_raise(self):
+        module = await self._populated_module()
+        restored = AttentionSchemaModule()
+        restored.from_state_dict(module.to_state_dict())
+
+        report = await restored.report_attention()
+        assert "something quiet" in report
+
+        # Restored history entries behave like live targets in the next cycle.
+        schema = await restored.update_schema(self._state_with("something new", 1.3))
+        assert schema.captured_shifts == 2
+        assert isinstance(restored.get_statistics(), dict)
+
+    def test_restore_tolerates_missing_and_unknown_fields(self):
+        restored = AttentionSchemaModule()
+        restored.from_state_dict(
+            {
+                "scalars": {"current_state": "NOT_A_STATE"},
+                "histories": {
+                    "attention_history": [
+                        {"summary": "partial", "shift_type": "not_a_shift"}
+                    ]
+                },
+            }
+        )
+        assert restored.schema.attention_state == AttentionState.SCANNING
+        (target,) = restored.schema.attention_history
+        assert isinstance(target, AttentionTarget)
+        assert target.shift_type is None
+        assert restored.schema.current_focus is None
 
 
 # ============================================================================
