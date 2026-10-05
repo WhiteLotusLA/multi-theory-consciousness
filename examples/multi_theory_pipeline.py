@@ -46,7 +46,6 @@ from mtc.consciousness.metacognition import (
 )
 from mtc.consciousness.active_inference import (
     ActiveInferenceModule,
-    HomeostaticDrives,
 )
 from mtc.consciousness.beautiful_loop import BeautifulLoop
 from mtc.consciousness.damasio import DamasioLayers
