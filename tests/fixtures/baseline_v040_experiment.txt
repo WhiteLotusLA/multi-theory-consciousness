@@ -1,0 +1,23 @@
+/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/numpy/lib/_format_impl.py:838: VisibleDeprecationWarning: dtype(): align should be passed as Python or NumPy boolean but got `align=0`. Did you mean to pass a tuple to create a subarray type? (Deprecated NumPy 2.4)
+  array = pickle.load(fp, **pickle_kwargs)
+Overrides: {'fep': {'planning_horizon': 10, 'num_actions': 2, 'num_hidden_states': 2, 'learning_rate_A': 0.3, 'learning_rate_B': 0.15}, 'blt': {'field_evidencing_threshold': 0.3}}
+Computing noise baseline...
+/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/numpy/_core/fromnumeric.py:3824: RuntimeWarning: Mean of empty slice
+  return _methods._mean(a, axis=axis, dtype=dtype,
+/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/numpy/_core/_methods.py:142: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret.dtype.type(ret / rcount)
+---
+overall_score:     0.031247
+passing_count:     2
+total_indicators:  30
+ae_score:           0.004150
+ast_score:          0.000000
+blt_score:          0.000000
+fep_score:          0.072995
+gwt_score:          0.052174
+hot_score:          0.000000
+iit_score:          0.005406
+rpt_score:          0.030645
+processing_ms:     1.0
+warmup_cycles:     25
+total_seconds:     86.2

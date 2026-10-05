@@ -37,7 +37,8 @@ htmlcov/
 *.env
 
 # Runtime data
-data/
+data/*
+!data/dcm/
 results/
 logs/
 *.log
@@ -65,6 +66,26 @@ run.log
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
-Makefile
 *.o
 *.dylib
+
+# Private session material (never in the public repo)
+First_Mates_Handoff*.md
+*_Handoff-*.md
+
+# LaTeX build outputs (paper/latex/main.tex is the source)
+paper/latex/*.aux
+paper/latex/*.bbl
+paper/latex/*.blg
+paper/latex/*.out
+paper/latex/*.toc
+paper/latex/*.fls
+paper/latex/*.fdb_latexmk
+paper/latex/*.synctex.gz
+paper/latex/main.pdf
+
+# Private denylist for the privacy audit (names that never enter the repo)
+config/privacy/denylist.local.txt
+
+# Per-install private space (replaces the reference system's private directory)
+agent_space/
