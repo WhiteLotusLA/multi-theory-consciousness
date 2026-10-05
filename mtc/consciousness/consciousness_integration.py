@@ -24,15 +24,22 @@ a running thought machine). A value that was not produced is None; nothing
 stands in for it. An indicator that cannot measure is recorded with its error
 and a None score, never as 0.0, and the confidence is discounted by coverage,
 the measured share of the panel.
+
+The integration also keeps a bounded window (``temporal_window``) of assembled
+verification states, one per turn, for the verification suite's temporal
+consistency test (``append_temporal_sample``, ``get_temporal_data``); the
+window is telemetry only and is not persisted.
 """
 
 import asyncio
+import copy
 import inspect
 import logging
 import math
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 from scipy import stats
@@ -223,6 +230,7 @@ class ConsciousnessIntegration:
         neural_data_manager: Optional[NeuralDataManager] = None,
         enable_persistence: bool = True,
         assessment_interval_ms: int = 100,
+        temporal_window: int = 100,
     ):
         """
         Initialize consciousness integration.
@@ -233,7 +241,11 @@ class ConsciousnessIntegration:
                 ``store_consciousness_snapshot``)
             enable_persistence: Whether to save snapshots to the store
             assessment_interval_ms: How often the monitoring loop assesses
+            temporal_window: Assembled verification states kept for the
+                temporal consistency test (oldest dropped first)
         """
+        if temporal_window < 1:
+            raise ValueError("temporal_window must be at least 1")
         self.orchestrator = neural_orchestrator
         self.metrics = ConsciousnessMetrics()
         self.neural_data_manager = neural_data_manager
@@ -243,6 +255,10 @@ class ConsciousnessIntegration:
         # Historical data for temporal analysis
         self.snapshot_history: List[ConsciousnessSnapshot] = []
         self.max_history_size = 1000
+
+        # Assembled verification states, one per turn, for the temporal
+        # consistency test. Telemetry only: never read into a prompt.
+        self.temporal_samples: Deque[Dict[str, Any]] = deque(maxlen=temporal_window)
 
         # Real-time monitoring
         self.monitoring_active = False
@@ -258,6 +274,31 @@ class ConsciousnessIntegration:
             f"  Persistence: {'enabled' if enable_persistence else 'disabled'}\n"
             f"  Indicators: legacy {len(self.metrics.indicators)}-indicator framework"
         )
+
+    # ======== TEMPORAL SAMPLES ========
+
+    def append_temporal_sample(self, sample: Dict[str, Any]) -> None:
+        """Keep one assembled verification state for the temporal test.
+
+        The Phase 6 post-turn step appends one sample per turn (the output of
+        ``ConsciousnessStateAssembler``). The sample is deep-copied; a nested
+        ``temporal_data`` key is dropped so samples never nest; a non-dict
+        sample is ignored. The window keeps the newest ``temporal_window``.
+        """
+        if not isinstance(sample, dict):
+            logger.debug("Temporal sample ignored: not a dict")
+            return
+        entry = {k: v for k, v in sample.items() if k != "temporal_data"}
+        self.temporal_samples.append(copy.deepcopy(entry))
+
+    def get_temporal_data(self) -> Dict[str, List[Any]]:
+        """The kept samples, oldest first, as the verifier reads them.
+
+        Returns ``{"states": [...], "timestamps": [...]}``: copies of the
+        samples and each sample's own ``timestamp`` (None when it has none).
+        """
+        states = [copy.deepcopy(s) for s in self.temporal_samples]
+        return {"states": states, "timestamps": [s.get("timestamp") for s in states]}
 
     # ======== COLLECTION ========
 

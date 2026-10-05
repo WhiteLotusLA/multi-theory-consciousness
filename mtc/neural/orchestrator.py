@@ -154,10 +154,7 @@ OPTIONAL_COMPONENTS: Dict[str, Tuple[str, Optional[str]]] = {
     "neural_data_manager": ("mtc.neural.mongodb_schemas", "phase 5"),
     "redis_manager": ("mtc.memory.redis_manager", "phase 5"),
     "measurement_framework": ("mtc.assessment.framework", None),
-    "verification_framework": (
-        "mtc.consciousness.verification_framework",
-        "phase 4",
-    ),
+    "verification_framework": ("mtc.consciousness.verification_framework", None),
     "continuous_thought": ("mtc.consciousness.continuous", "phase 6"),
     "global_workspace": ("mtc.consciousness.global_workspace", None),
     "enhanced_workspace": ("mtc.consciousness.enhanced_global_workspace", None),
@@ -1106,6 +1103,117 @@ class NeuralOrchestrator:
             import traceback
 
             logger.error(traceback.format_exc())
+            return None
+
+    def _verification_neural_data(self) -> Dict[str, Any]:
+        """Substrate blocks for verification, from the latest experience only.
+
+        Reads ``latest_substrate_states``, ``latest_neural_signals`` and the
+        current experience. A block is real only when its substrate produced
+        output in the latest experience: the SNN with a finite synchrony in the
+        stashed SNN state, the LSM with a stashed trajectory and a finite
+        emotional coherence, the HTM with a stashed episodic pattern and a
+        finite anomaly score from the HTM's own metrics.
+        """
+        signals = getattr(self, "latest_neural_signals", None)
+        signals = signals if isinstance(signals, dict) else {}
+        states = getattr(self, "latest_substrate_states", None)
+        states = states if isinstance(states, dict) else {}
+        experience = getattr(getattr(self, "state", None), "current_experience", None)
+
+        def signal(key: str) -> Optional[np.ndarray]:
+            value = signals.get(key)
+            return _as_1d(value) if value is not None else None
+
+        def as_list(key: str) -> List[float]:
+            array = signal(key)
+            return array.tolist() if array is not None else []
+
+        snn_state = states.get("snn_state")
+        metrics = snn_state.get("metrics") if isinstance(snn_state, dict) else None
+        synchrony = (
+            _finite(metrics.get("synchrony")) if isinstance(metrics, dict) else None
+        )
+        snn = {
+            "synchrony": synchrony,
+            "temporal_patterns": as_list("snn"),
+            "is_real": synchrony is not None,
+        }
+
+        lsm_produced = signal("lsm") is not None
+        subconscious = (
+            getattr(experience, "subconscious_state", None) if lsm_produced else None
+        )
+        coherence = _finite(getattr(subconscious, "emotional_coherence", None))
+        lsm = {
+            "coherence": coherence,
+            "intuitive_valence": _finite(
+                getattr(subconscious, "intuitive_valence", None)
+            ),
+            "intuitive_arousal": _finite(
+                getattr(subconscious, "intuitive_arousal", None)
+            ),
+            "state_trajectory": as_list("lsm"),
+            "is_real": coherence is not None,
+        }
+
+        anomaly = None
+        if signal("htm") is not None:
+            htm_metrics = self._component_metric(
+                getattr(getattr(self, "memory_consolidator", None), "htm", None),
+                "get_metrics",
+            )
+            if isinstance(htm_metrics, dict):
+                anomaly = _finite(htm_metrics.get("anomaly_score"))
+        htm = {"anomaly_score": anomaly, "is_real": anomaly is not None}
+        return {"snn": snn, "lsm": lsm, "htm": htm}
+
+    async def verify_consciousness(
+        self,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        *,
+        pad_state: Any = None,
+        temporal_data: Optional[Dict[str, List[Any]]] = None,
+    ) -> Optional["VerificationSuiteResult"]:
+        """Run the verification suite on the latest experience's real outputs.
+
+        The coherence, temporal consistency and emotional authenticity tests
+        score only blocks the latest experience produced (see
+        ``_verification_neural_data``); with no substrate output every test
+        is ``insufficient_data`` and the overall score is None, whether or not
+        ``conversation_history`` is passed: conversational continuity joins
+        the coherence score only beside a real substrate or affect component.
+        PAD affect and temporal samples come from the caller (the orchestrator
+        owns neither).
+
+        Args:
+            conversation_history: Turns for the contextual continuity part,
+                which never makes coherence measured on its own
+            pad_state: Optional ``PADState`` or mapping of the PAD axes
+            temporal_data: Optional ``ConsciousnessIntegration.get_temporal_data()``
+
+        Returns:
+            VerificationSuiteResult, or None when the verifier is unavailable
+            or the run failed; never raises.
+        """
+        verifier = getattr(self, "consciousness_verifier", None)
+        if verifier is None:
+            logger.warning("Consciousness verifier not available")
+            return None
+        try:
+            from mtc.consciousness.verification_state_assembler import (
+                ConsciousnessStateAssembler,
+            )
+
+            state = ConsciousnessStateAssembler.from_neural_data(
+                self._verification_neural_data(),
+                pad_state=pad_state,
+                conversation_history=conversation_history,
+                temporal_data=temporal_data,
+            )
+            return verifier.run_verification_suite(state)
+        except Exception as e:
+            logger.error(f"Consciousness verification failed: {e}")
             return None
 
     # =========================================================================
