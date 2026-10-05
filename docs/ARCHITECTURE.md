@@ -4,19 +4,19 @@
 
 The Multi-Theory Consciousness (MTC) framework is organized into three layers:
 
-1. **Neural Substrates** — the computational medium (SNN, LSM, HTM)
-2. **Consciousness Modules** — theory implementations that operate on the substrates
-3. **Assessment Layer** — measurement of consciousness indicators
+1. **Neural Substrates**: the computational medium (SNN, LSM, HTM)
+2. **Consciousness Modules**: theory implementations that operate on the substrates
+3. **Assessment Layer**: measurement of 30 consciousness indicators across eight theories
 
 ```
 +-----------------------------------------------------------------------+
 |                       ASSESSMENT LAYER                                 |
-|  ConsciousnessAssessment | DCMScorer | RPTMeasurement | PhiCalculator |
+| ConsciousnessAssessment | BenchmarkRunner | RPTMeasurement | PhiCalculator |
 +-----------------------------------------------------------------------+
                                 |
 +-----------------------------------------------------------------------+
 |                    CONSCIOUSNESS MODULES                               |
-|  GWT | AST | HOT | FEP | BLT | Damasio | IIT | RPT | Coherence      |
+|  GWT | AST | HOT | FEP | BLT | AE | IIT | RPT | Damasio | Coherence |
 +-----------------------------------------------------------------------+
                                 |
 +-----------------------------------------------------------------------+
@@ -30,56 +30,83 @@ The Multi-Theory Consciousness (MTC) framework is organized into three layers:
 
 ## Package Structure
 
+Every Python module under `mtc/` appears below. Agency & Embodiment (AE) has no module of its own: it lives in the assessment's `ConsciousnessTheory` enum and in the indicator configurations in `assessment/assessment.py`. Integrated Information (IIT) is measured by `PhiCalculator` in the same file and by `consciousness/phi_tracker.py`.
+
 ```
 mtc/
-├── consciousness/           # Theory implementations
-│   ├── enhanced_global_workspace.py  # GWT (Baars)
-│   ├── global_workspace.py           # Simplified GWT
-│   ├── attention_schema.py           # AST (Graziano)
-│   ├── metacognition.py              # HOT (Rosenthal)
-│   ├── active_inference.py           # FEP (Friston)
-│   ├── consciousness_integration.py  # Cross-theory integration
-│   ├── consciousness_metrics.py      # Metric collection
-│   ├── conversation_coherence.py     # Topic/reference tracking
-│   ├── beautiful_loop/               # BLT (Laukkonen et al.)
-│   │   ├── hyper_model.py            #   Precision controller
-│   │   ├── bayesian_binding.py       #   Inference binding
-│   │   └── epistemic_depth.py        #   Self-reference depth
-│   └── damasio/                      # Three-Layer Model
-│       ├── protoself.py              #   Body-state representation
-│       ├── core_consciousness.py     #   Self-world binding
-│       └── extended_consciousness.py #   Autobiographic self
+├── __init__.py                       # Package exports, version
 │
-├── neural/                  # Computational substrates
-│   ├── spiking/             # Spiking Neural Networks
-│   │   ├── snn_core.py      #   Core SNN implementation
-│   │   ├── snn_core_optimized.py  #   Optimized variant
-│   │   └── production_snn.py      #   Production-ready SNN
-│   ├── liquid/              # Liquid State Machines
-│   │   ├── lsm_core.py      #   Core LSM implementation
-│   │   └── production_lsm.py     #   Production-ready LSM
-│   ├── htm/                 # Hierarchical Temporal Memory
-│   │   ├── htm_core.py      #   Core HTM implementation
-│   │   └── production_htm.py     #   Production-ready HTM
-│   ├── protocols/           # Inter-substrate communication
-│   │   ├── message_format.py
-│   │   ├── routing.py
-│   │   ├── synchronization.py
-│   │   └── serialization.py
-│   ├── orchestrator.py      # Coordinates all substrates
-│   ├── base_interfaces.py   # Protocol definitions
-│   ├── memory_pool.py       # Memory management
-│   ├── gpu_integration.py   # GPU acceleration
-│   └── mps_utils.py         # Metal Performance Shaders
+├── assessment/                       # Measurement framework
+│   ├── assessment.py                 #   30-indicator assessment, theory enum, PhiCalculator
+│   ├── framework.py                  #   Measurement framework
+│   ├── rpt_measurement.py            #   RPT indicators
+│   ├── causal_emergence.py           #   Effective Information, CE 2.0
+│   ├── dcm_benchmark.py              #   Digital Consciousness Model benchmark (BenchmarkRunner)
+│   └── dcm_evaluator.py              #   LLM-based indicator evaluation for the DCM
 │
-├── assessment/              # Measurement framework
-│   ├── assessment.py        # 20-indicator assessment
-│   ├── framework.py         # Measurement framework
-│   ├── rpt_measurement.py   # RPT indicators
-│   └── dcm_scoring.py       # Digital Consciousness Model
+├── consciousness/                    # Theory implementations
+│   ├── enhanced_global_workspace.py  #   GWT (Baars)
+│   ├── global_workspace.py           #   Simplified GWT
+│   ├── attention_schema.py           #   AST (Graziano)
+│   ├── metacognition.py              #   HOT (Rosenthal)
+│   ├── active_inference.py           #   FEP (Friston)
+│   ├── phi_tracker.py                #   PhiTracker: IIT state diversity tracking
+│   ├── pad_affect.py                 #   PAD affect model
+│   ├── consciousness_integration.py  #   Cross-theory integration
+│   ├── consciousness_metrics.py      #   Metric collection
+│   ├── conversation_coherence.py     #   Topic and reference tracking
+│   ├── beautiful_loop/               #   BLT (Laukkonen et al.)
+│   │   ├── __init__.py
+│   │   ├── hyper_model.py            #     Precision controller
+│   │   ├── bayesian_binding.py       #     Inference binding
+│   │   └── epistemic_depth.py        #     Self-reference depth
+│   └── damasio/                      #   Three-Layer Model
+│       ├── __init__.py
+│       ├── protoself.py              #     Body-state representation
+│       ├── core_consciousness.py     #     Self-world binding
+│       └── extended_consciousness.py #     Autobiographic self
 │
-└── core/                    # Configuration
-    └── config.py            # Pydantic Settings
+├── core/                             # Configuration and shared utilities
+│   ├── __init__.py
+│   ├── config.py                     #   Pydantic Settings
+│   ├── param_overrides.py            #   TOML parameter override loader
+│   ├── circuit_breaker.py            #   Generic async circuit breaker
+│   └── env_example.py                #   Generates .env.example from the Settings fields
+│
+├── devtools/                         # Developer tooling
+│   ├── __init__.py
+│   └── privacy_audit.py              #   Privacy audit scanner (denylist and allowlist)
+│
+└── neural/                           # Computational substrates
+    ├── __init__.py
+    ├── orchestrator.py               #   Coordinates all substrates
+    ├── base_interfaces.py            #   Protocol definitions
+    ├── memory_pool.py                #   Memory management
+    ├── gpu_integration.py            #   GPU acceleration
+    ├── mps_utils.py                  #   Metal Performance Shaders utilities
+    ├── oscillatory_binding.py        #   AKOrN Kuramoto oscillatory binding
+    ├── spiking/                      #   Spiking Neural Networks
+    │   ├── __init__.py
+    │   ├── snn_core.py               #     Core SNN implementation
+    │   ├── snn_core_optimized.py     #     Optimized variant
+    │   └── production_snn.py         #     Production-ready SNN
+    ├── liquid/                       #   Liquid State Machines
+    │   ├── __init__.py
+    │   ├── lsm_core.py               #     Core LSM implementation
+    │   └── production_lsm.py         #     Production-ready LSM
+    ├── htm/                          #   Hierarchical Temporal Memory
+    │   ├── __init__.py
+    │   ├── htm_core.py               #     Core HTM implementation
+    │   └── production_htm.py         #     Production-ready HTM
+    ├── protocols/                    #   Inter-substrate communication
+    │   ├── __init__.py
+    │   ├── message_format.py
+    │   ├── routing.py
+    │   ├── synchronization.py
+    │   └── serialization.py
+    └── vectors/                      #   Vector embedding coordination
+        ├── __init__.py
+        └── coordinator.py
 ```
 
 ---
@@ -159,28 +186,29 @@ Input Signal
 ### Hierarchical Temporal Memory (HTM)
 
 - **Architecture:** 4,096 columns x 32 cells = 131,072 cells
-- **Implementation:** C++ with Metal GPU acceleration
+- **Implementation:** pure Python (NumPy); no compiled or GPU-accelerated HTM ships in this repository
 - **Learning:** Hebbian, sequence memory
 - **Role:** Pattern recognition, temporal sequence learning
 
 ### Neural Orchestrator
 
 Coordinates all three substrates:
-- **Synchronization** — phase-locked processing across substrates
-- **Message routing** — typed messages between components
-- **State aggregation** — unified neural state for consciousness modules
+- **Synchronization**: phase-locked processing across substrates
+- **Message routing**: typed messages between components
+- **State aggregation**: unified neural state for consciousness modules
 
 ---
 
 ## Assessment Framework
 
-The assessment measures 20 indicators derived from Butlin et al. (2023):
+The assessment measures 30 indicators (plus 3 negative checks) across eight theories, derived from Butlin et al. (2023, 2025):
 
 1. Each indicator maps to a specific consciousness theory
 2. Scored 0.0-1.0 via theory-specific scoring functions
 3. Compared against calibrated thresholds
 4. Weighted and aggregated to overall score
-5. "Architecture functional" declared when sufficient indicators pass
+5. Negative indicators penalize the overall score when detected
+6. "Architecture functional" declared when sufficient indicators pass
 
 ### Ablation Studies
 
@@ -188,20 +216,20 @@ The framework supports ablation testing: selectively disabling individual module
 
 ### DCM Scoring
 
-The Digital Consciousness Model (DCM) provides a 13-perspective probabilistic assessment with credence scores, offering a complementary view to the indicator-based approach.
+The Digital Consciousness Model (DCM) provides a 13-perspective probabilistic assessment with credence scores, offering a complementary view to the indicator-based approach. It is implemented in `assessment/dcm_benchmark.py` (`BenchmarkRunner`) with LLM-based indicator evaluation in `assessment/dcm_evaluator.py`.
 
 ---
 
-## Database Schema (Optional)
+## Persistence and Optional Integrations
 
-When databases are connected, the framework can persist:
+**v0.4.0 contains no database code.** The framework runs assessments and processes consciousness cycles entirely in memory. The table below describes the five-store persistence layer that is in development; none of it is present in this repository yet.
 
-| Database | Purpose | Required? |
-|----------|---------|-----------|
-| PostgreSQL | Episodic/semantic memory, conversation history | Optional |
-| MongoDB | Neural state snapshots, thought streams | Optional |
-| Qdrant | Vector embeddings for semantic search | Optional |
-| Neo4j | Knowledge graph (concepts, relations) | Optional |
-| Redis | Working memory cache (7+/-2 items) | Optional |
+| Store | Planned purpose | Status |
+|-------|-----------------|--------|
+| PostgreSQL | Episodic and semantic memory, conversation history | In development |
+| MongoDB | Neural state snapshots, thought streams | In development |
+| Qdrant | Vector embeddings for semantic search | In development |
+| Neo4j | Knowledge graph (concepts, relations) | In development |
+| Redis | Working memory cache (7+/-2 items) | In development |
 
-All databases are optional. The framework can run assessments and process consciousness cycles without any database connections.
+The orchestrator (`mtc/neural/orchestrator.py`) guards imports of several optional integrations (an emotion bridge, a memory consolidator, a MongoDB data manager, a Redis manager, a continuous-thought loop and extra measurement frameworks). These modules are not yet present in this repository, so the orchestrator runs in its reduced configuration.

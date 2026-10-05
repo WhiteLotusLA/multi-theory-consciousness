@@ -116,7 +116,9 @@ class PhiTracker:
             signals["AST"] = float(protoself)
         else:
             attn = getattr(cs, "attention_schema", None)
-            signals["AST"] = 0.7 if attn and getattr(attn, "current_focus", None) else 0.0
+            signals["AST"] = (
+                0.7 if attn and getattr(attn, "current_focus", None) else 0.0
+            )
 
         # HOT
         fok = getattr(cs, "feeling_of_knowing", None)
@@ -128,7 +130,11 @@ class PhiTracker:
 
         # FEP
         urgency = getattr(cs, "homeostatic_urgency", None)
-        if urgency is not None and isinstance(urgency, (tuple, list)) and len(urgency) >= 2:
+        if (
+            urgency is not None
+            and isinstance(urgency, (tuple, list))
+            and len(urgency) >= 2
+        ):
             signals["FEP"] = float(urgency[1])
         else:
             signals["FEP"] = min(1.0, float(getattr(cs, "prediction_error", 0.0)))
@@ -194,9 +200,8 @@ class PhiTracker:
             visits = self.state_visit_counts[s]
             if visits > 0:
                 for i in range(self.N_NODES):
-                    tpm[s, i] = (
-                        (self.transition_counts[s, i] + self.laplace_alpha)
-                        / (visits + 2 * self.laplace_alpha)
+                    tpm[s, i] = (self.transition_counts[s, i] + self.laplace_alpha) / (
+                        visits + 2 * self.laplace_alpha
                     )
 
         return tpm

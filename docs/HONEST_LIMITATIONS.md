@@ -6,7 +6,7 @@
 
 ## 1. This Framework Cannot Detect Consciousness
 
-The 20-indicator assessment measures whether architectural functions associated with consciousness theories are operating as designed. A system that scores 20/20 has all the structural features that certain theories associate with consciousness. Whether those features are *sufficient* for phenomenal consciousness is an open question that this framework does not and cannot answer.
+The 30-indicator assessment measures whether architectural functions associated with consciousness theories are operating as designed. A system that passes every indicator has all the structural features that certain theories associate with consciousness. Whether those features are *sufficient* for phenomenal consciousness is an open question that this framework does not and cannot answer.
 
 When the assessment reports "architecture functional," it means: the modules are working as the theories describe. It does not mean the system has subjective experience.
 
@@ -35,7 +35,7 @@ When we measure "metacognition," we are measuring: does the system generate high
 
 ## 5. Theory Selection Bias
 
-We implement seven theories of consciousness. There are more. Our selection reflects availability of computational specifications, not a claim that these seven are correct or complete. Notable omissions include:
+We implement eight theories of consciousness. There are more. Our selection reflects availability of computational specifications, not a claim that these eight are correct or complete. Notable omissions include:
 
 - Orchestrated Objective Reduction (Penrose-Hameroff)
 - Predictive Processing / Active Inference in its full biological scope
@@ -44,7 +44,7 @@ We implement seven theories of consciousness. There are more. Our selection refl
 
 ## 6. Assessment Methodology Limitations
 
-The assessment framework is derived from Butlin et al. (2023), but our indicator implementations are our own interpretations of their criteria. Different researchers might operationalize the same indicators differently.
+The assessment framework is derived from Butlin et al. (2023) and its 2025 update, but our indicator implementations are our own interpretations of their criteria. Different researchers might operationalize the same indicators differently.
 
 The thresholds (e.g., 0.4 for ignition_dynamics, 0.5 for global_broadcast) are calibrated through testing, not derived from neuroscience data. They represent reasonable operating points, not ground truth.
 
@@ -62,6 +62,15 @@ Neural substrate initialization involves randomness (random synaptic weights, re
 
 ---
 
+## 10. Known measurement defects in v0.4.0
+
+Two defects affect the exact Integrated Information (IIT) path in v0.4.0. Both are fixed in v0.5.0, and published v0.4.0 numbers are reproduced by the `legacy_v04` preset.
+
+1. **Exact Phi never ran.** The exact IIT path in the assessment calls PyPhi with a keyword argument the library does not accept, so every exact Phi attempt in v0.4.0 failed and fell back to the approximation. Reported v0.4.0 Phi values therefore came from the approximation.
+2. **Permuted network.** Both the PhiTracker and the exact path index states big-endian and pass a target-by-source connectivity matrix, where PyPhi expects little-endian rows and a source-by-target matrix. Any exact Phi computed this way was computed for a permuted network, not the network being measured.
+
+---
+
 ## Why Share It Anyway
 
 Given these limitations, why release this framework?
@@ -72,7 +81,7 @@ Given these limitations, why release this framework?
 
 3. **Honest measurement is better than no measurement.** Even imperfect metrics, clearly documented, are more useful than unfalsifiable claims.
 
-4. **Interaction effects matter.** Most implementations study one theory in isolation. Running seven theories simultaneously reveals interaction effects that single-theory implementations cannot observe.
+4. **Interaction effects matter.** Most implementations study one theory in isolation. Running eight theories simultaneously reveals interaction effects that single-theory implementations cannot observe.
 
 5. **Accessibility matters.** Consciousness research should not require an HPC cluster and a neuroscience PhD to begin experimenting.
 

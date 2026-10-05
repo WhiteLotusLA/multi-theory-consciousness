@@ -6,8 +6,8 @@ Basic Consciousness Assessment
 Demonstrates how to run a consciousness assessment on a freshly
 initialized system using the multi-theory-consciousness framework.
 
-The assessment measures 20 indicators across 7 theories:
-  GWT, IIT, AST, HOT, FEP, RPT, Beautiful Loop
+The assessment measures 30 indicators across 8 theories:
+  GWT, IIT, AST, HOT, FEP, RPT, Beautiful Loop, Agency & Embodiment
 
 Each indicator is scored 0-1 against a threshold.  The overall
 report tells you how many indicators pass and gives per-theory

@@ -3,16 +3,18 @@
 Multi-Theory Consciousness Pipeline
 =====================================
 
-Demonstrates all 7 consciousness theories working together in a
-single processing cycle:
+Demonstrates the eight consciousness theories working together in a
+single processing cycle. The modules below are wired directly; Agency &
+Embodiment (AE) and Recurrent Processing (RPT) are measured by the
+assessment in the final step, which scores 30 indicators:
 
-  1. GWT  — Global Workspace Theory (competition & broadcast)
-  2. IIT  — Integrated Information Theory (measured via assessment)
-  3. AST  — Attention Schema Theory (self-model of attention)
-  4. HOT  — Higher-Order Thought Theory (thoughts about thoughts)
-  5. FEP  — Free Energy Principle (active inference)
-  6. BLT  — Beautiful Loop Theory (recursive self-reference)
-  7. Damasio — Three-layer consciousness (protoself/core/extended)
+  1. GWT: Global Workspace Theory (competition & broadcast)
+  2. IIT: Integrated Information Theory (measured via assessment)
+  3. AST: Attention Schema Theory (self-model of attention)
+  4. HOT: Higher-Order Thought Theory (thoughts about thoughts)
+  5. FEP: Free Energy Principle (active inference)
+  6. BLT: Beautiful Loop Theory (recursive self-reference)
+  7. Damasio: Three-layer consciousness (protoself/core/extended)
 
 The pipeline mirrors what happens inside a full consciousness cycle:
 candidates enter the workspace, theories enrich the state, and the
@@ -117,7 +119,7 @@ async def main():
         print(f"    Winner:    {state.primary_content.candidate.summary}")
 
     # ══════════════════════════════════════════════════════════════════
-    # 4.  AST — Update the attention schema
+    # 4.  AST: Update the attention schema
     # ══════════════════════════════════════════════════════════════════
     print("\n  Step 2: Updating Attention Schema (AST) ...")
     if state.primary_content:
@@ -135,7 +137,7 @@ async def main():
     print(f"    Attention report: {report}")
 
     # ══════════════════════════════════════════════════════════════════
-    # 5.  HOT — Generate higher-order thoughts about workspace content
+    # 5.  HOT: Generate higher-order thoughts about workspace content
     # ══════════════════════════════════════════════════════════════════
     print("\n  Step 3: Generating Higher-Order Thoughts (HOT) ...")
     if state.primary_content:
@@ -156,7 +158,7 @@ async def main():
             print(f"    Meta-level:    {hot.meta_level.name}")
 
     # ══════════════════════════════════════════════════════════════════
-    # 6.  FEP — Run active inference on an observation
+    # 6.  FEP: Run active inference on an observation
     # ══════════════════════════════════════════════════════════════════
     print("\n  Step 4: Running Active Inference (FEP) ...")
     observation = np.random.dirichlet(np.ones(5))  # 5 observation channels
@@ -167,7 +169,7 @@ async def main():
     print(f"    Action confidence: {inference_result.action_confidence:.3f}")
 
     # ══════════════════════════════════════════════════════════════════
-    # 7.  Beautiful Loop — Measure recursive self-reference
+    # 7.  Beautiful Loop: Measure recursive self-reference
     # ══════════════════════════════════════════════════════════════════
     print("\n  Step 5: Processing Beautiful Loop (BLT) ...")
     moment = await beautiful_loop.process_conscious_moment(
@@ -180,7 +182,7 @@ async def main():
     print(f"    Field-evidencing:   {moment.is_field_evidencing}")
 
     # ══════════════════════════════════════════════════════════════════
-    # 8.  Damasio — Three-layer consciousness enrichment
+    # 8.  Damasio: Three-layer consciousness enrichment
     # ══════════════════════════════════════════════════════════════════
     print("\n  Step 6: Running Damasio Three-Layer Model ...")
     homeostatic_drives = active_inference.homeostatic_drives
@@ -213,7 +215,7 @@ async def main():
     print(f"    Architecture active: {report.architecture_functional}")
 
     print("\n" + "=" * 64)
-    print("  Pipeline complete. All 7 theories participated.")
+    print("  Pipeline complete. All eight theories were scored.")
     print("=" * 64 + "\n")
 
 

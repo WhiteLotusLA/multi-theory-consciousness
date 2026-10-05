@@ -5,7 +5,17 @@ All notable changes to the Multi-Theory Consciousness Framework will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] — 2026-04-07
+## [Unreleased]
+
+### Phase 0: foundation
+
+- Baseline fixtures recording v0.4.0 assessment behavior
+- Green mechanical test suite with pytest markers and configuration
+- Real `Settings` with derived store names and generated configuration docs (`.env.example`, `docs/CONFIGURATION.md`)
+- Privacy audit tool, denylists, git hook and CI workflow
+- Documentation corrections: eight theories and 30 indicators everywhere, honest HTM and database statements, known measurement defects recorded in `docs/HONEST_LIMITATIONS.md`
+
+## [0.4.0] - 2026-04-07
 
 ### Added
 - Agency & Embodiment (AE) theory with 2 indicators (AE-1: `agency`, AE-2: `flexible_responsiveness`)
@@ -22,23 +32,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Test imports: phase6 test module → `mtc.assessment.assessment` canonical path
 
 ### Changed
-- Indicator count: 25 → 30 (27 positive + 3 negative)
+- Indicator count: 25 → 30 (plus 3 negative checks)
 - Theory count: 7 → 8 (added Agency & Embodiment)
 - Theory empirical weights now include AE at 0.70 in overall consciousness scoring
 - README: 7 theories → 8 theories, 25 indicators → 30 indicators
 - All Butlin indicator references updated to 2025 TiCS publication
 
-## [0.3.0] — 2026-03-27
+## [0.3.0] - 2026-03-27
 
 ### Added
 - AutoConsciousness infrastructure: autonomous parameter research loop (Karpathy autoresearch pattern)
-  - `experiments/params.toml` — single mutable parameter file
-  - `experiments/param_schema.toml` — 69 tunable parameters with bounds
-  - `experiments/program.md` — Claude Code agent instructions (Phase 2)
-  - `scripts/run_experiment.py` — experiment runner with `--validate` ablation checks
-  - `mtc/core/param_overrides.py` — TOML override loader with schema validation
+  - `experiments/params.toml`: single mutable parameter file
+  - `experiments/param_schema.toml`: 69 tunable parameters with bounds
+  - `experiments/program.md`: Claude Code agent instructions (Phase 2)
+  - `scripts/run_experiment.py`: experiment runner with `--validate` ablation checks
+  - `mtc/core/param_overrides.py`: TOML override loader with schema validation
 
-### Changed (Backported from the reference implementation)
+### Changed (ported from the reference implementation)
 - Assessment: replaced 3 placeholder indicator formulas with real measurements
   - `recurrent_processing`: was `score=0.6`, now uses broadcast coverage + cycles
   - `embodiment`: was `score=0.5`, now uses capacity, history, voluntary ratio
@@ -54,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - `ignition_dynamics` score could exceed 1.0 (now clamped)
 
-## [0.2.1] — 2026-03-25
+## [0.2.1] - 2026-03-25
 
 ### Added
 - Indicators #24-25: `temporal_prediction_depth`, `agent_environment_coupling` (FEP)
@@ -84,9 +94,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 8-octant affect label mapping
 - Generic async Circuit Breaker for database resilience
 - 3 new consciousness indicators:
-  - `oscillatory_binding_coherence` (RPT) — Kuramoto order parameter
-  - `causal_emergence` (IIT) — macro vs micro causal power
-  - `affect_coherence` (FEP) — PAD dimensional consistency
+  - `oscillatory_binding_coherence` (RPT): Kuramoto order parameter
+  - `causal_emergence` (IIT): macro vs micro causal power
+  - `affect_coherence` (FEP): PAD dimensional consistency
 
 ### Changed
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# Consciousness Parameter Schema
+# Consciousness parameter schema for the AutoConsciousness loop
 # =============================================================================
 # All tunable parameters across consciousness modules.
 # Sourced from actual module constructors.
@@ -9,7 +9,7 @@
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# GWT — EnhancedGlobalWorkspace
+# GWT: EnhancedGlobalWorkspace
 # -----------------------------------------------------------------------------
 
 [gwt.capacity]
@@ -33,7 +33,7 @@ min = 1.0
 max = 10.0
 description = "Multiplier applied to winning coalition signals during broadcast"
 
-# GWT — TemporalWorkspaceConfig
+# GWT: TemporalWorkspaceConfig
 
 [gwt.competition_duration_ms]
 type = "float"
@@ -71,7 +71,7 @@ max = 50.0
 description = "Simulation timestep for the temporal workspace dynamics (ms)"
 
 # -----------------------------------------------------------------------------
-# AST — AttentionSchemaModule
+# AST: AttentionSchemaModule
 # -----------------------------------------------------------------------------
 
 [ast.voluntary_boost]
@@ -110,7 +110,7 @@ max = 500
 description = "Number of past attention states retained for prediction"
 
 # -----------------------------------------------------------------------------
-# HOT — MetacognitionModule
+# HOT: MetacognitionModule
 # -----------------------------------------------------------------------------
 
 [hot.hot_generation_threshold]
@@ -147,7 +147,7 @@ default = true
 description = "Whether to generate third-order thoughts (thoughts about thoughts about thoughts)"
 
 # -----------------------------------------------------------------------------
-# FEP — ActiveInferenceConfig
+# FEP: ActiveInferenceConfig
 # -----------------------------------------------------------------------------
 
 [fep.num_hidden_states]
@@ -224,7 +224,7 @@ default = true
 description = "Whether meta-level inference over model parameters is enabled"
 
 # -----------------------------------------------------------------------------
-# FEP Drives — attention_budget
+# FEP Drives: attention_budget
 # -----------------------------------------------------------------------------
 
 [fep.drives.attention_budget.optimal_level]
@@ -256,7 +256,7 @@ max = 5.0
 description = "Relative weight of attention budget in drive arbitration"
 
 # -----------------------------------------------------------------------------
-# FEP Drives — curiosity
+# FEP Drives: curiosity
 # -----------------------------------------------------------------------------
 
 [fep.drives.curiosity.optimal_level]
@@ -288,7 +288,7 @@ max = 5.0
 description = "Relative weight of curiosity in drive arbitration"
 
 # -----------------------------------------------------------------------------
-# FEP Drives — social_connection
+# FEP Drives: social_connection
 # -----------------------------------------------------------------------------
 
 [fep.drives.social_connection.optimal_level]
@@ -320,7 +320,7 @@ max = 5.0
 description = "Relative weight of social connection in drive arbitration"
 
 # -----------------------------------------------------------------------------
-# FEP Drives — coherence
+# FEP Drives: coherence
 # -----------------------------------------------------------------------------
 
 [fep.drives.coherence.optimal_level]
@@ -352,7 +352,7 @@ max = 5.0
 description = "Relative weight of coherence in drive arbitration"
 
 # -----------------------------------------------------------------------------
-# FEP Drives — safety
+# FEP Drives: safety
 # -----------------------------------------------------------------------------
 
 [fep.drives.safety.optimal_level]
@@ -384,7 +384,7 @@ max = 5.0
 description = "Relative weight of safety in drive arbitration (highest priority)"
 
 # -----------------------------------------------------------------------------
-# BLT — BeautifulLoop
+# BLT: BeautifulLoop
 # -----------------------------------------------------------------------------
 
 [blt.num_levels]
@@ -423,7 +423,7 @@ max = 1.0
 description = "Threshold for field-evidencing to contribute to consciousness detection"
 
 # -----------------------------------------------------------------------------
-# Damasio — DamasioLayers
+# Damasio: DamasioLayers
 # -----------------------------------------------------------------------------
 
 [damasio.stability_window]
@@ -434,7 +434,7 @@ max = 200
 description = "Number of recent ticks used to compute emotional stability"
 
 # -----------------------------------------------------------------------------
-# PAD — PADAffectModel
+# PAD: PADAffectModel
 # -----------------------------------------------------------------------------
 
 [pad.history_window]
@@ -445,7 +445,7 @@ max = 1000
 description = "Number of past affect states retained for trend analysis"
 
 # -----------------------------------------------------------------------------
-# Oscillatory — OscillatoryBinding
+# Oscillatory: OscillatoryBinding
 # -----------------------------------------------------------------------------
 
 [oscillatory.num_oscillators]
@@ -519,7 +519,7 @@ max = 1000
 description = "Number of past binding states retained for temporal analysis"
 
 # -----------------------------------------------------------------------------
-# RPT — RPTMeasurement
+# RPT: RPTMeasurement
 # -----------------------------------------------------------------------------
 
 [rpt.local_recurrence_threshold]

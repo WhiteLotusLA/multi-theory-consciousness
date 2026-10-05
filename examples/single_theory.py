@@ -82,7 +82,7 @@ async def main():
 
     # ── 4. Inspect results ───────────────────────────────────────────
     print("\n" + "=" * 60)
-    print("  GLOBAL WORKSPACE — CONSCIOUSNESS CYCLE RESULT")
+    print("  GLOBAL WORKSPACE: CONSCIOUSNESS CYCLE RESULT")
     print("=" * 60)
     print(f"  Conscious?           {state.is_conscious}")
     print(f"  Ignition events:     {state.ignition_events}")

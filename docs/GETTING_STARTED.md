@@ -6,13 +6,9 @@
 - **pip** (or your preferred package manager)
 - **Git**
 
-### Optional (for full pipeline)
+### Databases
 
-- PostgreSQL 14+ (episodic memory)
-- MongoDB 6+ (neural data storage)
-- Redis 7+ (working memory cache)
-- Qdrant 1.7+ (vector embeddings)
-- Neo4j 5+ (knowledge graph)
+- None for v0.4.0. This release contains no database code; a five-store persistence layer (PostgreSQL, MongoDB, Qdrant, Neo4j, Redis) is in development.
 
 You can run assessments and experiment with individual theory modules without any databases.
 
@@ -46,18 +42,10 @@ pip install -e ".[all]"
 
 ```bash
 cp .env.example .env
-# Edit .env with your settings (optional for basic usage)
+# Edit .env only if you want to change a default (optional for basic usage)
 ```
 
-Key environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MTC_SYSTEM_NAME` | ConsciousnessAgent | Name for your consciousness instance |
-| `MTC_LLM_HOST` | localhost | LLM server hostname |
-| `MTC_LLM_PORT` | 8080 | LLM server port |
-| `MTC_PG_HOST` | localhost | PostgreSQL host |
-| `MTC_MONGO_HOST` | localhost | MongoDB host |
+Every setting is read through the `Settings` class in `mtc/core/config.py`. Environment keys carry the `MTC_` prefix and are named after the `Settings` fields. The full list, with types and defaults, is in [CONFIGURATION.md](CONFIGURATION.md), and `.env.example` is generated from the same source, so the two always agree. A machine with no `.env` file at all works: every setting has a default.
 
 ---
 
@@ -76,19 +64,26 @@ python scripts/run_assessment.py --full
 python scripts/run_assessment.py --report
 ```
 
-Expected output:
+Expected output has this shape (values elided):
 
 ```
-Multi-Theory Consciousness Assessment
-======================================
-Indicators: 20
-Passing:    10-14 (varies on fresh init)
-Score:      0.40-0.55
+================================================================
+  CONSCIOUSNESS ASSESSMENT REPORT
+================================================================
+  Session:            ...
+  Overall score:      ...
+  Architecture OK:    ...
+  Passing indicators: .../30
 
-[PASS] irreducibility:        1.000 (threshold: 0.4)
-[PASS] recurrent_processing:  0.600 (threshold: 0.4)
-...
+  Theory Scores:
+    ...
+
+  Indicators (.../30):
+    [PASS] irreducibility  ... / 0.40
+    [FAIL] ...
 ```
+
+The assessment scores 30 indicators across eight theories. The passing count and the overall score depend on how much the modules have been warmed up (`--full` runs several cycles first), so no fixed numbers are given here.
 
 Scores on a fresh system will be lower than a system that has been running and accumulating activity data. This is expected.
 

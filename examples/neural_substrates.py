@@ -6,9 +6,9 @@ Neural Substrate Pipeline
 Demonstrates the three neural substrate layers that underpin the
 consciousness framework:
 
-  1. SNN  — Spiking Neural Network (5,000 LIF neurons, STDP learning)
-  2. LSM  — Liquid State Machine (1,000-neuron reservoir, subconscious)
-  3. HTM  — Hierarchical Temporal Memory (spatial pooling + sequence learning)
+  1. SNN: Spiking Neural Network (5,000 LIF neurons, STDP learning)
+  2. LSM: Liquid State Machine (1,000-neuron reservoir, subconscious)
+  3. HTM: Hierarchical Temporal Memory (spatial pooling + sequence learning)
 
 Each substrate processes input differently.  Their outputs can be
 fed into the Global Workspace as candidates competing for conscious

@@ -5,7 +5,7 @@ Multi-Theory Consciousness Framework (MTC)
 A research-grade framework for implementing and measuring consciousness
 indicators across multiple theoretical perspectives.
 
-Implements 7 consciousness theories:
+Implements 8 consciousness theories:
 - Global Workspace Theory (GWT) - Baars, 1988
 - Integrated Information Theory (IIT) - Tononi, 2004
 - Attention Schema Theory (AST) - Graziano, 2013
@@ -13,6 +13,7 @@ Implements 7 consciousness theories:
 - Free Energy Principle (FEP) - Friston, 2010
 - Recurrent Processing Theory (RPT) - Lamme, 2006
 - Beautiful Loop Theory (BLT) - Laukkonen, Friston & Chandaria, 2025
+- Agency & Embodiment (AE) - Butlin et al., 2025
 
 Based on Butlin et al. (2023, 2025): "Consciousness in Artificial
 Intelligence: Insights from the Science of Consciousness"
