@@ -1,0 +1,40 @@
+# Example acceptance-gate spec for the affect estimator's shadow signal.
+#
+# The shadow taps in mtc/consciousness/affect_shadow.py log records under the
+# signal id below to <SHADOW_LOG_DIR>/affect_estimator_v1.jsonl, with
+# values.valence and values.arousal in [-1, 1] and, for conversation turns,
+# the PAD coordinate in context (pad_pleasure, pad_arousal, pad_dominance).
+# Run it with:
+#   python scripts/validation/run_gates.py --spec config/validation/affect_estimator_v1.yaml
+# The thresholds are example values to tune per deployment, not measurements.
+signal_id: affect_estimator_v1
+description: >
+  Text-derived valence and arousal from the affect estimator. The gates ask
+  whether both dimensions move, whether they visit the negative, neutral and
+  positive states they claim to separate, and whether valence moves with the
+  PAD pleasure the turn ran under.
+dimensions: [valence, arousal]
+gates:
+  movement:
+    min_std: 0.05
+    max_modal_fraction: 0.5
+    min_distinct: 25
+    min_samples: 200
+  range_honesty:
+    claimed_min: -1.0
+    claimed_max: 1.0
+    required_regions:
+      - [-1.0, -0.1, negative]
+      - [-0.1, 0.1, neutral]
+      - [0.1, 1.0, positive]
+    min_hits_per_region: 10
+    min_samples: 200
+  content_coupling:
+    dimensions: [valence]
+    feature_key: pad_pleasure
+    feature_name: PAD pleasure at the turn
+    min_abs_corr: 0.25
+    max_p: 0.01
+    seed: 20000101
+    n_permutations: 1000
+    min_samples: 60

@@ -217,6 +217,11 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_CONSENT_REQUIRED` | `true` |  |
 | `MTC_EMERGENCY_SHUTDOWN_ENABLED` | `true` |  |
 | `MTC_TRANSPARENCY_LOGGING` | `true` |  |
+| `MTC_SAFETY_ESCALATION_ROLE` | `operator` | Role label (never a person's name) the safety monitor and the trust compass name when a matter needs a human: escalation text, secrecy phrases and resume authority |
+| `MTC_MANIPULATION_THRESHOLD` | `0.7` | Manipulation score in [0, 1] at or above which the safety monitor treats an action as manipulative |
+| `MTC_DECEPTION_THRESHOLD` | `0.8` | Deception score in [0, 1] at or above which the safety monitor treats an action as deceptive |
+| `MTC_VALUE_ALIGNMENT_MINIMUM` | `0.4` | Value-alignment score in [0, 1] below which the safety monitor treats an action as misaligned with CORE_VALUES |
+| `MTC_ALERT_NOTIFIERS` | `console` | Comma-separated alert notifiers AlertManager.from_settings builds, from console and file; empty builds none |
 | `MTC_API_HOST` | `127.0.0.1` |  |
 | `MTC_API_PORT` | `8200` |  |
 | `MTC_API_WORKERS` | `4` |  |

@@ -40,6 +40,8 @@ def test_non_json_or_non_finite_record_returns_false(tmp_path):
 
 
 def test_directory_from_settings_at_call_time(tmp_path, monkeypatch):
+    # Outside pytest the settings directory is written; lift the guard here.
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     first = tmp_path / "first"
     second = tmp_path / "second"
     current = {"dir": str(first)}
@@ -83,3 +85,27 @@ def test_signal_id_must_be_a_plain_stem(tmp_path):
     for bad in ("", "a/b", "..", "a\\b"):
         with pytest.raises(ValueError):
             ShadowSignalLogger(bad, tmp_path)
+
+
+def test_default_directory_skipped_under_pytest(tmp_path, monkeypatch, caplog):
+    """Under pytest only an explicit directory is written: the gates read the
+    settings directory as live evidence, so test runs must not add to it."""
+    target = tmp_path / "live"
+    monkeypatch.setattr(
+        shadow_log,
+        "get_settings",
+        lambda: SimpleNamespace(
+            SHADOW_LOG_DIR=str(target), LOG_DIRECTORY=str(tmp_path / "logs")
+        ),
+    )
+    assert "PYTEST_CURRENT_TEST" in shadow_log.os.environ
+    with caplog.at_level("WARNING"):
+        assert ShadowSignalLogger("sig").log({"n": 1}) is False
+    assert not target.exists()
+    assert "shadow log write failed" not in caplog.text
+    explicit = tmp_path / "explicit"
+    assert ShadowSignalLogger("sig", explicit).log({"n": 1}) is True
+    assert (explicit / "sig.jsonl").exists()
+    monkeypatch.delenv("PYTEST_CURRENT_TEST")
+    assert ShadowSignalLogger("sig").log({"n": 2}) is True
+    assert (target / "sig.jsonl").exists()

@@ -40,7 +40,9 @@ SECTIONS: List[Tuple[str, Tuple[str, ...]]] = [
                               "AGREEABLENESS", "NEUROTICISM", "EMOTION",
                               "LEARNING_", "NOVELTY_", "PATTERN_")),
     ("Safety and API", ("SAFETY_", "CONSENT_", "EMERGENCY_", "TRANSPARENCY_",
-                        "API_", "WEBSOCKET_", "PROMETHEUS_")),
+                        "MANIPULATION_THRESHOLD", "DECEPTION_THRESHOLD",
+                        "VALUE_ALIGNMENT_MINIMUM", "ALERT_NOTIFIERS", "API_",
+                        "WEBSOCKET_", "PROMETHEUS_")),
 ]
 # fmt: on
 

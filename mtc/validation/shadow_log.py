@@ -15,10 +15,17 @@ the first write, never earlier.
 Config: ``Settings.SHADOW_LOG_DIR`` (empty derives ``<LOG_DIRECTORY>/
 shadow_signals``), read at call time when no directory is passed to the
 constructor. Records may hold conversation-derived text and are private data.
+
+Test hygiene: the acceptance gates read the settings directory as live shadow
+evidence, and test runs exercise the same taps. So under pytest (the
+``PYTEST_CURRENT_TEST`` environment variable is set) a logger built without a
+directory writes nothing and ``log`` returns False; a logger given an explicit
+directory still writes.
 """
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -52,7 +59,13 @@ class ShadowSignalLogger:
         return self._directory or resolve_shadow_directory()
 
     def log(self, record: Dict[str, Any]) -> bool:
-        """Append one record; True when written, False on any failure."""
+        """Append one record; True when written, False on any failure.
+
+        Under pytest a logger without an explicit directory writes nothing.
+        """
+        if self._directory is None and "PYTEST_CURRENT_TEST" in os.environ:
+            logger.debug("shadow log write skipped under pytest: %s", self.signal_id)
+            return False
         try:
             directory = self.directory
             line = json.dumps(

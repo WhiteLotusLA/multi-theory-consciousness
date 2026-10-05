@@ -1,4 +1,4 @@
-"""Phase 5 Settings keys: device, embedding model, store and identity keys."""
+"""Phase 5 Settings keys: device, embedding model, store, identity and safety keys."""
 
 import os
 from pathlib import Path
@@ -142,3 +142,66 @@ def test_new_keys_land_in_their_sections():
     assert sections["MTC_PERSONA_PATH"] == "Identity and locale"
     assert sections["MTC_CORE_VALUES"] == "Identity and locale"
     assert sections["MTC_CREATOR_RELATIONSHIP"] == "Identity and locale"
+
+
+# Sub-workflow 3: the safety section (escalation role, thresholds, notifiers).
+
+
+def test_escalation_role_default_operator(clean_env, monkeypatch):
+    assert Settings().SAFETY_ESCALATION_ROLE == "operator"
+    monkeypatch.setenv("MTC_SAFETY_ESCALATION_ROLE", "guardian")
+    assert Settings().SAFETY_ESCALATION_ROLE == "guardian"
+    monkeypatch.setenv("MTC_SAFETY_ESCALATION_ROLE", "  ")
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_safety_thresholds_bounded(clean_env, monkeypatch):
+    s = Settings()
+    assert s.MANIPULATION_THRESHOLD == 0.7
+    assert s.DECEPTION_THRESHOLD == 0.8
+    assert s.VALUE_ALIGNMENT_MINIMUM == 0.4
+    for key in (
+        "MTC_MANIPULATION_THRESHOLD",
+        "MTC_DECEPTION_THRESHOLD",
+        "MTC_VALUE_ALIGNMENT_MINIMUM",
+    ):
+        for edge in ("0", "1", "0.5"):
+            monkeypatch.setenv(key, edge)
+            Settings()
+        for bad in ("-0.01", "1.01", "nan", "inf"):
+            monkeypatch.setenv(key, bad)
+            with pytest.raises(ValidationError):
+                Settings()
+        monkeypatch.delenv(key)
+
+
+def test_alert_notifiers_parse_and_reject_unknown(clean_env, monkeypatch):
+    assert csv_list(Settings().ALERT_NOTIFIERS) == ["console"]
+    monkeypatch.setenv("MTC_ALERT_NOTIFIERS", " console , file ")
+    assert csv_list(Settings().ALERT_NOTIFIERS) == ["console", "file"]
+    monkeypatch.setenv("MTC_ALERT_NOTIFIERS", "")
+    assert csv_list(Settings().ALERT_NOTIFIERS) == []
+    for bad in ("console,push", "sms", "Console"):
+        monkeypatch.setenv("MTC_ALERT_NOTIFIERS", bad)
+        with pytest.raises(ValidationError):
+            Settings()
+
+
+def test_safety_keys_land_in_the_safety_section():
+    rendered = render_env_example(Settings)
+    sections = {}
+    current = ""
+    for line in rendered.splitlines():
+        if line.startswith("# === "):
+            current = line[6:-4]
+        elif line and not line.startswith("#"):
+            sections[line.split("=", 1)[0]] = current
+    for key in (
+        "MTC_SAFETY_ESCALATION_ROLE",
+        "MTC_MANIPULATION_THRESHOLD",
+        "MTC_DECEPTION_THRESHOLD",
+        "MTC_VALUE_ALIGNMENT_MINIMUM",
+        "MTC_ALERT_NOTIFIERS",
+    ):
+        assert sections[key] == "Safety and API", key

@@ -30,6 +30,14 @@ callers in async code run them through ``asyncio.to_thread``. A backend that
 cannot reach its server raises ``StoreUnavailable``; it never answers a read
 with an invented or empty stand-in.
 
+The safety audit, alert and privacy audit protocols (pinned by
+``tests/memory/test_audit_store_contracts.py``) are async and follow the same
+rules, ordering by ``timestamp`` with later writes first among equal instants.
+Their documents hold proposed actions, alert context, user ids and access
+records, all private data at runtime. ``ALERT_SEVERITY_ORDER``,
+``severities_at_or_above`` and ``normalize_safety_audit`` are shared by every
+backend so the filters and field checks agree.
+
 Backend layout the later PostgreSQL and MongoDB implementations must match:
 
 - PostgreSQL tables ``consciousness_snapshots`` and ``consciousness_events``
@@ -41,6 +49,9 @@ Backend layout the later PostgreSQL and MongoDB implementations must match:
   ``speaker_models`` (unique ``speaker_name``), ``intrinsic_goals`` (unique
   ``goal_id``, plus an index on ``status``), ``attention_grabs`` (timestamp
   index and unique ``grab_id``) and ``dreams`` (timestamp index).
+- PostgreSQL table ``safety_audit`` with the columns ``SAFETY_AUDIT_FIELDS``
+  and a uuid ``id``; MongoDB collections ``alerts`` (unique ``alert_id``) and
+  ``privacy_audit_log`` (unique ``event_id``).
 """
 
 import uuid
@@ -650,4 +661,142 @@ class EpisodeConsolidator(Protocol):
         self, pattern_type: Optional[str] = None, min_frequency: int = 1
     ) -> List[Any]:
         """Return the consolidated patterns, optionally filtered."""
+        ...
+
+
+# Alert severities from least to most severe. A ``min_severity`` filter keeps
+# the named level and every level after it.
+ALERT_SEVERITY_ORDER = ("info", "warning", "urgent", "critical")
+
+# Columns of one safety audit row (the ``safety_audit`` table) besides ``id``.
+SAFETY_AUDIT_FIELDS = (
+    "timestamp",
+    "action_proposed",
+    "safety_level",
+    "checks_performed",
+    "decision",
+    "reasoning",
+    "requires_review",
+)
+SAFETY_AUDIT_REQUIRED = ("action_proposed", "safety_level", "decision")
+
+
+def severities_at_or_above(min_severity: str) -> Tuple[str, ...]:
+    """Return the severities at or above ``min_severity``, least severe first.
+
+    An unknown level raises ValueError naming ``ALERT_SEVERITY_ORDER``.
+    """
+    if min_severity not in ALERT_SEVERITY_ORDER:
+        raise ValueError(
+            f"unknown alert severity {min_severity!r}; "
+            f"expected one of {ALERT_SEVERITY_ORDER}"
+        )
+    return ALERT_SEVERITY_ORDER[ALERT_SEVERITY_ORDER.index(min_severity) :]
+
+
+def normalize_safety_audit(record: Mapping[str, Any]) -> Dict[str, Any]:
+    """Check one safety audit record and fill its optional fields.
+
+    The required fields are ``SAFETY_AUDIT_REQUIRED``; a missing one, or a key
+    outside ``SAFETY_AUDIT_FIELDS``, raises ValueError. ``checks_performed``
+    defaults to an empty mapping, ``reasoning`` to an empty string and
+    ``requires_review`` to False. ``timestamp`` is left to the store (its
+    current UTC time when absent). The result is a new dict.
+    """
+    unknown = sorted(set(record) - set(SAFETY_AUDIT_FIELDS))
+    if unknown:
+        raise ValueError(f"safety audit record has unknown fields {unknown}")
+    missing = [name for name in SAFETY_AUDIT_REQUIRED if record.get(name) is None]
+    if missing:
+        raise ValueError(f"safety audit record lacks required fields {missing}")
+    row = dict(record)
+    row["checks_performed"] = dict(row.get("checks_performed") or {})
+    row["reasoning"] = row.get("reasoning") or ""
+    row["requires_review"] = bool(row.get("requires_review", False))
+    return row
+
+
+@runtime_checkable
+class SafetyAuditStore(Protocol):
+    """Safety decisions, one row per checked action (private content).
+
+    A record holds ``SAFETY_AUDIT_FIELDS`` (checked by
+    ``normalize_safety_audit``); the proposed action can contain conversation
+    text. Rows come back with their ``id`` (a string) and an aware
+    ``timestamp``, newest first. The PostgreSQL implementation writes the
+    ``safety_audit`` table.
+    """
+
+    async def add_audit(self, record: Dict[str, Any]) -> str:
+        """Store one audit row and return its assigned id.
+
+        A missing ``timestamp`` means the store's current UTC time; a naive
+        one, a missing required field or an unknown field raises ValueError.
+        """
+        ...
+
+    async def pending_review(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return rows whose ``requires_review`` is true, newest first."""
+        ...
+
+    async def recent(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return the latest rows, newest first."""
+        ...
+
+
+@runtime_checkable
+class AlertStore(Protocol):
+    """Alerts keyed by ``alert_id`` (they can carry private context).
+
+    An alert document needs ``alert_id``, ``alert_type`` and ``severity`` (one
+    of ``ALERT_SEVERITY_ORDER``); other fields are stored as given. A missing
+    ``timestamp`` means the store's current UTC time; a naive one raises
+    ValueError. The MongoDB implementation writes the ``alerts`` collection.
+    """
+
+    async def add_alert(self, alert: Dict[str, Any]) -> None:
+        """Store one alert; a missing key field or unknown severity raises
+        ValueError."""
+        ...
+
+    async def recent_alerts(
+        self,
+        limit: int = 100,
+        alert_type: Optional[str] = None,
+        min_severity: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return alerts newest first, optionally of one type and at or above
+        a severity (an unknown severity raises ValueError)."""
+        ...
+
+    async def acknowledge(self, alert_id: str) -> bool:
+        """Mark an alert acknowledged (``acknowledged`` true and
+        ``acknowledged_at`` the store's current UTC time); False when no such
+        alert exists."""
+        ...
+
+
+@runtime_checkable
+class PrivacyAuditStore(Protocol):
+    """Privacy audit events (user ids and access records; private data).
+
+    An event document needs ``event_id``, ``event_type`` and ``user_id``;
+    other fields are stored as given. A missing ``timestamp`` means the
+    store's current UTC time; a naive one raises ValueError. The MongoDB
+    implementation writes the ``privacy_audit_log`` collection.
+    """
+
+    async def add_event(self, event: Dict[str, Any]) -> None:
+        """Store one event; a missing key field raises ValueError."""
+        ...
+
+    async def events(
+        self,
+        since: Optional[datetime] = None,
+        limit: int = 100,
+        user_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return events at or after ``since``, newest first, optionally of one
+        user and one type."""
         ...

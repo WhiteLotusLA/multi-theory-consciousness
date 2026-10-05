@@ -20,6 +20,13 @@ reads ``VECTOR_SEARCH_LIMIT`` for a default ``top_k`` and refuses an embedder
 whose ``semantic`` attribute is not true unless ``allow_non_semantic=True``, so
 no hashed or random vector passes for a meaning. The episodic store has its own
 in-memory implementation next to its schema.
+
+``InMemorySafetyAuditStore``, ``InMemoryAlertStore`` and
+``InMemoryPrivacyAuditStore`` take ``(max_items, clock)``; the clock stamps a
+document written without a ``timestamp`` and an alert's ``acknowledged_at``.
+They read newest first by timestamp and reject a second document with an id
+already stored. Their documents hold proposed actions, alert context, user ids
+and access records, all private data.
 """
 
 import copy
@@ -53,6 +60,8 @@ from mtc.memory.protocols import (
     SnapshotEvent,
     SnapshotRecord,
     clamp_working_capacity,
+    normalize_safety_audit,
+    severities_at_or_above,
 )
 from mtc.memory.thought_gist import ThoughtGist
 
@@ -827,3 +836,185 @@ class InMemoryGraphStore:
                 "concepts": len(self._concepts),
                 "memory_nodes": len(self._memories),
             }
+
+
+class _TimedDocs:
+    """Documents keyed by an id, read newest first by ``timestamp``.
+
+    Among equal timestamps the later write comes first. The oldest write is
+    dropped at the cap. Documents are deep-copied on write and on read.
+    """
+
+    def __init__(self, max_items: int, clock: Optional[Clock]) -> None:
+        self._max_items = _check_cap(max_items)
+        self._clock = clock or _utc_now
+        self._docs: "OrderedDict[str, Tuple[int, Dict[str, Any]]]" = OrderedDict()
+        self._seq = 0
+        self._lock = threading.RLock()
+
+    def now(self) -> datetime:
+        return _aware(self._clock())
+
+    def stamp(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+        """Copy ``doc`` and give it an aware UTC ``timestamp``."""
+        stored = copy.deepcopy(doc)
+        moment = stored.get("timestamp")
+        stored["timestamp"] = self.now() if moment is None else _aware(moment)
+        return stored
+
+    def put(self, key: str, doc: Dict[str, Any]) -> None:
+        with self._lock:
+            if key in self._docs:
+                raise ValueError(f"id {key!r} is already stored")
+            self._seq += 1
+            self._docs[key] = (self._seq, doc)
+            while len(self._docs) > self._max_items:
+                self._docs.popitem(last=False)
+
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            entry = self._docs.get(key)
+            return None if entry is None else entry[1]
+
+    def newest_first(
+        self,
+        limit: int,
+        keep: Optional[Callable[[Dict[str, Any]], bool]] = None,
+    ) -> List[Dict[str, Any]]:
+        if limit <= 0:
+            return []
+        with self._lock:
+            entries = list(self._docs.values())
+        entries.sort(key=lambda entry: (entry[1]["timestamp"], entry[0]), reverse=True)
+        docs = [doc for _seq, doc in entries if keep is None or keep(doc)]
+        return [copy.deepcopy(doc) for doc in docs[:limit]]
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._docs)
+
+
+def _require_keys(doc: Dict[str, Any], keys: Sequence[str], kind: str) -> None:
+    missing = [key for key in keys if doc.get(key) in (None, "")]
+    if missing:
+        raise ValueError(f"{kind} lacks required fields {missing}")
+
+
+class InMemorySafetyAuditStore:
+    """Safety audit rows held in process memory (proposed actions are private)."""
+
+    def __init__(
+        self, max_items: int = DEFAULT_MAX_ITEMS, clock: Optional[Clock] = None
+    ) -> None:
+        self._rows = _TimedDocs(max_items, clock)
+
+    async def add_audit(self, record: Dict[str, Any]) -> str:
+        row = self._rows.stamp(normalize_safety_audit(record))
+        row_id = str(uuid.uuid4())
+        row["id"] = row_id
+        self._rows.put(row_id, row)
+        return row_id
+
+    async def pending_review(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._rows.newest_first(limit, lambda row: bool(row["requires_review"]))
+
+    async def recent(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._rows.newest_first(limit)
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "backend": "memory",
+            "available": True,
+            "last_error": None,
+            "rows": len(self._rows),
+        }
+
+
+class InMemoryAlertStore:
+    """Alerts held in process memory, keyed by ``alert_id``."""
+
+    def __init__(
+        self, max_items: int = DEFAULT_MAX_ITEMS, clock: Optional[Clock] = None
+    ) -> None:
+        self._alerts = _TimedDocs(max_items, clock)
+
+    async def add_alert(self, alert: Dict[str, Any]) -> None:
+        _require_keys(alert, ("alert_id", "alert_type", "severity"), "alert")
+        severities_at_or_above(alert["severity"])
+        stored = self._alerts.stamp(alert)
+        self._alerts.put(str(stored["alert_id"]), stored)
+
+    async def recent_alerts(
+        self,
+        limit: int = 100,
+        alert_type: Optional[str] = None,
+        min_severity: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        allowed = (
+            set(severities_at_or_above(min_severity))
+            if min_severity is not None
+            else None
+        )
+
+        def keep(doc: Dict[str, Any]) -> bool:
+            if alert_type is not None and doc.get("alert_type") != alert_type:
+                return False
+            return allowed is None or doc.get("severity") in allowed
+
+        return self._alerts.newest_first(limit, keep)
+
+    async def acknowledge(self, alert_id: str) -> bool:
+        doc = self._alerts.get(str(alert_id))
+        if doc is None:
+            return False
+        doc["acknowledged"] = True
+        doc["acknowledged_at"] = self._alerts.now()
+        return True
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "backend": "memory",
+            "available": True,
+            "last_error": None,
+            "alerts": len(self._alerts),
+        }
+
+
+class InMemoryPrivacyAuditStore:
+    """Privacy audit events held in process memory (user ids are private)."""
+
+    def __init__(
+        self, max_items: int = DEFAULT_MAX_ITEMS, clock: Optional[Clock] = None
+    ) -> None:
+        self._events = _TimedDocs(max_items, clock)
+
+    async def add_event(self, event: Dict[str, Any]) -> None:
+        _require_keys(event, ("event_id", "event_type", "user_id"), "privacy event")
+        stored = self._events.stamp(event)
+        self._events.put(str(stored["event_id"]), stored)
+
+    async def events(
+        self,
+        since: Optional[datetime] = None,
+        limit: int = 100,
+        user_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        floor = _aware(since) if since is not None else None
+
+        def keep(doc: Dict[str, Any]) -> bool:
+            if floor is not None and doc["timestamp"] < floor:
+                return False
+            if user_id is not None and doc.get("user_id") != user_id:
+                return False
+            return event_type is None or doc.get("event_type") == event_type
+
+        return self._events.newest_first(limit, keep)
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "backend": "memory",
+            "available": True,
+            "last_error": None,
+            "events": len(self._events),
+        }

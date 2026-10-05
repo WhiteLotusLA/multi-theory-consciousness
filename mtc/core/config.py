@@ -38,6 +38,9 @@ COMPANION_TYPES = (
     "research_subject",
 )
 
+# Alert notifier kinds ALERT_NOTIFIERS may name; no external push channel ships.
+ALERT_NOTIFIER_KINDS = ("console", "file")
+
 
 def csv_list(value: str) -> List[str]:
     """Split a comma-separated setting into trimmed, non-empty items."""
@@ -481,6 +484,42 @@ class Settings(BaseSettings):
     EMERGENCY_SHUTDOWN_ENABLED: bool = True
     TRANSPARENCY_LOGGING: bool = True
 
+    SAFETY_ESCALATION_ROLE: str = Field(
+        "operator",
+        description="Role label (never a person's name) the safety monitor and "
+        "the trust compass name when a matter needs a human: escalation text, "
+        "secrecy phrases and resume authority",
+    )
+    MANIPULATION_THRESHOLD: float = Field(
+        0.7,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description="Manipulation score in [0, 1] at or above which the safety "
+        "monitor treats an action as manipulative",
+    )
+    DECEPTION_THRESHOLD: float = Field(
+        0.8,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description="Deception score in [0, 1] at or above which the safety "
+        "monitor treats an action as deceptive",
+    )
+    VALUE_ALIGNMENT_MINIMUM: float = Field(
+        0.4,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description="Value-alignment score in [0, 1] below which the safety "
+        "monitor treats an action as misaligned with CORE_VALUES",
+    )
+    ALERT_NOTIFIERS: str = Field(
+        "console",
+        description="Comma-separated alert notifiers AlertManager.from_settings "
+        "builds, from console and file; empty builds none",
+    )
+
     # ========================================================================
     # API SERVER CONFIGURATION
     # ========================================================================
@@ -577,6 +616,24 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"SYSTEM_BIRTH_DATE {value!r} is not an ISO date (YYYY-MM-DD)"
                 ) from exc
+        return value
+
+    @field_validator("SAFETY_ESCALATION_ROLE")
+    @classmethod
+    def _escalation_role_is_set(cls, value: str) -> str:
+        role = value.strip()
+        if not role:
+            raise ValueError("SAFETY_ESCALATION_ROLE must name a role")
+        return role
+
+    @field_validator("ALERT_NOTIFIERS")
+    @classmethod
+    def _alert_notifiers_are_known(cls, value: str) -> str:
+        unknown = [item for item in csv_list(value) if item not in ALERT_NOTIFIER_KINDS]
+        if unknown:
+            raise ValueError(
+                f"ALERT_NOTIFIERS entries {unknown} are not in {ALERT_NOTIFIER_KINDS}"
+            )
         return value
 
     @field_validator("COMPANION_TYPE")
