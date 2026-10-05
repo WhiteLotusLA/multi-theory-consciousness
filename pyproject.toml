@@ -52,14 +52,23 @@ neural = [
 fep = [
     "inferactively-pymdp>=0.0.7",
 ]
-databases = [
-    "redis>=5.0",
-    "motor>=3.0",
-    "pymongo>=4.0",
-    "neo4j>=5.0",
-    "qdrant-client>=1.7",
+postgres = [
     "asyncpg>=0.29",
-    "sqlalchemy>=2.0",
+]
+mongo = [
+    "pymongo>=4.0",
+]
+redis = [
+    "redis>=5.0",
+]
+neo4j = [
+    "neo4j>=5.0",
+]
+qdrant = [
+    "qdrant-client>=1.7",
+]
+databases = [
+    "multi-theory-consciousness[postgres,mongo,redis,neo4j,qdrant]",
 ]
 assessment = [
     "pymc>=5.0",
