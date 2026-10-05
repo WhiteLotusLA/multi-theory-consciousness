@@ -7,10 +7,12 @@ stores on a throwaway database and whose seeders write telemetry and thought
 documents directly. No case below needs editing.
 """
 
+import asyncio
 import copy
-from dataclasses import dataclass
+import functools
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import pytest
 
@@ -22,6 +24,8 @@ from mtc.memory.protocols import (
     ThoughtGistStore,
 )
 from mtc.memory.thought_gist import ThoughtGist
+from mtc.neural.mongodb_schemas import MongoConversationStore, NeuralDataManager
+from tests.memory.test_mongo_stores import FakeMongoClient
 
 T0 = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -35,6 +39,9 @@ class NeuralBackend:
     make_gists_and_retention: Callable[[], Tuple[Any, Any]]
     seed_telemetry: Callable[[Any, str, Dict[str, Any]], Any]
     seed_thought: Callable[[Any, Dict[str, Any]], Any]
+    # A store-backed entry names a throwaway fixture; its factories then take
+    # that fixture's value first and the ``backend`` fixture binds it.
+    fixture: Optional[str] = None
 
 
 def _memory_gists_and_retention():
@@ -50,8 +57,49 @@ async def _memory_seed_thought(retention, doc):
     retention.add_thought(doc)
 
 
-# Append a pytest.param(NeuralBackend(...), marks=pytest.mark.db, id="mongo")
-# entry per real store; the cases below do not change.
+def _mongo_turns(database: Any) -> Any:
+    store = MongoConversationStore(database=database)
+    store.ensure_indexes()
+    return store
+
+
+def _mongo_gists_and_retention(database: Any) -> Tuple[Any, Any]:
+    manager = NeuralDataManager(database_name=database.name, client=database.client)
+    manager.ensure_indexes()
+    return manager, manager
+
+
+async def _mongo_seed_telemetry(manager, collection, doc):
+    await asyncio.to_thread(manager.db[collection].insert_one, copy.deepcopy(doc))
+
+
+async def _mongo_seed_thought(manager, doc):
+    await asyncio.to_thread(
+        manager.db["thought_streams"].insert_one, copy.deepcopy(doc)
+    )
+
+
+@pytest.fixture
+def fake_mongo() -> Any:
+    """A fake pymongo database: checks the store logic without a server."""
+    return FakeMongoClient()["contract"]
+
+
+def _mongo_backend(fixture: str) -> NeuralBackend:
+    return NeuralBackend(
+        "mongo",
+        _mongo_turns,
+        _mongo_gists_and_retention,
+        _mongo_seed_telemetry,
+        _mongo_seed_thought,
+        fixture=fixture,
+    )
+
+
+# Append a pytest.param(NeuralBackend(...), marks=pytest.mark.db, id="...") entry
+# per real store; the cases below do not change. The mongo-fake entry runs them
+# over the fake driver of tests/memory/test_mongo_stores.py, which models the
+# driver and not a server, so the db entry is what checks real MongoDB.
 BACKENDS = [
     pytest.param(
         NeuralBackend(
@@ -63,12 +111,24 @@ BACKENDS = [
         ),
         id="inmemory",
     ),
+    pytest.param(_mongo_backend("fake_mongo"), id="mongo-fake"),
+    pytest.param(_mongo_backend("throwaway_mongo"), marks=pytest.mark.db, id="mongo"),
 ]
 
 
 @pytest.fixture(params=BACKENDS)
 def backend(request) -> NeuralBackend:
-    return request.param
+    entry = request.param
+    if entry.fixture is None:
+        return entry
+    target = request.getfixturevalue(entry.fixture)
+    return replace(
+        entry,
+        make_turns=functools.partial(entry.make_turns, target),
+        make_gists_and_retention=functools.partial(
+            entry.make_gists_and_retention, target
+        ),
+    )
 
 
 def _gist(

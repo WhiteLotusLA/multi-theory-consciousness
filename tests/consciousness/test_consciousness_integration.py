@@ -414,7 +414,9 @@ class _FakeAssessor:
 
 
 def test_process_experience_inside_running_loop():
-    orchestrator = ConsciousNeuralOrchestrator(enable_mongodb=False)
+    orchestrator = ConsciousNeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+    )
     orchestrator.consciousness = _FakeAssessor(0.42)
 
     async def inside_loop():
@@ -446,7 +448,9 @@ class _ContextIndicator:
 
 
 def test_back_to_back_experiences_in_loop_measure_their_own_data():
-    orchestrator = ConsciousNeuralOrchestrator(enable_mongodb=False)
+    orchestrator = ConsciousNeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+    )
     integration = orchestrator.consciousness
     integration.metrics.indicators = {
         "global_workspace_integration": _ContextIndicator()

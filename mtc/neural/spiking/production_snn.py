@@ -27,10 +27,24 @@ from dataclasses import dataclass
 import logging
 import time
 
+from mtc.core.device import resolve_device
+
 # Set default tensor type for MPS compatibility
 torch.set_default_dtype(torch.float32)
 
 logger = logging.getLogger(__name__)
+
+
+def _device_manager():
+    """The process device manager (``mtc.neural.mps_utils``), imported lazily.
+
+    Cache clears and synchronization go through it, so this module never
+    names an accelerator backend itself.
+    """
+    from mtc.neural.mps_utils import mps_manager
+
+    return mps_manager
+
 
 # snn.Leaky registers these as buffers, but they are derived from the config
 # at construction and are never learned; a restore must not overwrite them
@@ -93,8 +107,10 @@ class SNNConfig:
     batch_size: int = 32
     timesteps: int = 10  # Simulation steps per forward pass
 
-    # Hardware
+    # Hardware: with ``use_gpu`` the device is ``device`` when given and the
+    # ``MTC_DEVICE`` setting otherwise (``mtc.core.device``); without it, CPU
     use_gpu: bool = True
+    device: Optional[str] = None
 
     def __post_init__(self):
         if self.hidden_layers is None:
@@ -196,7 +212,8 @@ class ProductionSNN(nn.Module):
 
     - Leaky integrate-and-fire layers (about 5,200 neurons by default)
     - Optional STDP layers and their plasticity statistics
-    - MPS or CUDA device selection when available, CPU otherwise
+    - Device from ``SNNConfig.device`` or ``MTC_DEVICE`` (MPS, CUDA or CPU);
+      an explicit device that is not available raises
     - Population synchrony (chi) per forward pass
     - Guarded persistence of parameters and learned buffers
     """
@@ -205,16 +222,12 @@ class ProductionSNN(nn.Module):
         super().__init__()
         self.config = config or SNNConfig()
 
-        # Device selection (Metal/GPU if available)
-        if self.config.use_gpu and torch.backends.mps.is_available():
-            self.device = torch.device("mps")  # Metal Performance Shaders
-            logger.info("Using Metal Performance Shaders acceleration")
-        elif self.config.use_gpu and torch.cuda.is_available():
-            self.device = torch.device("cuda")
-            logger.info("Using CUDA GPU acceleration")
+        # Device selection through the MTC_DEVICE switch
+        if self.config.use_gpu:
+            self.device = resolve_device(self.config.device)
         else:
             self.device = torch.device("cpu")
-            logger.info("Using CPU (no GPU acceleration available)")
+        logger.info(f"SNN device: {self.device}")
 
         # Build network architecture
         self._build_network()
@@ -649,10 +662,8 @@ class ProductionSNN(nn.Module):
             start = time.time()
             with torch.no_grad():  # Prevent gradient accumulation during benchmark
                 output, state = self.forward(test_input)
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            elif torch.backends.mps.is_available():
-                torch.mps.synchronize()
+            if self.device.type != "cpu":
+                _device_manager().synchronize()
             times.append((time.time() - start) * 1000)
             spike_counts.append(int(sum(s.sum().item() for s in state["spike_counts"])))
 
@@ -713,8 +724,7 @@ def test_production_snn():
 
     # Force garbage collection before heavy operations
     gc.collect()
-    if torch.backends.mps.is_available():
-        torch.mps.empty_cache()
+    _device_manager().empty_cache()
 
     # Test input processing
     print("\n1. Testing input processing...")
@@ -737,8 +747,7 @@ def test_production_snn():
     # Test STDP learning (with smaller batch to prevent memory issues)
     print("\n3. Testing STDP learning...")
     gc.collect()
-    if torch.backends.mps.is_available():
-        torch.mps.empty_cache()
+    _device_manager().empty_cache()
 
     # Smaller batch size for safety
     inputs = torch.randn(8, config.input_dim, dtype=torch.float32)  # Reduced from 32

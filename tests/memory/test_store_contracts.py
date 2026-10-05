@@ -22,9 +22,10 @@ from typing import Any, Awaitable, Callable, Optional
 import pytest
 import pytest_asyncio
 
-from mtc.memory import inmemory, protocols
+from mtc.memory import inmemory, mongo_stores, protocols
 from mtc.memory.postgres_stores import PostgresSnapshotStore
 from mtc.memory.protocols import SnapshotEvent, SnapshotRecord
+from tests.memory.test_mongo_stores import FakeMongoClient
 
 T0 = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -77,8 +78,37 @@ async def _postgres_prepare(pool: Any) -> None:
     await PostgresSnapshotStore(pool).ensure_schema()
 
 
+_MONGO_CLASSES = {
+    "learning": mongo_stores.MongoLearningStore,
+    "speaker": mongo_stores.MongoSpeakerModelStore,
+    "goal": mongo_stores.MongoGoalStore,
+    "grab": mongo_stores.MongoAttentionGrabStore,
+    "dream": mongo_stores.MongoDreamStore,
+}
+
+
+def _mongo_factory(database: Any, kind: str, max_items: Optional[int] = None) -> Any:
+    if max_items is not None:
+        pytest.skip("MongoDB stores keep every document; they have no item cap")
+    if kind in _MONGO_CLASSES:
+        return _MONGO_CLASSES[kind](database=database)
+    return _inmemory_factory(kind)
+
+
+async def _mongo_prepare(database: Any) -> None:
+    await asyncio.to_thread(mongo_stores.ensure_document_indexes, database)
+
+
+@pytest.fixture
+def fake_mongo() -> Any:
+    """A fake pymongo database: checks the store logic without a server."""
+    return FakeMongoClient()["contract"]
+
+
 # Append a pytest.param(Backend(...), marks=pytest.mark.db, id="...") entry per
-# real store; the cases below do not change.
+# real store; the cases below do not change. The mongo-fake entry runs the same
+# cases over the fake driver of tests/memory/test_mongo_stores.py, which models
+# the driver and not a server, so the db entry is what checks real MongoDB.
 BACKENDS = [
     pytest.param(Backend("inmemory", _inmemory_factory), id="inmemory"),
     pytest.param(
@@ -91,6 +121,27 @@ BACKENDS = [
         ),
         marks=pytest.mark.db,
         id="postgres",
+    ),
+    pytest.param(
+        Backend(
+            "mongo-fake",
+            _mongo_factory,
+            supports_cap=False,
+            fixture="fake_mongo",
+            prepare=_mongo_prepare,
+        ),
+        id="mongo-fake",
+    ),
+    pytest.param(
+        Backend(
+            "mongo",
+            _mongo_factory,
+            supports_cap=False,
+            fixture="throwaway_mongo",
+            prepare=_mongo_prepare,
+        ),
+        marks=pytest.mark.db,
+        id="mongo",
     ),
 ]
 

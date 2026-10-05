@@ -165,7 +165,9 @@ def test_latest_signals_none_until_first_experience(wired):
 
 
 def test_missing_substrate_outputs_stay_missing():
-    bare = NeuralOrchestrator(enable_mongodb=False)
+    bare = NeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+    )
     bare.process_experience("observation", {"joy": 0.7})
 
     assert bare.latest_neural_signals is None

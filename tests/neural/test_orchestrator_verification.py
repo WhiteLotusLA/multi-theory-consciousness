@@ -26,13 +26,17 @@ def test_verification_component_available():
         "mtc.consciousness.verification_framework",
         None,
     )
-    orchestrator = NeuralOrchestrator(enable_mongodb=False)
+    orchestrator = NeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+    )
     assert orchestrator.available_components()["verification_framework"] is True
     assert isinstance(orchestrator.consciousness_verifier, ConsciousnessVerifier)
 
 
 def test_verify_with_absent_substrates_is_insufficient():
-    orchestrator = NeuralOrchestrator(enable_mongodb=False)
+    orchestrator = NeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+    )
     result = _run(orchestrator.verify_consciousness())
     assert isinstance(result, VerificationSuiteResult)
     assert result.overall_score is None
@@ -50,7 +54,9 @@ def test_verify_with_absent_substrates_is_insufficient():
 def test_verify_with_history_and_absent_substrates_is_insufficient():
     # Conversation turns alone are not evidence: a reply that repeats the
     # user's words must not produce a coherence score without a substrate.
-    orchestrator = NeuralOrchestrator(enable_mongodb=False)
+    orchestrator = NeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+    )
     history = [
         {"role": "user", "content": "tell me about cats"},
         {"role": "assistant", "content": "cats are about cats"},
@@ -75,7 +81,9 @@ def test_verify_with_history_and_absent_substrates_is_insufficient():
 
 
 def test_verify_marks_only_produced_outputs_real():
-    orchestrator = NeuralOrchestrator(enable_mongodb=False)
+    orchestrator = NeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+    )
     subconscious = SimpleNamespace(
         emotional_coherence=0.7,
         intuitive_valence=0.2,
@@ -113,7 +121,9 @@ def test_verify_marks_only_produced_outputs_real():
 
 
 def test_verify_never_raises(monkeypatch):
-    orchestrator = NeuralOrchestrator(enable_mongodb=False)
+    orchestrator = NeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+    )
 
     def boom(*args, **kwargs):
         raise RuntimeError("suite exploded")

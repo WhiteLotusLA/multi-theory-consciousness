@@ -17,8 +17,25 @@ Architecture:
 Every substrate except the oscillatory binding is optional. A component whose
 module is not installed is reported by ``available_components()`` and named
 once in the log at construction; nothing stands in for its output.
+
+Components and stores:
+
+- The emotion bridge (SNN and LSM) and the memory consolidator (HTM) are built
+  from their default configs on the first ``process_experience`` or ``sleep``
+  unless an instance is injected (``emotion_bridge``, ``memory_consolidator``)
+  or ``False`` disables the component. A component class that does not declare
+  ``build_on_first_use`` is built at construction instead. Constructing an
+  orchestrator therefore stays cheap, and the measurement framework is sized
+  from the substrates as soon as they exist.
+- A data manager (MongoDB) exists only when one is injected or
+  ``enable_mongodb=True`` is passed; the default is False. A Redis manager
+  exists only when one is passed. Constructing an orchestrator with defaults
+  creates no store client.
+- Accelerator cache clears go through the device manager in
+  ``mtc.neural.mps_utils``; this module names no accelerator backend.
 """
 
+import importlib
 import inspect
 import logging
 import math
@@ -281,22 +298,24 @@ def _reservoir_binding_metrics(trajectory: Any, coherence: Any) -> Dict[str, flo
 
 
 def _release_accelerator_cache(include_cuda: bool) -> Optional[str]:
-    """Empty the torch allocator cache when torch is already loaded.
+    """Empty the accelerator allocator cache through the device manager.
 
-    Torch is never imported here: when it is not loaded nothing has allocated
-    accelerator memory, so there is nothing to release.
+    The manager (``mtc.neural.mps_utils``) is consulted only when torch is
+    already loaded: when it is not, nothing has allocated accelerator memory,
+    so there is nothing to release. A CUDA cache is released only when
+    ``include_cuda`` is true. Returns the device that was cleared, or None.
     """
-    torch = sys.modules.get("torch")
-    if torch is None:
+    if "torch" not in sys.modules:
         return None
     try:
-        mps = getattr(getattr(torch, "backends", None), "mps", None)
-        if mps is not None and mps.is_available():
-            torch.mps.empty_cache()
-            return "mps"
-        if include_cuda and torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            return "cuda"
+        manager = importlib.import_module("mtc.neural.mps_utils").mps_manager
+        device = getattr(getattr(manager, "device", None), "type", None)
+        if not getattr(manager, "enabled", False) or device in (None, "cpu"):
+            return None
+        if device == "cuda" and not include_cuda:
+            return None
+        manager.empty_cache()
+        return str(device)
     except Exception as e:
         logger.debug(f"Accelerator cache release skipped: {e}")
     return None
@@ -370,20 +389,29 @@ class NeuralOrchestrator:
     def __init__(
         self,
         neural_data_manager=None,
-        enable_mongodb: bool = True,
+        enable_mongodb: bool = False,
         brain=None,
         redis_manager=None,
+        emotion_bridge=None,
+        memory_consolidator=None,
     ):
         """
         Initialize the neural orchestrator.
 
         Args:
             neural_data_manager: Data manager for neural data persistence
-            enable_mongodb: Whether to enable persistence
+            enable_mongodb: Build a data manager from Settings when none was
+                passed (it connects lazily); False by default, so nothing
+                touches MongoDB unless asked
             brain: LLM Brain for LLM-enhanced thoughts
             redis_manager: Redis manager for working memory cache (optional)
+            emotion_bridge: An emotion bridge to use; None builds the default
+                one on first use, False leaves the component out
+            memory_consolidator: A memory consolidator to use; None builds the
+                default one on first use, False leaves the component out
         """
         self.brain = brain
+        self.enable_mongodb = bool(enable_mongodb)
         self.neural_data_manager = neural_data_manager
         if enable_mongodb and not neural_data_manager and _HAS_NEURAL_DATA:
             self.neural_data_manager = NeuralDataManager()
@@ -401,20 +429,22 @@ class NeuralOrchestrator:
             logger.info(f"Optional components not installed: {', '.join(missing)}")
 
         # Layer 1: Conscious (SNN) + Subconscious (LSM)
-        self.lsm_bridge = None
-        if _HAS_EMOTION_BRIDGE:
-            self.lsm_bridge = EmotionLSMBridge(
-                neural_data_manager=self.neural_data_manager,
-                store_states=enable_mongodb,
-            )
-
         # Layer 2: Memory Consolidation (HTM)
+        # An injected instance is used as is; False leaves the component out; a
+        # real class (it declares build_on_first_use) is built by
+        # _ensure_components on first use, and any other class now.
+        self.lsm_bridge = None
         self.memory_consolidator = None
-        if _HAS_MEMORY_CONSOLIDATOR:
-            self.memory_consolidator = MemoryConsolidator(
-                neural_data_manager=self.neural_data_manager,
-                consolidation_cycles=10,
-            )
+        self._deferred_components: Dict[str, bool] = {}
+        self._place_component(
+            "lsm_bridge", emotion_bridge, EmotionLSMBridge, _HAS_EMOTION_BRIDGE
+        )
+        self._place_component(
+            "memory_consolidator",
+            memory_consolidator,
+            MemoryConsolidator,
+            _HAS_MEMORY_CONSOLIDATOR,
+        )
 
         # Layer 3: Continuous Thought Machine (Background consciousness)
         self.thought_generator = None
@@ -469,20 +499,7 @@ class NeuralOrchestrator:
         self.global_workspace = None
         self.enhanced_workspace = None
 
-        if _HAS_MEASUREMENT:
-            sizes = self.substrate_sizes()
-            try:
-                self.consciousness_framework = ConsciousnessMeasurementFramework(
-                    snn_neurons=sizes["snn"] or 0,
-                    lsm_neurons=sizes["lsm"] or 0,
-                    htm_columns=sizes["htm_columns"] or 0,
-                )
-                logger.info(
-                    "Consciousness Measurement Framework initialized "
-                    "(14 framework metrics)"
-                )
-            except Exception as e:
-                logger.warning(f"Consciousness framework initialization failed: {e}")
+        self._build_framework()
 
         if _HAS_VERIFICATION:
             try:
@@ -516,6 +533,66 @@ class NeuralOrchestrator:
 
         logger.info("Neural Orchestrator initialized!")
 
+    def _place_component(
+        self, attribute: str, supplied: Any, cls: Any, available: bool
+    ) -> None:
+        """Wire one optional component: use ``supplied``, leave it out, defer it
+        or build it now (see the module docstring)."""
+        if supplied is False:
+            return
+        if supplied is not None:
+            setattr(self, attribute, supplied)
+            return
+        if not available or cls is None:
+            return
+        if getattr(cls, "build_on_first_use", False):
+            self._deferred_components[attribute] = True
+        else:
+            setattr(self, attribute, self._build_component(attribute))
+
+    def _build_component(self, attribute: str) -> Any:
+        manager = self.neural_data_manager
+        if attribute == "lsm_bridge":
+            return EmotionLSMBridge(
+                neural_data_manager=manager,
+                store_states=bool(self.enable_mongodb and manager is not None),
+            )
+        return MemoryConsolidator(neural_data_manager=manager, consolidation_cycles=10)
+
+    def _ensure_components(self) -> None:
+        """Build the deferred components (the first experience or sleep does).
+
+        A failure (for example an explicit device that is not available)
+        propagates and leaves the component deferred, so the next call tries
+        again. Once substrates exist the measurement framework is rebuilt from
+        their sizes.
+        """
+        pending = getattr(self, "_deferred_components", None)
+        if not pending:
+            return
+        for attribute in list(pending):
+            setattr(self, attribute, self._build_component(attribute))
+            del pending[attribute]
+        self._build_framework()
+
+    def _build_framework(self) -> None:
+        """(Re)create the measurement framework sized from the live substrates."""
+        if not _HAS_MEASUREMENT:
+            return
+        sizes = self.substrate_sizes()
+        try:
+            self.consciousness_framework = ConsciousnessMeasurementFramework(
+                snn_neurons=sizes["snn"] or 0,
+                lsm_neurons=sizes["lsm"] or 0,
+                htm_columns=sizes["htm_columns"] or 0,
+            )
+            logger.info(
+                "Consciousness Measurement Framework initialized "
+                "(14 framework metrics)"
+            )
+        except Exception as e:
+            logger.warning(f"Consciousness framework initialization failed: {e}")
+
     # ======== COMPONENTS ========
 
     def available_components(self) -> Dict[str, bool]:
@@ -536,14 +613,24 @@ class NeuralOrchestrator:
         """
         bridge = getattr(self, "lsm_bridge", None)
         snn_neurons = None
-        count = getattr(getattr(bridge, "snn", None), "_count_neurons", None)
+        snn = getattr(bridge, "snn", None)
+        count = getattr(snn, "_count_neurons", None)
         if callable(count):
             try:
                 snn_neurons = _as_count(count())
             except Exception as e:
                 logger.debug(f"SNN neuron count unavailable: {e}")
-        lsm_config = getattr(getattr(bridge, "lsm", None), "config", None)
-        lsm_neurons = _as_count(getattr(lsm_config, "reservoir_size", None))
+        elif callable(getattr(snn, "get_metrics", None)):
+            try:
+                snn_neurons = _as_count(snn.get_metrics().get("total_neurons"))
+            except Exception as e:
+                logger.debug(f"SNN neuron count unavailable: {e}")
+        lsm = getattr(bridge, "lsm", None)
+        lsm_neurons = _as_count(
+            getattr(getattr(lsm, "config", None), "reservoir_size", None)
+        )
+        if lsm_neurons is None:
+            lsm_neurons = _as_count(getattr(lsm, "n_reservoir", None))
         htm = getattr(getattr(self, "memory_consolidator", None), "htm", None)
         htm_config = getattr(htm, "config", None)
         columns = _as_count(getattr(htm_config, "num_columns", None))
@@ -585,6 +672,7 @@ class NeuralOrchestrator:
             Processed experience with all neural states
         """
         start_time = datetime.now()
+        self._ensure_components()
 
         # Calculate valence/arousal if not provided
         if valence is None:
@@ -627,7 +715,7 @@ class NeuralOrchestrator:
                 emotions=emotions,
                 valence=valence,
                 arousal=arousal,
-                dominance=0.5,
+                dominance=None,
             )
 
             snn_result, subconscious_state = self.lsm_bridge.process_emotion(
@@ -952,6 +1040,7 @@ class NeuralOrchestrator:
             logger.warning("No experiences to consolidate")
             return {"status": "no_experiences"}
 
+        self._ensure_components()
         if not self.memory_consolidator:
             logger.warning("Memory consolidator not available")
             return {"status": "no_consolidator"}
@@ -989,9 +1078,11 @@ class NeuralOrchestrator:
         # Clear experience buffer (consolidated!)
         self.experience_buffer.clear()
 
+        reduction = consolidation_report.get("anomaly_reduction")
         logger.info(
-            f"Woke from sleep: {consolidation_report['patterns_discovered']} patterns, "
-            f"anomaly reduced by {consolidation_report.get('anomaly_reduction', 0):.3f}"
+            f"Woke from sleep: {consolidation_report.get('patterns_discovered', 0)} "
+            f"patterns, anomaly reduced by "
+            f"{'n/a' if reduction is None else f'{reduction:.3f}'}"
         )
 
         return consolidation_report
@@ -1067,8 +1158,15 @@ class NeuralOrchestrator:
                 logger.warning("LSM states missing from subconscious")
                 return None
 
-            # Recent memories arrive with the memory layer; thoughts come from
-            # the thought stream when it exists
+            # Not ported: the reference implementation's read of recent
+            # memories from the document store. It guarded on an
+            # ``episodic_memories`` attribute that its data manager never
+            # defined (the branch could not run), and episodic rows live in the
+            # episodic store of the memory layer, which this class does not
+            # hold. Recent memories arrive with the memory layer (Phase 6), so
+            # the list stays empty here rather than being filled from a
+            # collection that does not exist. Thoughts come from the thought
+            # stream when it exists.
             memories = []
             thoughts = []
             if self.thought_stream:
@@ -1360,6 +1458,79 @@ class NeuralOrchestrator:
             "attention_schema": attention_schema_metrics,
             "components": self.available_components(),
         }
+
+    def simulate_day(
+        self,
+        n_experiences: int = 20,
+        sleep_at_end: bool = True,
+        sleep_duration: str = "medium",
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run a day of synthetic experiences through ``process_experience``.
+
+        The emotions are stimuli drawn by a local generator (``seed`` makes the
+        day reproducible; the global random state is untouched): positive in the
+        first five experiences, curious in the next five, a mix in the next
+        five and calm after that. They are inputs, not measurements, and every
+        experience has the type ``simulated_experience``. With ``sleep_at_end``
+        the day closes with ``sleep(sleep_duration)``.
+
+        Returns:
+            ``n_experiences``, ``elapsed_time_sec``, ``avg_experience_time_sec``,
+            ``consolidation`` (the sleep report, or None) and ``final_metrics``.
+        """
+        if n_experiences < 1:
+            raise ValueError("n_experiences must be at least 1")
+        rng = np.random.default_rng(seed)
+        afternoon = (
+            {"trust": 0.7, "love": 0.6},
+            {"curiosity": 0.8, "anticipation": 0.6},
+            {"joy": 0.7, "surprise": 0.5},
+        )
+        logger.info(f"Simulating a day of {n_experiences} experiences")
+        start_time = datetime.now()
+        for i in range(n_experiences):
+            if i < 5:
+                emotions = {
+                    "joy": float(rng.uniform(0.6, 0.9)),
+                    "anticipation": float(rng.uniform(0.5, 0.8)),
+                }
+            elif i < 10:
+                emotions = {
+                    "curiosity": float(rng.uniform(0.7, 0.9)),
+                    "joy": float(rng.uniform(0.4, 0.7)),
+                }
+            elif i < 15:
+                emotions = dict(afternoon[int(rng.integers(len(afternoon)))])
+            else:
+                emotions = {
+                    "trust": float(rng.uniform(0.6, 0.8)),
+                    "love": float(rng.uniform(0.5, 0.7)),
+                }
+            self.process_experience(
+                experience_type="simulated_experience",
+                emotions=emotions,
+                context=f"Experience {i + 1} of the day",
+            )
+
+        consolidation_report = None
+        if sleep_at_end:
+            consolidation_report = self.sleep(duration=sleep_duration)
+
+        elapsed = (datetime.now() - start_time).total_seconds()
+        summary = {
+            "n_experiences": n_experiences,
+            "elapsed_time_sec": elapsed,
+            "avg_experience_time_sec": elapsed / n_experiences,
+            "consolidation": consolidation_report,
+            "final_metrics": self.get_system_metrics(),
+        }
+        logger.info(
+            f"Day complete: {n_experiences} experiences in {elapsed:.1f}s, "
+            f"{summary['final_metrics']['memory']['semantic_patterns']} patterns"
+        )
+        return summary
 
     # ======== CONTINUOUS THOUGHT MACHINE CONTROLS ========
 

@@ -1,86 +1,49 @@
 """
 HTM (Hierarchical Temporal Memory) Module for Consciousness Research
-==========================================================================
+=====================================================================
 
-This module provides research-grade HTM implementations for consciousness modeling,
-including MPS GPU-accelerated, C++ Metal, and Python fallback versions.
+Pure NumPy hierarchical temporal memory for consciousness modeling:
 
-Available Implementations (in order of preference):
-- MPSHTM: PyTorch MPS GPU acceleration (fastest)
-- CppHtmInterface: C++ HTM with Metal acceleration
-- ProductionHTM: Pure Python research implementation (fallback)
+- ``ProductionHTM``: spatial pooler plus temporal memory, 4,096 columns by
+  default (``HTM_COLUMNS`` and ``HTM_CELLS_PER_COLUMN`` size the one the memory
+  consolidator builds)
+- ``HTM``, ``SDR``, ``SpatialPooler`` and ``TemporalMemory``: the compact
+  reference implementation
+- ``MemoryConsolidator``, ``EpisodicMemory`` and ``SemanticPattern``: the
+  sleep-like replay that turns episodes into semantic patterns
+
+There is no accelerated or native variant: ``get_best_htm`` returns
+``ProductionHTM``.
 """
 
-import logging
+from typing import Optional
 
-logger = logging.getLogger(__name__)
-
-# Try MPS-accelerated HTM first (fastest on Apple Silicon)
-try:
-    from .mps_htm import MPSHTM, MPSHTMConfig, MPS_AVAILABLE
-
-    HTM_MPS_AVAILABLE = MPS_AVAILABLE
-    if HTM_MPS_AVAILABLE:
-        logger.info("MPS HTM with Metal Performance Shaders available")
-except ImportError as e:
-    HTM_MPS_AVAILABLE = False
-    MPSHTM = None
-    MPSHTMConfig = None
-    logger.debug(f"MPS HTM not available: {e}")
-
-# Try C++ HTM extension
-try:
-    from .cpp_integration import CppHtmInterface, HTMBuildSystem
-
-    HTM_CPP_AVAILABLE = True
-except ImportError:
-    HTM_CPP_AVAILABLE = False
-    CppHtmInterface = None
-    HTMBuildSystem = None
-
-# Always available Python implementations
-from .htm_core import HTM, SDR, SpatialPooler, TemporalMemory  # noqa: E402
-from .production_htm import ProductionHTM  # noqa: E402
+from .htm_core import HTM, SDR, SpatialPooler, TemporalMemory
+from .memory_consolidator import (
+    ConsolidatorConfig,
+    EpisodicMemory,
+    MemoryConsolidator,
+    SemanticPattern,
+)
+from .production_htm import HTMConfig, ProductionHTM
 
 
-def get_best_htm():
-    """
-    Get the best available HTM implementation.
-    Returns the fastest available: MPS > C++ > Python
-    """
-    if HTM_MPS_AVAILABLE:
-        return MPSHTM()
-    elif HTM_CPP_AVAILABLE:
-        from .cpp_integration import HTMCppConfig
-
-        return CppHtmInterface(HTMCppConfig())
-    else:
-        return ProductionHTM()
+def get_best_htm(config: Optional[HTMConfig] = None) -> ProductionHTM:
+    """Return a ``ProductionHTM`` built from ``config`` (the default config when
+    None)."""
+    return ProductionHTM(config)
 
 
 __all__ = [
-    # Best implementation selector
     "get_best_htm",
-    # MPS GPU accelerated (fastest)
-    "MPSHTM",
-    "MPSHTMConfig",
-    "HTM_MPS_AVAILABLE",
-    # C++ accelerated (if available)
-    "CppHtmInterface",
-    "HTMBuildSystem",
-    "HTM_CPP_AVAILABLE",
-    # Python implementations
     "HTM",
+    "HTMConfig",
     "ProductionHTM",
     "SDR",
     "SpatialPooler",
     "TemporalMemory",
+    "ConsolidatorConfig",
+    "EpisodicMemory",
+    "MemoryConsolidator",
+    "SemanticPattern",
 ]
-
-# Log availability summary
-if HTM_MPS_AVAILABLE:
-    logger.info("HTM: Using MPS GPU acceleration")
-elif HTM_CPP_AVAILABLE:
-    logger.info("HTM: Using C++ with Eigen SIMD")
-else:
-    logger.warning("HTM: Using Python fallback (slower)")
