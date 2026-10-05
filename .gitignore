@@ -89,3 +89,6 @@ config/privacy/denylist.local.txt
 
 # Per-install private space (replaces the reference system's private directory)
 agent_space/
+
+# Real drift canon; the shipped example is config/rsi/canon.example.json
+config/rsi/canon.json

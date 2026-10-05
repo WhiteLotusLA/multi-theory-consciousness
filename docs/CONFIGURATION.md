@@ -23,6 +23,29 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_LOG_ROTATION_SIZE_MB` | `100` |  |
 | `MTC_LOG_ROTATION_BACKUPS` | `5` |  |
 
+## Identity and locale
+
+| Variable | Default | Description |
+|---|---|---|
+| `MTC_TIMEZONE` | `UTC` | IANA time zone used for display and schedules; stored timestamps stay UTC |
+| `MTC_WAKE_HOUR` | `6` | Local hour the waking day starts |
+| `MTC_SLEEP_HOUR` | `22` | Local hour the night window starts; must differ from WAKE_HOUR |
+| `MTC_LOCATION_LAT` | `(empty)` | Optional latitude in degrees for daylight lines; set both coordinates or neither |
+| `MTC_LOCATION_LON` | `(empty)` | Optional longitude in degrees for daylight lines; set both coordinates or neither |
+| `MTC_SYSTEM_BIRTH_DATE` | `(empty)` | ISO date (YYYY-MM-DD) the system was brought up; empty means unknown and no age is computed |
+| `MTC_COMPANION_TYPE` | `research_subject` | Relationship type: child, sibling, friend, partner, mentor or research_subject |
+| `MTC_DEVELOPMENTAL_STAGE_ENABLED` | `false` | Enable the developmental machinery for companion types other than child |
+
+## Paths
+
+| Variable | Default | Description |
+|---|---|---|
+| `MTC_AGENT_SPACE_DIR` | `agent_space` | Private runtime directory (identity markers, persisted state); keep it out of version control |
+| `MTC_IDENTITY_STATEMENT_PATH` | `(empty)` | Identity statement file; empty derives <AGENT_SPACE_DIR>/identity_statement.md |
+| `MTC_SHADOW_LOG_DIR` | `(empty)` | Shadow signal logs; empty derives <LOG_DIRECTORY>/shadow_signals |
+| `MTC_RESULTS_DIR` | `results` | Root for experiment and snapshot result files |
+| `MTC_STATE_DIR` | `agent_space/consciousness_state` | Where module state is persisted between runs |
+
 ## Databases
 
 | Variable | Default | Description |
@@ -99,6 +122,12 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_HTM_COLUMNS` | `4096` |  |
 | `MTC_HTM_CELLS_PER_COLUMN` | `32` |  |
 
+## Speakers and trust
+
+| Variable | Default | Description |
+|---|---|---|
+| `MTC_DEFAULT_SPEAKER_TRUST` | `0.5` | Trust every speaker model starts from unless a token-checked trust lookup supplies another value; a name never changes it |
+
 ## Consciousness modules
 
 | Variable | Default | Description |
@@ -124,6 +153,7 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_BLT_BINDING_THRESHOLD` | `0.3` |  |
 | `MTC_BLT_DEPTH_THRESHOLD` | `0.3` |  |
 | `MTC_BLT_GENUINE_THRESHOLD` | `0.4` |  |
+| `MTC_ATTENTION_GRAB_NOTICING_ENABLED` | `false` | Record captured and emotional attention shifts in the attention-capture journal |
 
 ## Assessment
 
@@ -190,9 +220,3 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_WEBSOCKET_PING_TIMEOUT` | `10` |  |
 | `MTC_PROMETHEUS_ENABLED` | `false` |  |
 | `MTC_PROMETHEUS_PORT` | `9090` |  |
-
-## Other
-
-| Variable | Default | Description |
-|---|---|---|
-| `MTC_STATE_DIR` | `agent_space/consciousness_state` | Where module state is persisted between runs |

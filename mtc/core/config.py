@@ -14,9 +14,29 @@ Provides type-safe access to all framework settings including:
 """
 
 import os
-from typing import Optional, List
+from datetime import date
+from typing import Any, List, Optional
+from zoneinfo import ZoneInfo
+
+from pydantic import (
+    AliasChoices,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import AliasChoices, Field, computed_field, model_validator
+
+# Companion relationship types the onboarding schema and the developmental
+# gate recognise.
+COMPANION_TYPES = (
+    "child",
+    "sibling",
+    "friend",
+    "partner",
+    "mentor",
+    "research_subject",
+)
 
 
 class Settings(BaseSettings):
@@ -34,6 +54,63 @@ class Settings(BaseSettings):
     CREATOR_NAME: str = "Creator"
 
     # ========================================================================
+    # IDENTITY AND LOCALE
+    # ========================================================================
+
+    TIMEZONE: str = Field(
+        "UTC",
+        description="IANA time zone used for display and schedules; stored "
+        "timestamps stay UTC",
+    )
+    WAKE_HOUR: int = Field(
+        6, ge=0, le=23, description="Local hour the waking day starts"
+    )
+    SLEEP_HOUR: int = Field(
+        22,
+        ge=0,
+        le=23,
+        description="Local hour the night window starts; must differ from WAKE_HOUR",
+    )
+    LOCATION_LAT: Optional[float] = Field(
+        None,
+        description="Optional latitude in degrees for daylight lines; set both "
+        "coordinates or neither",
+    )
+    LOCATION_LON: Optional[float] = Field(
+        None,
+        description="Optional longitude in degrees for daylight lines; set both "
+        "coordinates or neither",
+    )
+    SYSTEM_BIRTH_DATE: str = Field(
+        "",
+        description="ISO date (YYYY-MM-DD) the system was brought up; empty means "
+        "unknown and no age is computed",
+    )
+    COMPANION_TYPE: str = Field(
+        "research_subject",
+        description="Relationship type: child, sibling, friend, partner, mentor "
+        "or research_subject",
+    )
+    DEVELOPMENTAL_STAGE_ENABLED: bool = Field(
+        False,
+        description="Enable the developmental machinery for companion types "
+        "other than child",
+    )
+
+    # ========================================================================
+    # SPEAKERS AND TRUST
+    # ========================================================================
+
+    DEFAULT_SPEAKER_TRUST: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description="Trust every speaker model starts from unless a token-checked "
+        "trust lookup supplies another value; a name never changes it",
+    )
+
+    # ========================================================================
     # SYSTEM CONFIGURATION
     # ========================================================================
 
@@ -49,6 +126,28 @@ class Settings(BaseSettings):
     MODEL_DIRECTORY: str = "./models"
     DATA_DIRECTORY: str = "./data"
     TEMP_DIRECTORY: str = "/tmp"
+
+    # ========================================================================
+    # PATHS
+    # ========================================================================
+
+    AGENT_SPACE_DIR: str = Field(
+        "agent_space",
+        description="Private runtime directory (identity markers, persisted "
+        "state); keep it out of version control",
+    )
+    IDENTITY_STATEMENT_PATH: str = Field(
+        "",
+        description="Identity statement file; empty derives "
+        "<AGENT_SPACE_DIR>/identity_statement.md",
+    )
+    SHADOW_LOG_DIR: str = Field(
+        "",
+        description="Shadow signal logs; empty derives <LOG_DIRECTORY>/shadow_signals",
+    )
+    RESULTS_DIR: str = Field(
+        "results", description="Root for experiment and snapshot result files"
+    )
 
     # ========================================================================
     # DATABASE CONFIGURATION
@@ -235,6 +334,13 @@ class Settings(BaseSettings):
     BLT_DEPTH_THRESHOLD: float = 0.3
     BLT_GENUINE_THRESHOLD: float = 0.4
 
+    # Attention-capture journal (mtc.consciousness.attention_observer)
+    ATTENTION_GRAB_NOTICING_ENABLED: bool = Field(
+        False,
+        description="Record captured and emotional attention shifts in the "
+        "attention-capture journal",
+    )
+
     # Module state persistence (mtc.consciousness.state_persistence)
     STATE_DIR: str = Field(
         "agent_space/consciousness_state",
@@ -392,6 +498,66 @@ class Settings(BaseSettings):
     # Derived values
     # ========================================================================
 
+    @field_validator("LOCATION_LAT", "LOCATION_LON", mode="before")
+    @classmethod
+    def _empty_coordinate_is_unset(cls, value: Any) -> Any:
+        """An empty env value (the generated example renders None so) is unset."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("TIMEZONE")
+    @classmethod
+    def _timezone_is_iana(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (KeyError, ValueError, OSError) as exc:
+            raise ValueError(f"TIMEZONE {value!r} is not an IANA zone name") from exc
+        return value
+
+    @field_validator("SYSTEM_BIRTH_DATE")
+    @classmethod
+    def _birth_date_is_iso(cls, value: str) -> str:
+        if value:
+            try:
+                date.fromisoformat(value)
+            except ValueError as exc:
+                raise ValueError(
+                    f"SYSTEM_BIRTH_DATE {value!r} is not an ISO date (YYYY-MM-DD)"
+                ) from exc
+        return value
+
+    @field_validator("COMPANION_TYPE")
+    @classmethod
+    def _companion_type_is_known(cls, value: str) -> str:
+        if value not in COMPANION_TYPES:
+            raise ValueError(f"COMPANION_TYPE must be one of {COMPANION_TYPES}")
+        return value
+
+    @field_validator("LOCATION_LAT")
+    @classmethod
+    def _latitude_in_range(cls, value: Optional[float]) -> Optional[float]:
+        if value is not None and not -90.0 <= value <= 90.0:
+            raise ValueError("LOCATION_LAT must be within [-90, 90]")
+        return value
+
+    @field_validator("LOCATION_LON")
+    @classmethod
+    def _longitude_in_range(cls, value: Optional[float]) -> Optional[float]:
+        if value is not None and not -180.0 <= value <= 180.0:
+            raise ValueError("LOCATION_LON must be within [-180, 180]")
+        return value
+
+    @model_validator(mode="after")
+    def _check_locale_pairs(self) -> "Settings":
+        if (self.LOCATION_LAT is None) != (self.LOCATION_LON is None):
+            raise ValueError(
+                "LOCATION_LAT and LOCATION_LON must be set together or not at all"
+            )
+        if self.WAKE_HOUR == self.SLEEP_HOUR:
+            raise ValueError("WAKE_HOUR and SLEEP_HOUR must differ")
+        return self
+
     @model_validator(mode="after")
     def _derive_store_names(self) -> "Settings":
         prefix = self.DB_PREFIX
@@ -407,6 +573,12 @@ class Settings(BaseSettings):
             self.REDIS_KEY_PREFIX = f"{prefix}:"
         if not self.PROJECT_ROOT:
             self.PROJECT_ROOT = os.getcwd()
+        if not self.IDENTITY_STATEMENT_PATH:
+            self.IDENTITY_STATEMENT_PATH = os.path.join(
+                self.AGENT_SPACE_DIR, "identity_statement.md"
+            )
+        if not self.SHADOW_LOG_DIR:
+            self.SHADOW_LOG_DIR = os.path.join(self.LOG_DIRECTORY, "shadow_signals")
         return self
 
 
