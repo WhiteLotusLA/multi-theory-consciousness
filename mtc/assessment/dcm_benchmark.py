@@ -19,7 +19,6 @@ import json
 import hashlib
 import logging
 import time
-import os
 import numpy as np
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -34,6 +33,8 @@ from typing import (
     Protocol,
     runtime_checkable,
 )
+
+from mtc.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -174,9 +175,7 @@ class ModelSpecManager:
         api_url: str = "",
     ):
         self.cache_dir = Path(cache_dir)
-        self.api_url = api_url or os.environ.get(
-            "DCM_API_URL", DEFAULT_DCM_API_URL
-        )
+        self.api_url = api_url or get_settings().DCM_API_URL
         self._raw_spec: Optional[List[Dict[str, Any]]] = None
         self._parsed: Optional[ParsedSpec] = None
 
@@ -262,9 +261,7 @@ class ModelSpecManager:
             raw=self._raw_spec,
         )
 
-    def _collect_indicators(
-        self, evidencers: List[Dict], indicators: Set[str]
-    ) -> None:
+    def _collect_indicators(self, evidencers: List[Dict], indicators: Set[str]) -> None:
         """Recursively collect leaf indicator names from evidencer tree."""
         for ev in evidencers:
             children = ev.get("evidencers", [])
@@ -486,30 +483,33 @@ class BayesianEngine:
                 stance_posteriors[stance.name] = mean_val
                 stance_confidence[stance.name] = ci_width
                 logger.info(
-                    f"  Stance '{stance.name}': P(c)={mean_val:.4f} "
+                    f" Stance '{stance.name}': P(c)={mean_val:.4f} "
                     f"(CI width={ci_width:.4f})"
                 )
             except Exception as e:
-                logger.warning(f"  Stance '{stance.name}' failed: {e}")
+                logger.warning(f" Stance '{stance.name}' failed: {e}")
                 stance_posteriors[stance.name] = 0.0
                 stance_confidence[stance.name] = 1.0
 
         # Aggregate: plausibility-weighted average
         if plausibility_weights:
-            total_w = sum(
-                plausibility_weights.get(s, 1.0) for s in stance_posteriors
+            total_w = sum(plausibility_weights.get(s, 1.0) for s in stance_posteriors)
+            overall = (
+                sum(
+                    stance_posteriors[s] * plausibility_weights.get(s, 1.0)
+                    for s in stance_posteriors
+                )
+                / total_w
+                if total_w > 0
+                else 0.0
             )
-            overall = sum(
-                stance_posteriors[s] * plausibility_weights.get(s, 1.0)
-                for s in stance_posteriors
-            ) / total_w if total_w > 0 else 0.0
         else:
             # Equal weights if no plausibility data
             vals = list(stance_posteriors.values())
             overall = float(np.mean(vals)) if vals else 0.0
 
         # Stance spread (min/max of per-stance posteriors, not a true
-        # Bayesian CI — proper CI would require combining per-stance
+        # Bayesian CI: proper CI would require combining per-stance
         # posterior samples, which is a future improvement)
         vals = list(stance_posteriors.values())
         ci = (
@@ -710,8 +710,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--mode",
         choices=["local", "claude", "manual"],
-        default=os.environ.get("DCM_EVALUATOR_MODE", "local"),
-        help="Evaluator mode (default: from DCM_EVALUATOR_MODE env var)",
+        default=get_settings().DCM_EVALUATOR_MODE,
+        help="Evaluator mode (default: from MTC_DCM_EVALUATOR_MODE)",
     )
     parser.add_argument(
         "--samples",
@@ -736,7 +736,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--cache-dir",
-        default=os.environ.get("DCM_CACHE_DIR", "data/dcm"),
+        default=get_settings().DCM_CACHE_DIR,
         help="Cache directory (default: data/dcm)",
     )
     args = parser.parse_args()
@@ -758,10 +758,10 @@ if __name__ == "__main__":
             sys.exit(1)
         print(f"\nDCM Score: {result.overall_probability:.4f}")
         print(f"CI: ({result.overall_ci[0]:.4f}, {result.overall_ci[1]:.4f})")
-        print(f"\nComparison (system - baseline):")
+        print("\nComparison (system - baseline):")
         for name, delta in sorted(result.comparison.items()):
             sign = "+" if delta >= 0 else ""
-            print(f"  vs {name}: {sign}{delta:.4f}")
+            print(f" vs {name}: {sign}{delta:.4f}")
         sys.exit(0)
 
     # A DCMEvidenceAdapter implementation is required to run the benchmark.
@@ -773,7 +773,9 @@ if __name__ == "__main__":
 
         # Users must supply their own adapter implementing DCMEvidenceAdapter.
         # Example: adapter = MySystemDCMAdapter()
-        raise ImportError("No DCMEvidenceAdapter configured. Provide one before running.")
+        raise ImportError(
+            "No DCMEvidenceAdapter configured. Provide one before running."
+        )
     except ImportError as e:
         print(f"Adapter not available: {e}")
         print(
@@ -795,24 +797,24 @@ if __name__ == "__main__":
     )
 
     print(f"\n{'='*60}")
-    print(f"DCM Benchmark Result")
+    print("DCM Benchmark Result")
     print(f"{'='*60}")
     print(f"Overall P(conscious): {result.overall_probability:.4f}")
     print(f"95% CI: ({result.overall_ci[0]:.4f}, {result.overall_ci[1]:.4f})")
     print(f"Spec version: {result.spec_version}")
     print(f"Indicators: {result.indicators_measured}/206")
-    print(f"  Tier 1 (module): {result.tier1_count}")
-    print(f"  Tier 2 (LLM):    {result.tier2_count}")
-    print(f"  Tier 3 (zeros):  {result.tier3_count}")
+    print(f" Tier 1 (module): {result.tier1_count}")
+    print(f" Tier 2 (LLM):    {result.tier2_count}")
+    print(f" Tier 3 (zeros):  {result.tier3_count}")
     print(f"Time: {result.processing_time_s:.1f}s")
-    print(f"\nPer-stance posteriors:")
+    print("\nPer-stance posteriors:")
     for name, prob in sorted(
         result.stance_posteriors.items(), key=lambda x: x[1], reverse=True
     ):
         ci = result.stance_confidence.get(name, 0.0)
-        print(f"  {name:40s} {prob:.4f} (CI width={ci:.4f})")
+        print(f" {name:40s} {prob:.4f} (CI width={ci:.4f})")
     if result.comparison:
-        print(f"\nComparison (system - baseline):")
+        print("\nComparison (system - baseline):")
         for name, delta in sorted(result.comparison.items()):
             sign = "+" if delta >= 0 else ""
-            print(f"  vs {name}: {sign}{delta:.4f}")
+            print(f" vs {name}: {sign}{delta:.4f}")

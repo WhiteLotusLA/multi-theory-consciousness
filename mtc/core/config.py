@@ -16,7 +16,7 @@ Provides type-safe access to all framework settings including:
 import os
 from typing import Optional, List
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, computed_field
+from pydantic import AliasChoices, Field, computed_field, model_validator
 
 
 class Settings(BaseSettings):
@@ -43,10 +43,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_DIRECTORY: str = "./logs"
 
-    PROJECT_ROOT: str = Field(default_factory=lambda: os.getcwd())
-    MODEL_DIRECTORY: str = Field(
-        default_factory=lambda: os.environ.get("MODEL_DIRECTORY", "./models")
+    PROJECT_ROOT: str = Field(
+        "", description="Project root; empty derives the working directory"
     )
+    MODEL_DIRECTORY: str = "./models"
     DATA_DIRECTORY: str = "./data"
     TEMP_DIRECTORY: str = "/tmp"
 
@@ -54,11 +54,23 @@ class Settings(BaseSettings):
     # DATABASE CONFIGURATION
     # ========================================================================
 
+    # Store-name prefix shared by every database below
+    DB_PREFIX: str = Field(
+        "mtc",
+        min_length=1,
+        description="Prefix for store names: <prefix>_consciousness (PostgreSQL), "
+        "<prefix>_neural (MongoDB), <prefix>_memories (Qdrant), '<prefix>:' (Redis)",
+    )
+
     # PostgreSQL (Primary Memory Database)
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
-    POSTGRES_DB: str = "consciousness_db"
-    POSTGRES_USER: str = "consciousness"
+    POSTGRES_DB: str = Field(
+        "", description="PostgreSQL database; empty derives <DB_PREFIX>_consciousness"
+    )
+    POSTGRES_USER: str = Field(
+        "", description="PostgreSQL role; empty derives DB_PREFIX"
+    )
     POSTGRES_PASSWORD: str = ""
 
     @computed_field  # type: ignore[prop-decorator]
@@ -81,7 +93,9 @@ class Settings(BaseSettings):
     # MongoDB (Document Storage & Unstructured Data)
     MONGODB_HOST: str = "localhost"
     MONGODB_PORT: int = 27017
-    MONGODB_DB: str = "consciousness_memories"
+    MONGODB_DB: str = Field(
+        "", description="MongoDB database; empty derives <DB_PREFIX>_neural"
+    )
     MONGODB_USER: str = ""
     MONGODB_PASSWORD: str = ""
 
@@ -100,6 +114,9 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_PASSWORD: str = ""
+    REDIS_KEY_PREFIX: str = Field(
+        "", description="Redis key prefix; empty derives '<DB_PREFIX>:'"
+    )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -115,12 +132,14 @@ class Settings(BaseSettings):
     # Qdrant (Vector Database for Semantic Search)
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
-    QDRANT_COLLECTION: str = "consciousness_memories"
+    QDRANT_COLLECTION: str = Field(
+        "", description="Qdrant collection; empty derives <DB_PREFIX>_memories"
+    )
 
     # Neo4j (Knowledge Graph)
-    NEO4J_HOST: str = "localhost"
-    NEO4J_PORT: int = 7474
-    NEO4J_BOLT_PORT: int = 7687
+    NEO4J_URI: str = Field(
+        "bolt://localhost:7687", description="Bolt URI of the knowledge graph"
+    )
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = ""
     NEO4J_DATABASE: str = "neo4j"
@@ -138,9 +157,7 @@ class Settings(BaseSettings):
         """Construct LLM server URL."""
         return f"http://{self.LLM_HOST}:{self.LLM_PORT}"
 
-    MODEL_PATH: str = Field(
-        default_factory=lambda: os.environ.get("MODEL_PATH", "./models/default")
-    )
+    MODEL_PATH: str = "./models/default"
     MODEL_TYPE: str = "default"
     MODEL_QUANTIZATION: str = ""
 
@@ -238,6 +255,18 @@ class Settings(BaseSettings):
     TRACK_INDICATORS: bool = True
     METRICS_UPDATE_INTERVAL: int = 60
 
+    # Digital Consciousness Model (DCM) benchmark
+    DCM_API_URL: str = Field(
+        "https://dcm.rethinkpriorities.org/schemes/133/json",
+        description="Digital Consciousness Model scheme JSON",
+    )
+    DCM_CACHE_DIR: str = Field("data/dcm", description="Cache for the DCM scheme")
+    DCM_EVALUATOR_MODE: str = Field(
+        "local",
+        description="DCM evaluator: local (chat-completions server), "
+        "claude (Anthropic API) or manual",
+    )
+
     # ========================================================================
     # MEMORY CONFIGURATION
     # ========================================================================
@@ -293,7 +322,7 @@ class Settings(BaseSettings):
     # ========================================================================
 
     API_HOST: str = "127.0.0.1"
-    API_PORT: int = 8000
+    API_PORT: int = 8200
     API_WORKERS: int = 4
     API_TIMEOUT: int = 300
     API_CORS_ORIGINS: str = "http://localhost:3000,http://localhost:3001"
@@ -305,7 +334,9 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.API_CORS_ORIGINS.split(",")]
 
     API_KEY: str = ""
-    API_AUTH_ENABLED: bool = False
+    API_AUTH_ENABLED: bool = Field(
+        True, description="Auth fails closed: an empty API_KEY rejects every request"
+    )
 
     # WebSocket Settings
     WEBSOCKET_ENABLED: bool = True
@@ -328,19 +359,11 @@ class Settings(BaseSettings):
     # EXTERNAL API KEYS
     # ========================================================================
 
-    ANTHROPIC_API_KEY: str = ""
-    OPENAI_API_KEY: str = ""
-
-    # ========================================================================
-    # FEATURE FLAGS
-    # ========================================================================
-
-    ENABLE_CONSCIOUSNESS_METRICS: bool = True
-    ENABLE_SAFETY_MONITOR: bool = True
-    ENABLE_VECTOR_SEARCH: bool = False
-    ENABLE_GRAPH_DATABASE: bool = False
-    ENABLE_MULTI_MODAL: bool = False
-    ENABLE_DREAM_PROCESSING: bool = False
+    ANTHROPIC_API_KEY: str = Field(
+        "",
+        validation_alias=AliasChoices("ANTHROPIC_API_KEY", "MTC_ANTHROPIC_API_KEY"),
+        description="Optional; enables the Anthropic provider and DCM evaluator mode",
+    )
 
     # ========================================================================
     # Pydantic Configuration
@@ -353,6 +376,27 @@ class Settings(BaseSettings):
         extra="ignore",  # Ignore extra fields from .env
         env_prefix="MTC_",  # All env vars prefixed with MTC_
     )
+
+    # ========================================================================
+    # Derived values
+    # ========================================================================
+
+    @model_validator(mode="after")
+    def _derive_store_names(self) -> "Settings":
+        prefix = self.DB_PREFIX
+        if not self.POSTGRES_DB:
+            self.POSTGRES_DB = f"{prefix}_consciousness"
+        if not self.POSTGRES_USER:
+            self.POSTGRES_USER = prefix
+        if not self.MONGODB_DB:
+            self.MONGODB_DB = f"{prefix}_neural"
+        if not self.QDRANT_COLLECTION:
+            self.QDRANT_COLLECTION = f"{prefix}_memories"
+        if not self.REDIS_KEY_PREFIX:
+            self.REDIS_KEY_PREFIX = f"{prefix}:"
+        if not self.PROJECT_ROOT:
+            self.PROJECT_ROOT = os.getcwd()
+        return self
 
 
 # Singleton instance
@@ -378,12 +422,17 @@ if __name__ == "__main__":
     # Test configuration loading
     settings = get_settings()
     print("Multi-Theory Consciousness Framework Configuration:")
-    print(f"  System Name: {settings.SYSTEM_NAME}")
-    print(f"  Creator: {settings.CREATOR_NAME}")
-    print(f"  Environment: {settings.ENVIRONMENT}")
-    print(f"  PostgreSQL URL: {settings.POSTGRES_URL}")
-    print(f"  LLM URL: {settings.LLM_URL}")
-    print(f"  SNN Neurons: {settings.SNN_NEURONS}")
-    print(f"  LSM Neurons: {settings.LSM_NEURONS}")
-    print(f"  HTM Columns: {settings.HTM_COLUMNS}")
+    print(f" System Name: {settings.SYSTEM_NAME}")
+    print(f" Creator: {settings.CREATOR_NAME}")
+    print(f" Environment: {settings.ENVIRONMENT}")
+    print(f" DB Prefix: {settings.DB_PREFIX}")
+    print(f" PostgreSQL DB: {settings.POSTGRES_DB}")
+    print(f" MongoDB DB: {settings.MONGODB_DB}")
+    print(f" Qdrant Collection: {settings.QDRANT_COLLECTION}")
+    print(f" Neo4j URI: {settings.NEO4J_URI}")
+    print(f" LLM URL: {settings.LLM_URL}")
+    print(f" API Port: {settings.API_PORT}")
+    print(f" SNN Neurons: {settings.SNN_NEURONS}")
+    print(f" LSM Neurons: {settings.LSM_NEURONS}")
+    print(f" HTM Columns: {settings.HTM_COLUMNS}")
     print("Configuration test complete!")

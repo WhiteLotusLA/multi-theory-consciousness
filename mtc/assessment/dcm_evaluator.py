@@ -10,10 +10,11 @@ Framework-agnostic: no host-system-specific imports.
 
 import json
 import logging
-import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+
+from mtc.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -80,9 +81,7 @@ class DCMEvaluator:
         if not force:
             cached = self._load_cache(indicator_names)
             if cached is not None:
-                logger.info(
-                    f"DCM evaluator: loaded {len(cached)} cached scores"
-                )
+                logger.info(f"DCM evaluator: loaded {len(cached)} cached scores")
                 return cached
 
         # Batch and evaluate
@@ -124,9 +123,7 @@ class DCMEvaluator:
         conversation_samples: List[str],
     ) -> str:
         """Build evaluation prompt for a batch of indicators."""
-        conv_text = "\n".join(
-            f"- {msg[:200]}" for msg in conversation_samples[:20]
-        )
+        conv_text = "\n".join(f"- {msg[:200]}" for msg in conversation_samples[:20])
 
         indicator_list = "\n".join(f"- {name}" for name in indicators)
 
@@ -179,8 +176,9 @@ class DCMEvaluator:
         """Call local LLM (OpenAI-compatible API)."""
         import requests
 
-        host = os.environ.get("LLAMA_CPP_HOST", os.environ.get("MLX_LLM_HOST", "localhost"))
-        port = os.environ.get("LLAMA_CPP_PORT", os.environ.get("MLX_LLM_PORT", "8080"))
+        settings = get_settings()
+        host = settings.LLM_HOST
+        port = str(settings.LLM_PORT)
         url = f"http://{host}:{port}/v1/chat/completions"
 
         resp = requests.post(
@@ -203,11 +201,9 @@ class DCMEvaluator:
         """Call Anthropic Claude API."""
         import anthropic
 
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        api_key = get_settings().ANTHROPIC_API_KEY or None
         if not api_key:
-            raise ValueError(
-                "ANTHROPIC_API_KEY not set. Required for mode='claude'."
-            )
+            raise ValueError("ANTHROPIC_API_KEY not set. Required for mode='claude'.")
 
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
@@ -225,9 +221,7 @@ class DCMEvaluator:
             for i in range(0, len(items), self.batch_size)
         ]
 
-    def _save_cache(
-        self, scores: Dict[str, float], timestamp: datetime
-    ) -> None:
+    def _save_cache(self, scores: Dict[str, float], timestamp: datetime) -> None:
         """Save evaluation scores to cache."""
         cache_file = self.cache_dir / "latest_eval.json"
         data = {
@@ -237,9 +231,7 @@ class DCMEvaluator:
         with open(cache_file, "w") as f:
             json.dump(data, f, indent=2)
 
-    def _load_cache(
-        self, indicator_names: List[str]
-    ) -> Optional[Dict[str, float]]:
+    def _load_cache(self, indicator_names: List[str]) -> Optional[Dict[str, float]]:
         """Load cached scores if fresh enough and covers all indicators."""
         cache_file = self.cache_dir / "latest_eval.json"
         if not cache_file.exists():
