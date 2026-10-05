@@ -9,6 +9,7 @@ from mtc.devtools.privacy_audit import (
     run_audit,
 )
 
+# Synthetic tokens: no real name appears in this file, whole or in pieces.
 PLANTED = "Plantedname"
 PET = "Plantedpet"
 EM_DASH = "\u2014"
@@ -144,3 +145,44 @@ def test_suffixed_token_forms_are_hits(tmp_path):
     )
     hits = run_audit([f], denylist=[PLANTED], allowlist=[])
     assert len(hits) == 3
+
+
+def test_assembled_literal_concatenation_is_reported(tmp_path):
+    f = write(tmp_path, "m.py", 'x = "Plan" + "tedname"\n')
+    hits = run_audit([f], denylist=[PLANTED], allowlist=[])
+    assert [(h.kind, h.line, h.match) for h in hits] == [
+        ("assembled-token", 1, PLANTED)
+    ]
+
+
+def test_assembled_join_and_chr_are_reported(tmp_path):
+    f = write(
+        tmp_path,
+        "m.py",
+        'a = "".join(["Plan", "ted", "name"])\n'
+        'b = chr(80) + "lantedname"\n'
+        'c = "-".join(("x", "y"))\n',
+    )
+    hits = run_audit([f], denylist=[PLANTED], allowlist=[])
+    assert [(h.kind, h.line) for h in hits] == [
+        ("assembled-token", 1),
+        ("assembled-token", 2),
+    ]
+
+
+def test_assembled_check_ignores_variables_and_non_python(tmp_path):
+    py = write(tmp_path, "m.py", 'p = "Plan"\nx = p + "tedname"\n')
+    md = write(tmp_path, "m.md", '"Plan" + "tedname"\n')
+    assert run_audit([py], denylist=[PLANTED], allowlist=[]) == []
+    assert run_audit([md], denylist=[PLANTED], allowlist=[]) == []
+
+
+def test_assembled_check_tolerates_unparseable_python(tmp_path):
+    f = write(tmp_path, "broken.py", 'def (:\n    "Plan" + "tedname"\n')
+    assert run_audit([f], denylist=[PLANTED], allowlist=[]) == []
+
+
+def test_whole_literal_is_not_double_reported(tmp_path):
+    f = write(tmp_path, "m.py", 'x = "Plantedname" + "!"\n')
+    hits = run_audit([f], denylist=[PLANTED], allowlist=[])
+    assert [h.kind for h in hits] == ["token"]

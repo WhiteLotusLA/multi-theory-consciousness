@@ -3,6 +3,9 @@
 Two denylists feed the token check: a public one committed in
 config/privacy/denylist.txt, and a private extra list that never enters the
 repository (PRIVACY_DENYLIST_EXTRA or config/privacy/denylist.local.txt).
+In Python files, expressions built only from literals (``"a" + "b"``,
+``"".join([...])``, ``chr(...)``) are assembled and matched too, so a token
+split into pieces is still a hit (kind ``assembled-token``).
 Pattern checks need no list. Allowlist rules suppress known-legitimate hits.
 
 Hits on private extra tokens report a placeholder (``private#N``, the 1-based
@@ -12,6 +15,7 @@ prints the names the private list exists to guard.
 
 from __future__ import annotations
 
+import ast
 import fnmatch
 import re
 from dataclasses import dataclass
@@ -230,6 +234,77 @@ def _scan_text(
     return hits
 
 
+def _constant_pieces(node: ast.AST) -> Optional[List[str]]:
+    """The string pieces of an expression built only from literals, else None.
+
+    Covers str constants, ``chr(<int>)``, ``+`` chains of those, and
+    ``"<sep>".join([...])`` over a literal list or tuple. Anything that
+    involves a name, a call with arguments or a format is left to the plain
+    text scan.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _constant_pieces(node.left)
+        right = _constant_pieces(node.right)
+        if left is None or right is None:
+            return None
+        return left + right
+    if isinstance(node, ast.Call) and not node.keywords and len(node.args) == 1:
+        func = node.func
+        arg = node.args[0]
+        if isinstance(func, ast.Name) and func.id == "chr":
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, int):
+                try:
+                    return [chr(arg.value)]
+                except (ValueError, OverflowError):
+                    return None
+            return None
+        if isinstance(func, ast.Attribute) and func.attr == "join":
+            sep = _constant_pieces(func.value)
+            if sep is None or not isinstance(arg, (ast.List, ast.Tuple)):
+                return None
+            parts: List[str] = []
+            for elt in arg.elts:
+                piece = _constant_pieces(elt)
+                if piece is None:
+                    return None
+                parts.append("".join(piece))
+            return ["".join(sep).join(parts)]
+    return None
+
+
+def _scan_assembled_literals(
+    rel_str: str, text: str, tokens: Sequence[Tuple[str, re.Pattern]]
+) -> List[Hit]:
+    """Denylist tokens that appear only once literal pieces are joined.
+
+    The text scan sees ``"Pla" + "nted"`` as two harmless pieces, but the
+    assembled value is what a reader of the repository ends up with, so every
+    literal-only expression is assembled and matched as well. Python that does
+    not parse is left to the text scan (and to the linters).
+    """
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return []
+    hits: List[Hit] = []
+    seen = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.BinOp, ast.Call)):
+            continue
+        pieces = _constant_pieces(node)
+        if pieces is None:
+            continue
+        value = "".join(pieces)
+        lineno = getattr(node, "lineno", 0)
+        for label, rx in tokens:
+            if rx.search(value) and (lineno, label) not in seen:
+                seen.add((lineno, label))
+                hits.append(Hit(rel_str, lineno, "assembled-token", label))
+    return sorted(hits, key=lambda h: (h.line, h.match))
+
+
 def run_audit(
     paths: Iterable[Path],
     denylist: Sequence[str],
@@ -263,5 +338,13 @@ def run_audit(
         text, problem = _read_text(path)
         if problem is not None:
             hits.append(Hit(str(rel), 0, "encoding", problem))
-        hits.extend(_scan_text(str(rel), text, tokens, suffix == ".py"))
+        scanned = _scan_text(str(rel), text, tokens, suffix == ".py")
+        if suffix == ".py":
+            whole = {(h.line, h.match) for h in scanned if h.kind == "token"}
+            scanned.extend(
+                h
+                for h in _scan_assembled_literals(str(rel), text, tokens)
+                if (h.line, h.match) not in whole
+            )
+        hits.extend(scanned)
     return [h for h in hits if not any(r.covers(h.path, h) for r in allowlist)]
