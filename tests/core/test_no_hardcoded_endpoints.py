@@ -18,19 +18,9 @@ URI_SCHEMES = (
 STORE_PORTS = (5432, 6333, 6379, 7687, 27017)
 
 # Known hits with their reasons; each is removed when its module takes the
-# value from Settings.
-KNOWN_ENDPOINT_LITERALS: Tuple[Tuple[str, str], ...] = (
-    (
-        "mtc/neural/vectors/coordinator.py",
-        "host and port defaults of the vector coordinator signature; the "
-        "knowledge and vector port reads them from Settings",
-    ),
-    (
-        "mtc/neural/gpu_integration.py",
-        "host and port defaults of the GPU factory signature; the vector port "
-        "reads them from Settings",
-    ),
-)
+# value from Settings. Empty since the vector coordinator and the GPU factory
+# read their host, port and collection from Settings.
+KNOWN_ENDPOINT_LITERALS: Tuple[Tuple[str, str], ...] = ()
 
 
 def _docstring_nodes(tree: ast.AST) -> Set[int]:

@@ -16,11 +16,9 @@ ROOT = Path(__file__).resolve().parents[2]
 CLIENT_PACKAGES = ("asyncpg", "motor", "pymongo", "redis", "neo4j", "qdrant_client")
 
 # Modules that still import a client package at module level. The walk below
-# does not import them; the vector work empties this tuple.
-PENDING_LAZY_IMPORTS = (
-    "mtc.neural.vectors.coordinator",
-    "mtc.neural.gpu_integration",
-)
+# does not import them. Empty since the vector coordinator and the GPU factory
+# import qdrant_client lazily; a new entry needs a reason and a later fix.
+PENDING_LAZY_IMPORTS: tuple = ()
 
 _WALK = r"""
 import importlib, json, pkgutil, sys
@@ -91,21 +89,13 @@ def _top_level_client_imports(path: Path):
     return found
 
 
-@pytest.mark.parametrize("module", PENDING_LAZY_IMPORTS)
-def test_pending_entries_still_import_a_client(module):
-    path = ROOT / (module.replace(".", "/") + ".py")
-    if module == "mtc.neural.gpu_integration":
-        # imports the coordinator at module level, which loads the client
-        text = path.read_text(encoding="utf-8")
-        assert "mtc.neural.vectors.coordinator" in text, (
-            f"{module} no longer imports the coordinator; remove it from "
-            "PENDING_LAZY_IMPORTS"
+def test_pending_entries_still_import_a_client():
+    for module in PENDING_LAZY_IMPORTS:
+        path = ROOT / (module.replace(".", "/") + ".py")
+        assert _top_level_client_imports(path), (
+            f"{module} no longer imports a client at module level; remove it "
+            "from PENDING_LAZY_IMPORTS"
         )
-        return
-    assert _top_level_client_imports(path), (
-        f"{module} no longer imports a client at module level; remove it from "
-        "PENDING_LAZY_IMPORTS"
-    )
 
 
 def test_no_other_module_imports_a_client_at_module_level():

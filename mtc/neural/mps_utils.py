@@ -1,41 +1,63 @@
 """
-Metal Performance Shaders Utilities for Consciousness Research
-==================================================================
+Device Manager for Tensor Work
+==============================
 
-Smart GPU acceleration using PyTorch MPS backend on Apple Silicon.
-Automatically chooses CPU vs GPU based on operation size and type.
+``MPSManager`` is the device manager the GPU helpers share (the vector
+coordinator's GPU variant, the GPU liquid state machine, the memory pool and
+the profiler). Its name is historical: it handles MPS, CUDA and the CPU. The
+device comes from ``mtc.core.device`` and so from ``MTC_DEVICE`` (``auto``
+keeps the MPS, CUDA, CPU order; an explicit device that is missing raises
+``DeviceUnavailableError`` naming the setting instead of falling back). A
+``device`` argument overrides the setting and ``force_cpu`` pins the CPU.
 
-Note: Not all operations benefit from GPU -- use wisely!
+Resolution is lazy: building a manager (including the module instance
+``mps_manager``) resolves nothing, and the first use of ``device`` or
+``enabled`` does, so importing this module never fails on a device setting.
+``enabled`` means an accelerated device (MPS or CUDA) is active.
 
-Performance Philosophy:
-- Small ops (<1000 elements): CPU faster (avoid transfer overhead)
-- Batch ops (10+ items): GPU shines
-- Large matrices (1000x1000+): GPU dominates
-- Chained ops: Keep on GPU to avoid transfers
+Dispatch: ``should_use_gpu`` sends batch operations, operations of at least
+``min_gpu_size`` elements, and matrix products of at least 1000 elements to the
+accelerator; everything else stays on the CPU. ``synchronize``,
+``empty_cache`` and ``get_memory_stats`` call the backend of the resolved
+device (MPS or CUDA) and do nothing on the CPU; memory figures that the CPU
+path cannot measure are None. Timings recorded with ``record_operation`` are
+measurements taken at runtime; nothing here states a speedup. Config keys:
+``DEVICE`` (``MTC_DEVICE``) through ``mtc.core.device``. No persisted state.
 """
 
-import torch
-import numpy as np
-from typing import Optional, Union, List
 import logging
+import time
 from dataclasses import dataclass
 from enum import Enum
-import time
+from typing import Any, Callable, Dict, List, Optional, Union
+
+import numpy as np
+import torch
+
+from mtc.core.config import Settings, get_settings
+from mtc.core.device import DeviceUnavailableError, resolve_device
 
 logger = logging.getLogger(__name__)
 
+MATMUL_MIN_SIZE = 1000
+MAX_STATS = 1000
+DEVICE_BACKEND = "torch"
+ACCELERATED_KINDS = ("mps", "cuda")
+_MB = 1024**2
+
 
 class ComputeDevice(Enum):
-    """Where to run computations"""
+    """Where to run computations."""
 
     CPU = "cpu"
     MPS = "mps"
-    AUTO = "auto"  # Let MPSManager decide
+    CUDA = "cuda"
+    AUTO = "auto"  # let the device manager decide
 
 
 @dataclass
 class PerformanceStats:
-    """Track GPU vs CPU performance"""
+    """One recorded operation timing."""
 
     operation_name: str
     device: str
@@ -44,353 +66,311 @@ class PerformanceStats:
     timestamp: float
 
 
+def synchronize_device(device: Any) -> None:
+    """Wait for queued work on an accelerator device; no-op on the CPU."""
+    kind = getattr(device, "type", str(device))
+    if kind == "mps":
+        torch.mps.synchronize()
+    elif kind == "cuda":
+        torch.cuda.synchronize()
+
+
+def device_status(
+    resolve: Callable[[], Any],
+    last_error: Optional[str] = None,
+    **details: Any,
+) -> Dict[str, Any]:
+    """Return the ``status()`` mapping of a device-backed object.
+
+    ``resolve`` returns the object's device; a ``DeviceUnavailableError`` from
+    it is reported as ``available`` False with the error text instead of being
+    raised. ``last_error`` is the object's own most recent failure, reported
+    when the device itself resolves.
+    """
+    try:
+        device = resolve()
+    except DeviceUnavailableError as exc:
+        return {
+            "backend": DEVICE_BACKEND,
+            "available": False,
+            "device": None,
+            "accelerated": False,
+            "last_error": str(exc),
+            **details,
+        }
+    kind = getattr(device, "type", str(device))
+    return {
+        "backend": DEVICE_BACKEND,
+        "available": True,
+        "device": kind,
+        "accelerated": kind in ACCELERATED_KINDS,
+        "last_error": last_error,
+        **details,
+    }
+
+
 class MPSManager:
-    """
-    Intelligent MPS manager for neural operations.
-    Decides when to use GPU vs CPU for optimal performance.
-    """
+    """Device manager on the ``MTC_DEVICE`` switch (the name is historical:
+    it serves MPS, CUDA and the CPU)."""
 
-    def __init__(self, force_cpu: bool = False, min_gpu_size: int = 10000):
-        """
-        Initialize MPS manager with smart dispatch.
-
-        Args:
-            force_cpu: Force CPU usage (for testing/debugging)
-            min_gpu_size: Minimum data size to use GPU (avoid overhead)
-        """
-        self.force_cpu = force_cpu
-        self.min_gpu_size = min_gpu_size
-        self.device = self._get_device()
-        self.enabled = self.device.type == "mps" and not force_cpu
-
-        # Performance tracking
+    def __init__(
+        self,
+        force_cpu: bool = False,
+        min_gpu_size: int = 10000,
+        device: Optional[str] = None,
+        settings: Optional[Settings] = None,
+    ) -> None:
+        self.force_cpu = bool(force_cpu)
+        self.min_gpu_size = int(min_gpu_size)
+        self._preference = "cpu" if self.force_cpu else device
+        self._settings = settings
+        self._device: Optional[torch.device] = None
+        self._last_error: Optional[str] = None
+        self._warned = False
         self.stats: List[PerformanceStats] = []
         self.total_gpu_ops = 0
         self.total_cpu_ops = 0
 
-        logger.info("MPS Manager initialized")
-        logger.info(f"  Device: {self.device}")
-        logger.info(f"  MPS Enabled: {self.enabled}")
-        logger.info(f"  Min GPU Size: {self.min_gpu_size} elements")
+    # ------------------------------------------------------------------
+    # Device
+    # ------------------------------------------------------------------
 
-        if self.enabled:
-            logger.info("  GPU acceleration ready!")
-            self._log_gpu_info()
-        else:
-            logger.warning("  Running on CPU only")
-
-    def _get_device(self) -> torch.device:
-        """Determine the best device to use"""
-        if self.force_cpu:
-            return torch.device("cpu")
-
-        if torch.backends.mps.is_available():
-            if torch.backends.mps.is_built():
-                return torch.device("mps")
-
-        logger.warning("MPS not available, falling back to CPU")
-        return torch.device("cpu")
-
-    def _log_gpu_info(self):
-        """Log GPU memory information"""
-        try:
-            allocated = torch.mps.current_allocated_memory() / (1024**3)
-            driver = torch.mps.driver_allocated_memory() / (1024**3)
+    @property
+    def device(self) -> torch.device:
+        """The resolved ``torch.device`` (resolved on first use)."""
+        if self._device is None:
+            active = self._settings if self._settings is not None else get_settings()
+            try:
+                self._device = resolve_device(self._preference, settings=active)
+            except DeviceUnavailableError as exc:
+                self._last_error = str(exc)
+                if not self._warned:
+                    self._warned = True
+                    logger.warning("device manager has no device: %s", exc)
+                raise
+            self._last_error = None
             logger.info(
-                f"  GPU Memory: {allocated:.2f}GB allocated, {driver:.2f}GB driver"
+                "device manager on %s (accelerated: %s)",
+                self._device,
+                self._device.type != "cpu",
             )
-        except Exception as e:
-            logger.debug(f"Could not get GPU memory info: {e}")
+            if self._device.type != "cpu":
+                self._log_memory()
+        return self._device
+
+    @property
+    def enabled(self) -> bool:
+        """True when an accelerated device (MPS or CUDA) is active."""
+        return self.device.type in ACCELERATED_KINDS
+
+    def status(self) -> Dict[str, Any]:
+        """Return ``backend``, ``available``, ``last_error`` and the device.
+
+        Never raises: an explicit device that is not available shows up as
+        ``available`` False with the error naming the setting.
+        """
+        requested = self._preference
+        if requested is None:
+            active = self._settings if self._settings is not None else get_settings()
+            requested = getattr(active, "DEVICE", None)
+        return device_status(
+            lambda: self.device,
+            requested=requested,
+            force_cpu=self.force_cpu,
+            gpu_operations=self.total_gpu_ops,
+            cpu_operations=self.total_cpu_ops,
+        )
+
+    def refresh(self) -> torch.device:
+        """Resolve the device again (after a settings change)."""
+        self._device = None
+        return self.device
+
+    def _log_memory(self) -> None:
+        stats = self.get_memory_stats()
+        if stats.get("allocated_mb") is not None:
+            logger.info(
+                "accelerator memory: %.1f MB allocated, %s MB held by the driver",
+                stats["allocated_mb"],
+                stats.get("driver_mb"),
+            )
+
+    # ------------------------------------------------------------------
+    # Dispatch and transfers
+    # ------------------------------------------------------------------
 
     def should_use_gpu(
         self, operation: str, data_size: int, is_batch: bool = False
     ) -> bool:
-        """
-        Decide if we should use GPU for this operation.
-
-        Args:
-            operation: Name of operation (embedding, matmul, etc.)
-            data_size: Number of elements in operation
-            is_batch: Whether this is a batch operation
-
-        Returns:
-            True if GPU should be used
-        """
+        """Return True when this operation should run on the accelerator."""
         if not self.enabled:
             return False
-
-        # Always use GPU for batch operations (even if small)
-        if is_batch:
+        if is_batch or data_size >= self.min_gpu_size:
             return True
-
-        # Use GPU for large operations
-        if data_size >= self.min_gpu_size:
-            return True
-
-        # Special case: matrix multiplication benefits from GPU at smaller sizes
-        if "matmul" in operation.lower() or "mm" in operation.lower():
-            return data_size >= 1000  # 32x32 matrix
-
+        name = operation.lower()
+        if "matmul" in name or "mm" in name:
+            return data_size >= MATMUL_MIN_SIZE
         return False
 
     def to_device(
-        self, data: Union[torch.Tensor, np.ndarray], force_device: Optional[str] = None
+        self,
+        data: Union[torch.Tensor, np.ndarray],
+        force_device: Optional[str] = None,
     ) -> torch.Tensor:
-        """
-        Move data to optimal device.
-
-        Args:
-            data: Tensor or numpy array
-            force_device: Force specific device ("cpu" or "mps")
-
-        Returns:
-            Tensor on the chosen device
-        """
-        # Convert numpy to tensor if needed
+        """Move data (a tensor or an array) to ``force_device`` or the device."""
         if isinstance(data, np.ndarray):
             data = torch.from_numpy(data)
-
-        # Determine target device
-        if force_device:
-            target = torch.device(force_device)
-        else:
-            target = self.device
-
+        target = torch.device(force_device) if force_device else self.device
         return data.to(target)
 
-    def to_numpy(self, tensor: torch.Tensor) -> np.ndarray:
-        """Convert tensor to numpy, moving to CPU if needed"""
-        if tensor.device.type == "mps":
-            tensor = tensor.cpu()
-        return tensor.numpy()
+    def to_numpy(self, tensor: Any) -> np.ndarray:
+        """Return a tensor as a numpy array, moving it off any accelerator."""
+        detached = tensor.detach() if hasattr(tensor, "detach") else tensor
+        if getattr(getattr(detached, "device", None), "type", "cpu") != "cpu":
+            detached = detached.cpu()
+        return detached.numpy()
 
-    def synchronize(self):
-        """Synchronize GPU operations (wait for completion)"""
-        if self.enabled:
-            torch.mps.synchronize()
+    def synchronize(self) -> None:
+        """Wait for queued accelerator work; no-op on the CPU."""
+        synchronize_device(self.device)
 
-    def empty_cache(self):
-        """Clear MPS cache to free memory"""
-        if self.enabled:
+    def empty_cache(self) -> None:
+        """Release cached accelerator memory; no-op on the CPU."""
+        kind = self.device.type
+        if kind == "mps":
             torch.mps.empty_cache()
-            logger.debug("MPS cache cleared")
+        elif kind == "cuda":
+            torch.cuda.empty_cache()
 
-    def get_memory_stats(self) -> dict:
-        """Get current memory usage statistics"""
-        if self.enabled:
-            try:
-                return {
-                    "device": "mps",
-                    "allocated_mb": torch.mps.current_allocated_memory() / (1024**2),
-                    "driver_mb": torch.mps.driver_allocated_memory() / (1024**2),
-                    "allocated_gb": torch.mps.current_allocated_memory() / (1024**3),
-                    "driver_gb": torch.mps.driver_allocated_memory() / (1024**3),
-                }
-            except Exception as e:
-                logger.error(f"Error getting MPS memory stats: {e}")
-                return {"device": "mps", "error": str(e)}
-        else:
-            return {"device": "cpu", "allocated_mb": 0, "driver_mb": 0}
+    def get_memory_stats(self) -> Dict[str, Any]:
+        """Return allocated and driver memory in MB (None when unmeasured)."""
+        kind = self.device.type
+        try:
+            if kind == "mps":
+                allocated = torch.mps.current_allocated_memory() / _MB
+                driver = torch.mps.driver_allocated_memory() / _MB
+            elif kind == "cuda":
+                allocated = torch.cuda.memory_allocated(self.device) / _MB
+                driver = torch.cuda.memory_reserved(self.device) / _MB
+            else:
+                return {"device": "cpu", "allocated_mb": None, "driver_mb": None}
+        except Exception as exc:  # noqa: BLE001 - reported, not raised
+            logger.warning("could not read %s memory: %s", kind, exc)
+            return {
+                "device": kind,
+                "allocated_mb": None,
+                "driver_mb": None,
+                "error": str(exc),
+            }
+        return {
+            "device": kind,
+            "allocated_mb": allocated,
+            "driver_mb": driver,
+            "allocated_gb": allocated / 1024,
+            "driver_gb": driver / 1024,
+        }
+
+    # ------------------------------------------------------------------
+    # Measured timings
+    # ------------------------------------------------------------------
 
     def record_operation(
         self, operation_name: str, device: str, duration_ms: float, data_size: int
-    ):
-        """Record performance statistics"""
-        stat = PerformanceStats(
-            operation_name=operation_name,
-            device=device,
-            duration_ms=duration_ms,
-            data_size=data_size,
-            timestamp=time.time(),
+    ) -> None:
+        """Record one measured operation (the last ``MAX_STATS`` are kept)."""
+        self.stats.append(
+            PerformanceStats(
+                operation_name=operation_name,
+                device=device,
+                duration_ms=duration_ms,
+                data_size=data_size,
+                timestamp=time.time(),
+            )
         )
-        self.stats.append(stat)
-
-        if device == "mps":
-            self.total_gpu_ops += 1
-        else:
+        if device == "cpu":
             self.total_cpu_ops += 1
+        else:
+            self.total_gpu_ops += 1
+        if len(self.stats) > MAX_STATS:
+            self.stats = self.stats[-MAX_STATS:]
 
-        # Keep only last 1000 stats to avoid memory bloat
-        if len(self.stats) > 1000:
-            self.stats = self.stats[-1000:]
-
-    def get_performance_summary(self) -> dict:
-        """Get summary of GPU vs CPU performance"""
+    def get_performance_summary(self) -> Dict[str, Any]:
+        """Summarize the recorded timings by device kind."""
         if not self.stats:
             return {"no_data": True}
-
-        gpu_stats = [s for s in self.stats if s.device == "mps"]
-        cpu_stats = [s for s in self.stats if s.device == "cpu"]
-
-        summary = {
+        gpu = [s for s in self.stats if s.device != "cpu"]
+        cpu = [s for s in self.stats if s.device == "cpu"]
+        summary: Dict[str, Any] = {
             "total_operations": len(self.stats),
-            "gpu_operations": len(gpu_stats),
-            "cpu_operations": len(cpu_stats),
-            "gpu_percentage": (
-                len(gpu_stats) / len(self.stats) * 100 if self.stats else 0
-            ),
+            "gpu_operations": len(gpu),
+            "cpu_operations": len(cpu),
+            "gpu_percentage": len(gpu) / len(self.stats) * 100,
         }
-
-        if gpu_stats:
-            summary["gpu_avg_duration_ms"] = sum(
-                s.duration_ms for s in gpu_stats
-            ) / len(gpu_stats)
-
-        if cpu_stats:
-            summary["cpu_avg_duration_ms"] = sum(
-                s.duration_ms for s in cpu_stats
-            ) / len(cpu_stats)
-
+        if gpu:
+            summary["gpu_avg_duration_ms"] = sum(s.duration_ms for s in gpu) / len(gpu)
+        if cpu:
+            summary["cpu_avg_duration_ms"] = sum(s.duration_ms for s in cpu) / len(cpu)
         return summary
 
     def __repr__(self) -> str:
-        return f"MPSManager(device={self.device}, enabled={self.enabled}, ops={self.total_gpu_ops}gpu/{self.total_cpu_ops}cpu)"
+        where = str(self._device) if self._device is not None else "unresolved"
+        return (
+            f"MPSManager(device={where}, "
+            f"ops={self.total_gpu_ops}gpu/{self.total_cpu_ops}cpu)"
+        )
 
 
-# Global MPS manager instance
-# Other modules can import and use this directly
+# The shared manager; it resolves MTC_DEVICE on first use.
 mps_manager = MPSManager()
 
 
-# Convenience functions for common operations
-
-
 def cosine_similarity_gpu(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    """
-    Compute cosine similarity on GPU (if beneficial).
-
-    Args:
-        a: Tensor of shape (n, d)
-        b: Tensor of shape (m, d)
-
-    Returns:
-        Similarity matrix of shape (n, m)
-    """
-    start = time.time()
-
-    # Normalize vectors
+    """Return the (n, m) cosine similarity of row sets ``a`` and ``b``."""
+    start = time.perf_counter()
     a_norm = a / a.norm(dim=1, keepdim=True)
     b_norm = b / b.norm(dim=1, keepdim=True)
-
-    # Compute similarity (matrix multiply)
     similarity = a_norm @ b_norm.T
-
-    if a.device.type == "mps":
-        torch.mps.synchronize()
-
-    duration_ms = (time.time() - start) * 1000
+    synchronize_device(a.device)
     mps_manager.record_operation(
-        "cosine_similarity", a.device.type, duration_ms, a.shape[0] * b.shape[0]
+        "cosine_similarity",
+        a.device.type,
+        (time.perf_counter() - start) * 1000,
+        a.shape[0] * b.shape[0],
     )
-
     return similarity
 
 
 def batch_matmul_gpu(matrices: List[torch.Tensor]) -> torch.Tensor:
-    """
-    Efficient batch matrix multiplication on GPU.
-
-    Args:
-        matrices: List of tensors to multiply
-
-    Returns:
-        Product of all matrices
-    """
-    start = time.time()
-
-    # Stack into batch
+    """Return the elementwise product of a list of equal-shape tensors."""
+    start = time.perf_counter()
     batched = torch.stack(matrices)
-
-    # Batch multiply (GPU optimized)
     result = torch.prod(batched, dim=0)
-
-    if batched.device.type == "mps":
-        torch.mps.synchronize()
-
-    duration_ms = (time.time() - start) * 1000
+    synchronize_device(batched.device)
     mps_manager.record_operation(
         "batch_matmul",
         batched.device.type,
-        duration_ms,
+        (time.perf_counter() - start) * 1000,
         sum(m.numel() for m in matrices),
     )
-
     return result
 
 
-# Example usage and testing
 if __name__ == "__main__":
-    import logging
-
     logging.basicConfig(level=logging.INFO)
-
-    print("=" * 70)
-    print("TESTING MPS UTILITIES FOR CONSCIOUSNESS RESEARCH")
-    print("=" * 70)
-    print()
-
-    print(f"MPS Manager: {mps_manager}")
-    print()
-
-    # Test 1: Small operation (should use CPU)
-    print("Test 1: Small vector operation (100 elements)")
-    small_size = 100
-    should_gpu = mps_manager.should_use_gpu("embedding", small_size, is_batch=False)
-    print(f" Should use GPU: {should_gpu} (Expected: False - too small)")
-    print()
-
-    # Test 2: Large operation (should use GPU)
-    print("Test 2: Large vector operation (100,000 elements)")
-    large_size = 100000
-    should_gpu = mps_manager.should_use_gpu("embedding", large_size, is_batch=False)
-    print(f" Should use GPU: {should_gpu} (Expected: True - large enough)")
-    print()
-
-    # Test 3: Batch operation (should use GPU even if small)
-    print("Test 3: Batch operation (small but batched)")
-    batch_size = 10
-    should_gpu = mps_manager.should_use_gpu("batch_embed", batch_size, is_batch=True)
-    print(f" Should use GPU: {should_gpu} (Expected: True - batch operation)")
-    print()
-
-    # Test 4: GPU memory stats
-    print("Test 4: GPU Memory Statistics")
-    mem_stats = mps_manager.get_memory_stats()
-    for key, value in mem_stats.items():
-        print(f" {key}: {value}")
-    print()
-
+    print(f"device manager: {mps_manager} on {mps_manager.device}")
+    print("dispatch for 100 elements:", mps_manager.should_use_gpu("embed", 100))
+    print("dispatch for a batch:", mps_manager.should_use_gpu("embed", 10, True))
+    print("memory:", mps_manager.get_memory_stats())
+    n, m, d = 100, 100, 384
+    cpu_a, cpu_b = torch.randn(n, d), torch.randn(m, d)
+    began = time.perf_counter()
+    cosine_similarity_gpu(cpu_a, cpu_b)
+    print(f"cpu: {(time.perf_counter() - began) * 1000:.2f} ms for {n}x{m} at {d}D")
     if mps_manager.enabled:
-        # Test 5: Cosine similarity
-        print("Test 5: Cosine Similarity (GPU vs CPU)")
-        n, m, d = 100, 100, 8192
-
-        # CPU
-        cpu_a = torch.randn(n, d)
-        cpu_b = torch.randn(m, d)
-        start = time.time()
-        cpu_sim = cosine_similarity_gpu(cpu_a, cpu_b)
-        cpu_time = (time.time() - start) * 1000
-        print(f" CPU: {cpu_time:.2f}ms for {n}x{m} similarity matrix (8192D)")
-
-        # GPU
-        gpu_a = cpu_a.to(mps_manager.device)
-        gpu_b = cpu_b.to(mps_manager.device)
-        start = time.time()
-        gpu_sim = cosine_similarity_gpu(gpu_a, gpu_b)
-        torch.mps.synchronize()
-        gpu_time = (time.time() - start) * 1000
-        print(f" GPU: {gpu_time:.2f}ms for {n}x{m} similarity matrix (8192D)")
-        print(f" Speedup: {cpu_time/gpu_time:.2f}x")
-        print()
-
-    # Test 6: Performance summary
-    print("Test 6: Performance Summary")
-    summary = mps_manager.get_performance_summary()
-    for key, value in summary.items():
-        print(f" {key}: {value}")
-
-    print()
-    print("=" * 70)
-    print("MPS UTILITIES READY FOR NEURAL ACCELERATION!")
-    print("=" * 70)
+        dev_a, dev_b = cpu_a.to(mps_manager.device), cpu_b.to(mps_manager.device)
+        began = time.perf_counter()
+        cosine_similarity_gpu(dev_a, dev_b)
+        mps_manager.synchronize()
+        elapsed = (time.perf_counter() - began) * 1000
+        print(f"{mps_manager.device}: {elapsed:.2f} ms for {n}x{m} at {d}D")
+    print("summary:", mps_manager.get_performance_summary())

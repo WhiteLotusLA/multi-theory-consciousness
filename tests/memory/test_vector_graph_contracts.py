@@ -5,10 +5,14 @@ Every case runs against each entry of ``VECTOR_BACKENDS`` or
 coordinator and the graph manager join by appending one ``pytest.param`` entry
 each (carrying ``pytest.mark.db`` where they need a server), so no case below
 needs editing. A vector factory takes the embedder and ``allow_non_semantic``.
+A backend that needs a throwaway store names its fixture; the factory then
+receives the fixture's value first. The Qdrant coordinator also runs here in
+local mode (``QdrantClient(":memory:")``, no server and no marker).
 """
 
+import functools
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import pytest
 
@@ -25,6 +29,7 @@ from mtc.memory.protocols import (
 class Backend:
     name: str
     factory: Callable[..., Any]
+    fixture: Optional[str] = None
 
 
 class _SemanticHash(HashEmbedder):
@@ -39,22 +44,78 @@ def _memory_vector(embedder=None, allow_non_semantic=False):
     )
 
 
+def _qdrant_local(embedder=None, allow_non_semantic=False):
+    qdrant_client = pytest.importorskip("qdrant_client")
+    from mtc.neural.vectors.coordinator import VectorCoordinator
+
+    return VectorCoordinator(
+        collection_name="contract_memories",
+        embedder=embedder or _SemanticHash(),
+        client=qdrant_client.QdrantClient(":memory:"),
+        allow_non_semantic=allow_non_semantic,
+    )
+
+
+def _qdrant_server(target, embedder=None, allow_non_semantic=False):
+    from mtc.neural.vectors.coordinator import VectorCoordinator
+
+    return VectorCoordinator(
+        collection_name=target.collection,
+        embedder=embedder or _SemanticHash(),
+        client=target.client,
+        allow_non_semantic=allow_non_semantic,
+    )
+
+
+def _neo4j_graph(target):
+    from mtc.knowledge.config import Neo4jConfig
+    from mtc.knowledge.graph_manager import KnowledgeGraphManager
+
+    manager = KnowledgeGraphManager(
+        config=Neo4jConfig("unused", "unused", "unused", target.database),
+        driver=target.driver,
+    )
+    manager.bootstrap_constraints()
+    return manager
+
+
 # Append a pytest.param(Backend(...), marks=pytest.mark.db, id="...") entry per
 # real store; the cases below do not change.
-VECTOR_BACKENDS = [pytest.param(Backend("inmemory", _memory_vector), id="inmemory")]
-GRAPH_BACKENDS = [
-    pytest.param(Backend("inmemory", inmemory.InMemoryGraphStore), id="inmemory")
+VECTOR_BACKENDS = [
+    pytest.param(Backend("inmemory", _memory_vector), id="inmemory"),
+    pytest.param(Backend("qdrant_local", _qdrant_local), id="qdrant_local"),
+    pytest.param(
+        Backend("qdrant", _qdrant_server, fixture="throwaway_qdrant"),
+        marks=pytest.mark.db,
+        id="qdrant",
+    ),
 ]
+GRAPH_BACKENDS = [
+    pytest.param(Backend("inmemory", inmemory.InMemoryGraphStore), id="inmemory"),
+    pytest.param(
+        Backend("neo4j", _neo4j_graph, fixture="throwaway_neo4j"),
+        marks=pytest.mark.db,
+        id="neo4j",
+    ),
+]
+
+
+def _bound_factory(request):
+    backend = request.param
+    if backend.fixture is None:
+        return backend.factory
+    # The throwaway fixtures are synchronous, so they resolve here directly.
+    return functools.partial(backend.factory, request.getfixturevalue(backend.fixture))
 
 
 @pytest.fixture(params=VECTOR_BACKENDS)
 def make_vector(request):
-    return request.param.factory
+    return _bound_factory(request)
 
 
 @pytest.fixture(params=GRAPH_BACKENDS)
 def make_graph(request):
-    return request.param.factory
+    return _bound_factory(request)
 
 
 def test_stores_satisfy_their_protocols(make_vector, make_graph):
