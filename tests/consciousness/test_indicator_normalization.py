@@ -9,6 +9,9 @@ Task 7 of the consciousness expansion plan.
 """
 
 import asyncio
+import random
+
+import numpy as np
 import pytest
 
 from mtc.assessment.assessment import (
@@ -146,6 +149,11 @@ class TestNoiseBaseline:
         in the same ballpark (within 0.3 of each other), confirming the
         averaging smooths out randomness.
         """
+        # Seeded so the comparison is reproducible: unseeded, two 5-iteration
+        # baselines differ by 0.3 or more about a third of the time (mostly
+        # higher_order_representations), before and after v0.5.0.
+        random.seed(42)
+        np.random.seed(42)
         b1 = await assessment.run_noise_baseline(iterations=5)
         b2 = await assessment.run_noise_baseline(iterations=5)
 

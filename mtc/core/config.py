@@ -370,6 +370,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("ANTHROPIC_API_KEY", "MTC_ANTHROPIC_API_KEY"),
         description="Optional; enables the Anthropic provider and DCM evaluator mode",
     )
+    ANTHROPIC_MODEL: str = Field(
+        "",
+        description="Anthropic model id for the DCM evaluator's claude mode and "
+        "the Anthropic provider; empty disables claude mode",
+    )
 
     # ========================================================================
     # Pydantic Configuration

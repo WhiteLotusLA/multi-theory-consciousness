@@ -11,6 +11,8 @@ AI consciousness system.
 
 Primary analysis (module-level):
   - Reads PhiTracker's empirical TPM (32x5 node-factored)
+  - Reorders its rows to little-endian when they arrive big-endian (the
+    PhiTracker's convention; see ``tpm_row_order``)
   - Converts to state-to-state TPM (32x32)
   - Computes EI at micro (32 states) and all 52 macro scales
   - Finds optimal macro partition where EI peaks
@@ -19,11 +21,16 @@ Secondary analysis (oscillator-level):
   - Uses OscillatoryBinding's transition counts (81x81)
   - Computes EI at per-group (81 states) and global (3 states) scales
 
+Row order: the functions below read bit i of a state index as node i
+(little-endian). The PhiTracker builds its TPM with big-endian rows (the first
+label is the most significant bit), so the analyzer reorders them first by
+default. Micro EI does not depend on row order; the macro coarse-graining
+does, because it groups source states by node membership.
+
 References:
   - Hoel, Albantakis & Tononi (2013). PNAS.
   - Hoel (2025). "Causal Emergence 2.0." arXiv:2503.13395.
 
-Created: 2026-03-18
 Author: MTC Contributors
 """
 
@@ -33,7 +40,11 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from mtc.consciousness import pyphi_bridge
+
 logger = logging.getLogger(__name__)
+
+TPM_ROW_ORDERS = ("big_endian", "little_endian")
 
 # Module labels matching PhiTracker.NODE_LABELS
 MODULE_LABELS = ["GWT", "AST", "HOT", "FEP", "BLT"]
@@ -280,7 +291,20 @@ class CausalEmergenceAnalyzer:
     the macro scale where Effective Information peaks.
     """
 
-    def __init__(self):
+    def __init__(self, tpm_row_order: str = "big_endian"):
+        """
+        Args:
+            tpm_row_order: Row order of the node-factored TPM the tracker
+                returns. ``big_endian`` (default, the PhiTracker's convention)
+                reorders the rows to little-endian before the analysis;
+                ``little_endian`` uses the rows as given, the v0.4.0 path.
+        """
+        if tpm_row_order not in TPM_ROW_ORDERS:
+            raise ValueError(
+                f"tpm_row_order must be one of {TPM_ROW_ORDERS}, "
+                f"got {tpm_row_order!r}"
+            )
+        self.tpm_row_order = tpm_row_order
         self._partitions = generate_bell_partitions(N_MODULES)
         self._last_result: Optional[CausalEmergenceResult] = None
         self._last_oscillator_result: Optional[Dict[str, Any]] = None
@@ -307,6 +331,9 @@ class CausalEmergenceAnalyzer:
 
         # Step 1: Get and convert TPM
         node_tpm = phi_tracker.build_tpm()  # (32, 5)
+        if self.tpm_row_order == "big_endian":
+            # Pure numpy reorder; bit reversal maps big-endian to little-endian
+            node_tpm = pyphi_bridge.to_little_endian_rows(node_tpm)
         state_tpm = node_tpm_to_state_tpm(node_tpm)  # (32, 32)
 
         # Step 2: Compute micro EI

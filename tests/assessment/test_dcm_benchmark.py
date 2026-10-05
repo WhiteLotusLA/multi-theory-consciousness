@@ -1,6 +1,7 @@
 """Tests for the full DCM Benchmark implementation."""
 
 import importlib.util
+from pathlib import Path
 import json
 import pytest
 import tempfile
@@ -358,3 +359,155 @@ class TestBenchmarkRunner:
         assert d["overall_probability"] == 0.4
         assert d["overall_ci"] == [0.2, 0.6]
         assert d["tier1_count"] == 60
+
+
+# ---------------------------------------------------------------------------
+# History cap, reload of the newest saved result, and the CLI entry point
+# ---------------------------------------------------------------------------
+
+
+def _result(when: datetime, probability: float):
+    from mtc.assessment.dcm_benchmark import DCMBenchmarkResult
+
+    return DCMBenchmarkResult(
+        timestamp=when,
+        spec_version="test",
+        stance_posteriors={"A": probability},
+        stance_confidence={"A": 0.1},
+        overall_probability=probability,
+        overall_ci=(probability, probability),
+        indicators_measured=3,
+        tier1_count=1,
+        tier2_count=1,
+        tier3_count=1,
+        comparison={"baseline": probability - 0.1},
+    )
+
+
+class _StubAdapter:
+    def collect_module_evidence(self):
+        return {"Indicator 1": 0.5}
+
+    def get_system_description(self):
+        return "stub"
+
+    def get_conversation_samples(self, n=20):
+        return []
+
+    def get_known_zeros(self):
+        return set()
+
+
+_FACTORY_CALLS = []
+
+
+def _stub_adapter_factory(state_dir=None):
+    _FACTORY_CALLS.append(state_dir)
+    return _StubAdapter()
+
+
+def test_result_history_capped_at_50(monkeypatch, tmp_path):
+    from mtc.assessment.dcm_benchmark import BenchmarkRunner, ModelSpecManager
+
+    runner = BenchmarkRunner(cache_dir=str(tmp_path))
+    assert runner.history_size == 50
+    spec_data = {"version": "test_v1", "fetched_at": "", "raw": MOCK_SPEC}
+    (tmp_path / "current_spec.json").write_text(json.dumps(spec_data))
+    monkeypatch.setattr(ModelSpecManager, "check_drift", lambda self: None)
+
+    from mtc.assessment import dcm_benchmark
+
+    monkeypatch.setattr(
+        dcm_benchmark.BayesianEngine,
+        "run_all_stances",
+        lambda self, spec, scores, plausibility_weights=None: (
+            {"A": 0.2},
+            {"A": 0.1},
+            0.2,
+            (0.2, 0.2),
+        ),
+    )
+    for _ in range(55):
+        runner.run(adapter=_StubAdapter(), samples=5)
+    assert len(runner.get_history()) == 50
+
+
+def test_get_latest_reloads_newest_saved_result(tmp_path):
+    from mtc.assessment.dcm_benchmark import BenchmarkRunner
+
+    writer = BenchmarkRunner(cache_dir=str(tmp_path))
+    writer._save_result(_result(datetime(2026, 1, 1, 12, 0), 0.25))
+    newest = _result(datetime(2026, 3, 2, 9, 30), 0.4)
+    writer._save_result(newest)
+
+    fresh = BenchmarkRunner(cache_dir=str(tmp_path))
+    latest = fresh.get_latest()
+    assert latest is not None
+    assert latest.overall_probability == pytest.approx(0.4)
+    assert latest.timestamp == newest.timestamp
+    assert latest.overall_ci == (0.4, 0.4)
+
+    restored = BenchmarkRunner(cache_dir=str(tmp_path))
+    restored.from_state_dict({})
+    assert restored._latest_result is not None
+    assert restored._latest_result.overall_probability == pytest.approx(0.4)
+
+    empty = BenchmarkRunner(cache_dir=str(tmp_path / "nothing"))
+    assert empty.get_latest() is None
+
+
+def test_main_loads_adapter_from_dotted_path(monkeypatch, tmp_path):
+    from mtc.assessment import dcm_benchmark
+
+    captured = {}
+
+    def fake_run(self, adapter, evaluator=None, mode="local", samples=100, **kw):
+        captured["adapter"] = adapter
+        captured["evaluator"] = evaluator
+        return _result(datetime(2026, 4, 1), 0.3)
+
+    monkeypatch.setattr(dcm_benchmark.BenchmarkRunner, "run", fake_run)
+    _FACTORY_CALLS.clear()
+    state_dir = tmp_path / "state"
+    code = dcm_benchmark.main(
+        [
+            "--adapter",
+            "tests.assessment.test_dcm_benchmark:_stub_adapter_factory",
+            "--state-dir",
+            str(state_dir),
+            "--mode",
+            "manual",
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--samples",
+            "5",
+        ]
+    )
+    assert code == 0
+    assert _FACTORY_CALLS == [str(state_dir)]
+    assert isinstance(captured["adapter"], _StubAdapter)
+    assert captured["evaluator"] is None
+
+    assert dcm_benchmark.main(["--adapter", "no_such_module_here:factory"]) != 0
+    assert dcm_benchmark.main(["--adapter", "missing-colon"]) != 0
+
+
+def test_main_compare_reads_reloaded_result(tmp_path, capsys):
+    from mtc.assessment import dcm_benchmark
+
+    writer = dcm_benchmark.BenchmarkRunner(cache_dir=str(tmp_path))
+    writer._save_result(_result(datetime(2026, 5, 1), 0.35))
+    code = dcm_benchmark.main(["--compare", "--cache-dir", str(tmp_path)])
+    assert code == 0
+    assert "0.3500" in capsys.readouterr().out
+
+
+def test_dcm_benchmark_can_import():
+    import mtc.assessment.dcm_benchmark as module
+
+    assert callable(module.main)
+    assert module.DEFAULT_ADAPTER == (
+        "mtc.assessment.dcm_reference_adapter:build_default_adapter"
+    )
+    source = Path(module.__file__).read_text()
+    assert "No DCMEvidenceAdapter configured" not in source

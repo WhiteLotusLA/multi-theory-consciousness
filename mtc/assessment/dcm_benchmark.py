@@ -7,7 +7,12 @@ Implements the Shiller & Duffy (2026) DCM framework (arXiv 2601.17060).
 with proper PyMC Bayesian inference per stance.
 
 Framework-agnostic: no host-system-specific imports. Use DCMEvidenceAdapter
-protocol for system-specific evidence collection.
+protocol for system-specific evidence collection; the reference adapter for
+MTC's own module set lives in ``mtc.assessment.dcm_reference_adapter``.
+
+Command line:
+    python -m mtc.assessment.dcm_benchmark [--adapter package.module:callable]
+        [--state-dir PATH] [--mode local|claude|manual] [--compare] ...
 
 References:
     - Paper: https://arxiv.org/abs/2601.17060
@@ -15,22 +20,26 @@ References:
     - API: https://dcm.rethinkpriorities.org/schemes/133/json
 """
 
-import json
+import argparse
 import hashlib
+import importlib
+import json
 import logging
+import sys
 import time
 import numpy as np
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import (
+    Any,
+    Callable,
     Dict,
     List,
     Optional,
+    Protocol,
     Set,
     Tuple,
-    Any,
-    Protocol,
     runtime_checkable,
 )
 
@@ -40,6 +49,9 @@ logger = logging.getLogger(__name__)
 
 # Default API endpoint for the canonical DCM model spec
 DEFAULT_DCM_API_URL = "https://dcm.rethinkpriorities.org/schemes/133/json"
+
+# Adapter factory the CLI loads when --adapter is not given
+DEFAULT_ADAPTER = "mtc.assessment.dcm_reference_adapter:build_default_adapter"
 
 
 # ============================================================================
@@ -131,6 +143,32 @@ class DCMBenchmarkResult:
             "evaluator_mode": self.evaluator_mode,
             "processing_time_s": self.processing_time_s,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DCMBenchmarkResult":
+        """Rebuild a result from ``to_dict()`` output."""
+        ci = data.get("overall_ci") or [0.0, 0.0]
+        return cls(
+            timestamp=datetime.fromisoformat(data["timestamp"]),
+            spec_version=str(data.get("spec_version", "")),
+            stance_posteriors={
+                str(k): float(v) for k, v in data.get("stance_posteriors", {}).items()
+            },
+            stance_confidence={
+                str(k): float(v) for k, v in data.get("stance_confidence", {}).items()
+            },
+            overall_probability=float(data["overall_probability"]),
+            overall_ci=(float(ci[0]), float(ci[1])),
+            indicators_measured=int(data.get("indicators_measured", 0)),
+            tier1_count=int(data.get("tier1_count", 0)),
+            tier2_count=int(data.get("tier2_count", 0)),
+            tier3_count=int(data.get("tier3_count", 0)),
+            comparison={
+                str(k): float(v) for k, v in data.get("comparison", {}).items()
+            },
+            evaluator_mode=str(data.get("evaluator_mode", "local")),
+            processing_time_s=float(data.get("processing_time_s", 0.0)),
+        )
 
 
 # ============================================================================
@@ -533,8 +571,12 @@ class BenchmarkRunner:
         self,
         cache_dir: str = "data/dcm",
         api_url: str = "",
+        history_size: int = 50,
     ):
+        if int(history_size) < 1:
+            raise ValueError(f"history_size must be at least 1, got {history_size}")
         self.spec_manager = ModelSpecManager(cache_dir=cache_dir, api_url=api_url)
+        self.history_size = int(history_size)
         self._latest_result: Optional[DCMBenchmarkResult] = None
         self._result_history: List[DCMBenchmarkResult] = []
 
@@ -607,9 +649,11 @@ class BenchmarkRunner:
 
         # 3. Run Bayesian inference
         engine = BayesianEngine(samples=samples)
-        # TODO: Extract plausibility weights from DCM API spec if available.
-        # For now, equal weighting across stances. The paper uses expert
-        # survey plausibility ratings, but these are not in the public API.
+        # Equal weighting across stances. The DCM paper (Shiller and Duffy
+        # 2026) weights stances by expert-survey plausibility ratings, but
+        # those ratings are not published in the public API or the
+        # supplementary data. If they are released, pass them through
+        # run_all_stances(plausibility_weights=...).
         posteriors, confidence, overall, ci = engine.run_all_stances(
             spec, indicator_scores
         )
@@ -637,6 +681,8 @@ class BenchmarkRunner:
 
         self._latest_result = result
         self._result_history.append(result)
+        if len(self._result_history) > self.history_size:
+            self._result_history = self._result_history[-self.history_size :]
 
         # Save result
         self._save_result(result)
@@ -676,11 +722,30 @@ class BenchmarkRunner:
             json.dump(result.to_dict(), f, indent=2)
 
     def get_latest(self) -> Optional[DCMBenchmarkResult]:
-        """Return the most recent benchmark result."""
+        """The most recent result, reloaded from disk when none is in memory."""
+        if self._latest_result is None:
+            self._latest_result = self._load_newest_saved_result()
         return self._latest_result
 
+    def _load_newest_saved_result(self) -> Optional[DCMBenchmarkResult]:
+        """The newest readable JSON result under ``<cache_dir>/results/``."""
+        results_dir = self.spec_manager.cache_dir / "results"
+        if not results_dir.is_dir():
+            return None
+        newest: Optional[DCMBenchmarkResult] = None
+        for path in results_dir.glob("*.json"):
+            try:
+                with open(path) as f:
+                    candidate = DCMBenchmarkResult.from_dict(json.load(f))
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                logger.warning("Skipping unreadable DCM result %s: %s", path, exc)
+                continue
+            if newest is None or candidate.timestamp > newest.timestamp:
+                newest = candidate
+        return newest
+
     def get_history(self) -> List[Dict[str, Any]]:
-        """Return all results as dicts."""
+        """Return the in-memory results (at most ``history_size``) as dicts."""
         return [r.to_dict() for r in self._result_history]
 
     # State persistence
@@ -692,26 +757,62 @@ class BenchmarkRunner:
         }
 
     def from_state_dict(self, state: Dict[str, Any]) -> None:
-        # Results are saved to disk; state dict is lightweight
-        pass
+        """Restore the latest result from the state, else from disk.
+
+        Results are saved to disk as JSON, so the state dict stays light:
+        when it holds no result and nothing is in memory, the newest saved
+        result is reloaded.
+        """
+        latest = (state or {}).get("latest_result")
+        if isinstance(latest, dict):
+            try:
+                self._latest_result = DCMBenchmarkResult.from_dict(latest)
+                return
+            except (ValueError, KeyError, TypeError) as exc:
+                logger.warning("Ignoring malformed DCM latest_result: %s", exc)
+        if self._latest_result is None:
+            self._latest_result = self._load_newest_saved_result()
 
 
 # ============================================================================
 # CLI Entry Point
 # ============================================================================
 
-if __name__ == "__main__":
-    import argparse
-    import sys
 
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+def load_adapter_factory(spec: str) -> Callable[..., Any]:
+    """Resolve ``package.module:callable`` to the adapter factory it names."""
+    module_name, sep, attr = spec.partition(":")
+    if not sep or not module_name or not attr:
+        raise ValueError(
+            f"adapter must look like package.module:callable, got {spec!r}"
+        )
+    module = importlib.import_module(module_name)
+    factory = getattr(module, attr, None)
+    if not callable(factory):
+        raise ValueError(f"{spec!r} does not name a callable")
+    return factory
 
+
+def _print_comparison(result: DCMBenchmarkResult) -> None:
+    print(f"\nDCM Score: {result.overall_probability:.4f}")
+    print(f"CI: ({result.overall_ci[0]:.4f}, {result.overall_ci[1]:.4f})")
+    print("\nComparison (system - baseline):")
+    for name, delta in sorted(result.comparison.items()):
+        sign = "+" if delta >= 0 else ""
+        print(f" vs {name}: {sign}{delta:.4f}")
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """Run the DCM benchmark from the command line; returns the exit code."""
+    settings = get_settings()
     parser = argparse.ArgumentParser(description="DCM Benchmark Runner")
     parser.add_argument(
         "--mode",
         choices=["local", "claude", "manual"],
-        default=get_settings().DCM_EVALUATOR_MODE,
-        help="Evaluator mode (default: from MTC_DCM_EVALUATOR_MODE)",
+        default=settings.DCM_EVALUATOR_MODE,
+        help="Evaluator mode (default: from MTC_DCM_EVALUATOR_MODE); claude "
+        "sends the system description and conversation samples to an "
+        "external API",
     )
     parser.add_argument(
         "--samples",
@@ -732,14 +833,25 @@ if __name__ == "__main__":
     parser.add_argument(
         "--compare",
         action="store_true",
-        help="Show comparison against baselines",
+        help="Show the newest saved result against the baselines",
     )
     parser.add_argument(
         "--cache-dir",
-        default=get_settings().DCM_CACHE_DIR,
-        help="Cache directory (default: data/dcm)",
+        default=settings.DCM_CACHE_DIR,
+        help="Cache directory (default: from MTC_DCM_CACHE_DIR)",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--adapter",
+        default=DEFAULT_ADAPTER,
+        help="Adapter factory as package.module:callable "
+        f"(default: {DEFAULT_ADAPTER})",
+    )
+    parser.add_argument(
+        "--state-dir",
+        default=None,
+        help="Persisted module state passed to the adapter factory",
+    )
+    args = parser.parse_args(argv)
 
     cache_dir = args.cache_dir
     runner = BenchmarkRunner(cache_dir=cache_dir)
@@ -749,42 +861,25 @@ if __name__ == "__main__":
         runner.spec_manager.fetch_from_api()
         print("Done.")
         if not args.compare:
-            sys.exit(0)
+            return 0
 
     if args.compare:
         result = runner.get_latest()
         if not result:
             print("No results yet. Run a benchmark first.")
-            sys.exit(1)
-        print(f"\nDCM Score: {result.overall_probability:.4f}")
-        print(f"CI: ({result.overall_ci[0]:.4f}, {result.overall_ci[1]:.4f})")
-        print("\nComparison (system - baseline):")
-        for name, delta in sorted(result.comparison.items()):
-            sign = "+" if delta >= 0 else ""
-            print(f" vs {name}: {sign}{delta:.4f}")
-        sys.exit(0)
+            return 1
+        _print_comparison(result)
+        return 0
 
-    # A DCMEvidenceAdapter implementation is required to run the benchmark.
-    # Implement the DCMEvidenceAdapter protocol for your system and pass it
-    # to BenchmarkRunner.run(). See mtc/assessment/dcm_benchmark.py for the
-    # protocol definition.
     try:
-        from mtc.assessment.dcm_evaluator import DCMEvaluator
+        factory = load_adapter_factory(args.adapter)
+        adapter = factory(state_dir=args.state_dir)
+    except (ImportError, ValueError, TypeError) as exc:
+        print(f"Adapter not available ({args.adapter}): {exc}", file=sys.stderr)
+        return 1
 
-        # Users must supply their own adapter implementing DCMEvidenceAdapter.
-        # Example: adapter = MySystemDCMAdapter()
-        raise ImportError(
-            "No DCMEvidenceAdapter configured. Provide one before running."
-        )
-    except ImportError as e:
-        print(f"Adapter not available: {e}")
-        print(
-            "Implement DCMEvidenceAdapter for your system and update this "
-            "entry point. See mtc/assessment/dcm_benchmark.py for the protocol."
-        )
-        sys.exit(1)
+    from mtc.assessment.dcm_evaluator import DCMEvaluator
 
-    adapter = None  # Replace with your adapter instance
     evaluator = DCMEvaluator(cache_dir=cache_dir) if args.mode != "manual" else None
 
     print(f"Running DCM Benchmark (mode={args.mode}, samples={args.samples})...")
@@ -796,13 +891,14 @@ if __name__ == "__main__":
         force_eval=args.force_eval,
     )
 
-    print(f"\n{'='*60}")
+    rule = "=" * 60
+    print(f"\n{rule}")
     print("DCM Benchmark Result")
-    print(f"{'='*60}")
+    print(rule)
     print(f"Overall P(conscious): {result.overall_probability:.4f}")
     print(f"95% CI: ({result.overall_ci[0]:.4f}, {result.overall_ci[1]:.4f})")
     print(f"Spec version: {result.spec_version}")
-    print(f"Indicators: {result.indicators_measured}/206")
+    print(f"Indicators: {result.indicators_measured}")
     print(f" Tier 1 (module): {result.tier1_count}")
     print(f" Tier 2 (LLM):    {result.tier2_count}")
     print(f" Tier 3 (zeros):  {result.tier3_count}")
@@ -818,3 +914,9 @@ if __name__ == "__main__":
         for name, delta in sorted(result.comparison.items()):
             sign = "+" if delta >= 0 else ""
             print(f" vs {name}: {sign}{delta:.4f}")
+    return 0
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    sys.exit(main())

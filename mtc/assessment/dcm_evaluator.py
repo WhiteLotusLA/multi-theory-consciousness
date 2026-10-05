@@ -3,13 +3,21 @@ DCM LLM-based Indicator Evaluator
 ==================================
 
 Evaluates DCM indicators that can't be measured directly from modules.
-Uses any OpenAI-compatible API (local LLM) or Anthropic API (Claude).
+Uses a local chat-completions server (``mode="local"``, the Settings LLM host
+and port) or the Anthropic API (``mode="claude"``, model id from
+``Settings.ANTHROPIC_MODEL``).
+
+Data leaving the machine: ``mode="claude"`` sends the system description and
+the conversation samples the adapter supplies to an external API. The local
+mode keeps them on the configured host.
 
 Framework-agnostic: no host-system-specific imports.
 """
 
+import hashlib
 import json
 import logging
+import math
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -17,9 +25,6 @@ from typing import Dict, List, Optional, Any
 from mtc.core.config import get_settings
 
 logger = logging.getLogger(__name__)
-
-# Default conservative score for indicators that can't be evaluated
-DEFAULT_SCORE = 0.3
 
 EVALUATION_SYSTEM_PROMPT = """You are an expert consciousness researcher evaluating whether an AI system exhibits specific consciousness-related indicators from the Digital Consciousness Model (DCM).
 
@@ -71,15 +76,31 @@ class DCMEvaluator:
             spec: ParsedSpec (for indicator descriptions, if available)
             system_description: Architecture summary
             conversation_samples: Recent conversations
-            mode: "local" (Qwen) or "claude" (Anthropic API)
+            mode: "local" (chat-completions server) or "claude" (Anthropic
+                API; sends the description and samples off the machine)
             force: Bypass cache
 
         Returns:
-            Dict mapping indicator name -> score [0, 1]
+            Dict mapping indicator name -> score [0, 1]. An indicator the
+            model did not score (failed batch, missing or unparseable entry)
+            is left out rather than given a stand-in value; the benchmark
+            then treats it as unmeasured. Only a complete evaluation is
+            cached.
+
+        Raises:
+            ValueError: ``mode="claude"`` with ``Settings.ANTHROPIC_MODEL``
+                empty.
         """
+        if mode == "claude":
+            self._claude_model()  # configuration errors surface here, not per batch
+
+        cache_key = self._cache_key(
+            system_description, conversation_samples, indicator_names
+        )
+
         # Check cache first (unless forced)
         if not force:
-            cached = self._load_cache(indicator_names)
+            cached = self._load_cache(indicator_names, cache_key)
             if cached is not None:
                 logger.info(f"DCM evaluator: loaded {len(cached)} cached scores")
                 return cached
@@ -106,13 +127,17 @@ class DCMEvaluator:
                 scores = self._parse_response(response, batch)
                 all_scores.update(scores)
             except Exception as e:
+                # The batch's indicators stay unscored; no stand-in value.
                 logger.warning(f"DCM evaluator batch {i+1} failed: {e}")
-                # Default scores for failed batch
-                for name in batch:
-                    all_scores[name] = DEFAULT_SCORE
 
-        # Cache results
-        self._save_cache(all_scores, datetime.now())
+        missing = [name for name in indicator_names if name not in all_scores]
+        if missing:
+            logger.warning(
+                f"DCM evaluator: {len(missing)} indicators unscored, "
+                "result not cached"
+            )
+        else:
+            self._save_cache(all_scores, datetime.now(), cache_key)
 
         return all_scores
 
@@ -137,7 +162,10 @@ class DCMEvaluator:
     def _parse_response(
         self, response: str, indicator_names: List[str]
     ) -> Dict[str, float]:
-        """Parse LLM response into indicator scores."""
+        """Parse LLM response into indicator scores.
+
+        Entries that are missing, non-numeric or non-finite are left out.
+        """
         scores: Dict[str, float] = {}
 
         try:
@@ -152,22 +180,25 @@ class DCMEvaluator:
 
             data = json.loads(text)
 
+            if not isinstance(data, dict):
+                raise ValueError("evaluator response is not a JSON object")
+
             for name in indicator_names:
-                if name in data:
-                    entry = data[name]
-                    if isinstance(entry, dict):
-                        scores[name] = float(entry.get("score", DEFAULT_SCORE))
-                    elif isinstance(entry, (int, float)):
-                        scores[name] = float(entry)
-                    else:
-                        scores[name] = DEFAULT_SCORE
-                else:
-                    scores[name] = DEFAULT_SCORE
+                entry = data.get(name)
+                if isinstance(entry, dict):
+                    entry = entry.get("score")
+                if isinstance(entry, bool) or not isinstance(entry, (int, float, str)):
+                    continue
+                try:
+                    value = float(entry)
+                except ValueError:
+                    continue
+                if math.isfinite(value):
+                    scores[name] = value
 
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning(f"Failed to parse evaluator response: {e}")
-            for name in indicator_names:
-                scores[name] = DEFAULT_SCORE
+            return {}
 
         # Clamp all scores to [0, 1]
         return {k: max(0.0, min(1.0, v)) for k, v in scores.items()}
@@ -197,17 +228,29 @@ class DCMEvaluator:
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
 
+    @staticmethod
+    def _claude_model() -> str:
+        """The configured Anthropic model id; raises when it is empty."""
+        model = get_settings().ANTHROPIC_MODEL
+        if not model:
+            raise ValueError(
+                "Settings.ANTHROPIC_MODEL (env MTC_ANTHROPIC_MODEL) is empty; "
+                "set it to a model id to use mode='claude'"
+            )
+        return model
+
     def _call_claude(self, prompt: str) -> str:
-        """Call Anthropic Claude API."""
+        """Call the Anthropic API (sends the prompt off the machine)."""
         import anthropic
 
+        model = self._claude_model()
         api_key = get_settings().ANTHROPIC_API_KEY or None
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY not set. Required for mode='claude'.")
 
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=model,
             max_tokens=4096,
             system=EVALUATION_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
@@ -221,25 +264,56 @@ class DCMEvaluator:
             for i in range(0, len(items), self.batch_size)
         ]
 
-    def _save_cache(self, scores: Dict[str, float], timestamp: datetime) -> None:
-        """Save evaluation scores to cache."""
-        cache_file = self.cache_dir / "latest_eval.json"
+    @staticmethod
+    def _cache_key(
+        system_description: str,
+        conversation_samples: List[str],
+        indicator_names: List[str],
+    ) -> str:
+        """sha256 over the description, the samples and the sorted indicators.
+
+        A cached evaluation is reused only for the same evidence and the same
+        indicator set.
+        """
+        payload = json.dumps(
+            {
+                "system_description": system_description,
+                "conversation_samples": list(conversation_samples),
+                "indicators": sorted(indicator_names),
+            },
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _cache_file(self, cache_key: str) -> Path:
+        return self.cache_dir / f"eval_{cache_key[:32]}.json"
+
+    def _save_cache(
+        self, scores: Dict[str, float], timestamp: datetime, cache_key: str
+    ) -> None:
+        """Save evaluation scores to the cache file for ``cache_key``."""
+        cache_file = self._cache_file(cache_key)
         data = {
             "timestamp": timestamp.isoformat(),
+            "cache_key": cache_key,
             "scores": scores,
         }
         with open(cache_file, "w") as f:
             json.dump(data, f, indent=2)
 
-    def _load_cache(self, indicator_names: List[str]) -> Optional[Dict[str, float]]:
-        """Load cached scores if fresh enough and covers all indicators."""
-        cache_file = self.cache_dir / "latest_eval.json"
+    def _load_cache(
+        self, indicator_names: List[str], cache_key: str
+    ) -> Optional[Dict[str, float]]:
+        """Load cached scores for ``cache_key`` if fresh and complete."""
+        cache_file = self._cache_file(cache_key)
         if not cache_file.exists():
             return None
 
         try:
             with open(cache_file) as f:
                 data = json.load(f)
+            if data.get("cache_key") != cache_key:
+                return None
 
             cached_time = datetime.fromisoformat(data["timestamp"])
             if datetime.now() - cached_time > self.cache_ttl:

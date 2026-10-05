@@ -1,12 +1,8 @@
 """
-Tests for Phase 6 Consciousness Assessment Framework
-=====================================================
+Tests for the consciousness assessment (mtc.assessment.assessment): the
+30-indicator measurement system. All tests use mocks (no real neural
+modules or databases).
 
-Tests for src/consciousness/phase6_consciousness_assessment.py  -
-the 14+ indicator consciousness measurement system. All tests use
-mocks (no real neural modules or databases).
-
-Created: 2026-03-09
 Author: Multi-Theory Consciousness Project
 """
 
@@ -170,7 +166,11 @@ async def test_assessment_with_mock_global_workspace(assessment):
         },
     }
 
-    report = await assessment.run_full_assessment(global_workspace=mock_gw)
+    # Raw scores: the stub noise baseline is random and would make the
+    # normalized check depend on the draw.
+    report = await assessment.run_full_assessment(
+        global_workspace=mock_gw, normalize=False
+    )
 
     # GWT indicators should have higher scores with an active workspace
     gb = report.indicator_results["global_broadcast"]

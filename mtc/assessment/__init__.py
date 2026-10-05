@@ -3,15 +3,23 @@ MTC Assessment Module
 ======================
 
 Consciousness measurement and validation tools:
-- ConsciousnessAssessment: 30-indicator assessment across 8 theories (27 positive + 3 negative)
-- ConsciousnessMeasurementFramework: Academic-grade measurement system
+- ConsciousnessAssessment: 30 positive and 3 negative indicators across 8
+  theories, with measured, absent and insufficient_data statuses
+- ConsciousnessMeasurementFramework: the legacy 14-metric framework
 - RPTMeasurement: Recurrent Processing Theory measurement
 - BenchmarkRunner: Full Bayesian DCM benchmark (Shiller & Duffy 2026)
 - DCMEvaluator: LLM-based DCM indicator evaluator
+- ReferenceDCMAdapter: DCM evidence adapter for MTC's own module set
 - CausalEmergenceAnalyzer: Hoel Effective Information + CE 2.0
-- PhiCalculator: IIT Phi calculation (exact + approximation)
+- PhiCalculator: exact IIT 4.0 Phi through the PyPhi bridge when a TPM is
+  supplied, otherwise a labelled spectral integration proxy
 - LongitudinalStudy: Track consciousness emergence over time
 - AblationStudy: Component contribution analysis
+
+Phi has two paths into the assessment: a PhiTracker passed as ``phi_tracker``
+gives exact IIT 4.0 Phi of the module graph (a module-graph integration
+proxy), and the PhiCalculator works on supplied neural states. Importing this
+package never imports PyPhi.
 """
 
 from mtc.assessment.assessment import (
@@ -50,6 +58,11 @@ from mtc.assessment.dcm_benchmark import (
 from mtc.assessment.dcm_evaluator import (
     DCMEvaluator,
 )
+from mtc.assessment.dcm_reference_adapter import (
+    KNOWN_ZEROS,
+    ReferenceDCMAdapter,
+    build_default_adapter,
+)
 from mtc.assessment.causal_emergence import (
     CausalEmergenceAnalyzer,
 )
@@ -85,6 +98,9 @@ __all__ = [
     "StanceNode",
     "IndicatorScore",
     "DCMEvaluator",
+    "ReferenceDCMAdapter",
+    "build_default_adapter",
+    "KNOWN_ZEROS",
     # Causal Emergence (v0.2.0)
     "CausalEmergenceAnalyzer",
 ]

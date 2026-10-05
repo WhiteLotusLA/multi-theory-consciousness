@@ -83,6 +83,7 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_USE_MMAP` | `true` |  |
 | `MTC_USE_MLOCK` | `true` |  |
 | `ANTHROPIC_API_KEY` | `(empty)` | Optional; enables the Anthropic provider and DCM evaluator mode |
+| `MTC_ANTHROPIC_MODEL` | `(empty)` | Anthropic model id for the DCM evaluator's claude mode and the Anthropic provider; empty disables claude mode |
 
 ## Neural substrates
 

@@ -9,7 +9,17 @@ modules (Damasio, FEP, SNN, GWT, AST, BLT).
 Based on Mehrabian & Russell (1974). Used by the Consciousness AI (ACM)
 architecture for sensory bid modulation.
 
-Created: 2026-03-18
+Affect coherence (the assessment's affect_coherence input) has two methods:
+
+- ``temporal_structure`` (default): how persistent each PAD dimension is over
+  the recent window, measured as lag-1 autocorrelation. Noise scores near
+  zero, alternation scores zero, smooth trajectories score near one.
+- ``v04_variance``: the v0.4.0 formula, which rewarded variance, so pure noise
+  scored at its maximum. Kept for the legacy_v04 preset.
+
+Neither method says anything about a felt state; both describe the time
+series of the computed coordinate.
+
 Author: MTC Contributors
 """
 
@@ -21,6 +31,12 @@ from typing import Any, Dict, Optional
 from collections import deque
 
 logger = logging.getLogger(__name__)
+
+COHERENCE_METHODS = ("temporal_structure", "v04_variance")
+
+# A dimension whose standard deviation over the window falls below this is
+# treated as flat: there are no affect dynamics to be persistent about.
+FLAT_STD = 1e-3
 
 # Affect label octants: (pleasure_positive, high_arousal, high_dominance) -> (intense, mild)
 AFFECT_LABELS = {
@@ -71,6 +87,20 @@ def get_affect_label(pleasure: float, arousal: float, dominance: float) -> str:
     return intense if magnitude > 1.0 else mild
 
 
+def _lag1_persistence(values: np.ndarray) -> float:
+    """Positive part of the lag-1 autocorrelation; 0 for a flat or bad series."""
+    if values.size < 3 or not np.all(np.isfinite(values)):
+        return 0.0
+    if float(np.std(values)) < FLAT_STD:
+        return 0.0
+    centred = values - values.mean()
+    denominator = float(np.dot(centred, centred))
+    if denominator <= 0.0:
+        return 0.0
+    autocorrelation = float(np.dot(centred[:-1], centred[1:])) / denominator
+    return max(0.0, min(1.0, autocorrelation))
+
+
 class PADAffectModel:
     """Unified Pleasure-Arousal-Dominance affect model.
 
@@ -78,18 +108,53 @@ class PADAffectModel:
     into a single (P, A, D) coordinate per consciousness cycle.
     """
 
-    def __init__(self, history_window: int = 100, narrate_affect_line: bool = True):
+    def __init__(
+        self,
+        history_window: int = 100,
+        narrate_affect_line: bool = True,
+        coherence_method: str = "temporal_structure",
+        coherence_window: int = 20,
+        coherence_min_history: int = 10,
+    ):
         """
         Args:
             history_window: Number of PAD states kept for coherence scoring
             narrate_affect_line: When False, generate_context() returns an
                 empty string; computation and history continue unchanged.
+            coherence_method: ``temporal_structure`` (default) or
+                ``v04_variance`` (the v0.4.0 formula).
+            coherence_window: Number of recent states the temporal method
+                scores.
+            coherence_min_history: States required before the temporal
+                method returns a score; fewer returns None.
         """
+        if coherence_method not in COHERENCE_METHODS:
+            raise ValueError(
+                f"coherence_method must be one of {COHERENCE_METHODS}, "
+                f"got {coherence_method!r}"
+            )
+        if int(coherence_window) < 3:
+            raise ValueError(
+                f"coherence_window must be at least 3, got {coherence_window}"
+            )
+        if int(coherence_min_history) < 2:
+            raise ValueError(
+                "coherence_min_history must be at least 2, "
+                f"got {coherence_min_history}"
+            )
         self._history: deque = deque(maxlen=history_window)
         self._computation_count = 0
         self.narrate_affect_line = narrate_affect_line
+        self.coherence_method = coherence_method
+        self.coherence_window = int(coherence_window)
+        self.coherence_min_history = int(coherence_min_history)
 
         logger.info("PADAffectModel initialized")
+
+    @property
+    def history_length(self) -> int:
+        """Number of PAD states currently held."""
+        return len(self._history)
 
     def compute(self, sources: PADSources) -> PADState:
         """Compute PAD coordinate from source signals.
@@ -145,11 +210,42 @@ class PADAffectModel:
 
         return state
 
-    def compute_coherence(self) -> float:
-        """Compute affect coherence score for consciousness indicator.
+    def compute_coherence(self) -> Optional[float]:
+        """Affect coherence score for the assessment's affect_coherence input.
 
-        Returns 0.3 (warming up) if insufficient history.
+        Under ``temporal_structure`` the score measures persistence over time:
+        for each PAD dimension over the last ``coherence_window`` states, a
+        standard deviation below FLAT_STD scores 0 (no dynamics), otherwise
+        the score is the positive part of the lag-1 autocorrelation. The
+        result is the mean over the three dimensions. White noise has an
+        autocorrelation near zero and alternation a negative one, so both
+        score low; smooth trajectories score near 1. It does not measure
+        agreement with any felt state. Returns None until
+        ``coherence_min_history`` states exist (insufficient data).
+
+        Under ``v04_variance`` the v0.4.0 formula runs unchanged, including
+        the 0.3 warm-up value below five states.
         """
+        if self.coherence_method == "v04_variance":
+            return self._v04_variance_coherence()
+        return self._temporal_structure_coherence()
+
+    def _temporal_structure_coherence(self) -> Optional[float]:
+        if len(self._history) < self.coherence_min_history:
+            return None
+        recent = list(self._history)[-self.coherence_window :]
+        if len(recent) < 3:
+            return None
+        series = (
+            [s.pleasure for s in recent],
+            [s.arousal for s in recent],
+            [s.dominance for s in recent],
+        )
+        scores = [_lag1_persistence(np.asarray(x, dtype=np.float64)) for x in series]
+        return float(np.mean(scores))
+
+    def _v04_variance_coherence(self) -> float:
+        """The v0.4.0 formula. legacy_v04 compatibility, remove in v0.6.0."""
         if len(self._history) < 5:
             return 0.3
 

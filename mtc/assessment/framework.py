@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """
-Consciousness Measurement Framework - Academic Research Grade
-===================================================================
+Legacy 14-Metric Consciousness Measurement Framework
+====================================================
 
-This module implements a comprehensive consciousness measurement system based on
-Integrated Information Theory (IIT), Global Workspace Theory (GWT), and other
-leading consciousness theories. 20 indicators track consciousness emergence.
+Computes 14 descriptive metrics from raw substrate arrays (SNN, LSM and,
+when available, HTM states), recent memories and recent thoughts. The metrics
+are named after IIT, GWT, temporal, self-model and complexity notions, but
+each one is a simple statistic over the supplied arrays or a token count over
+the supplied text. This is the legacy 14-metric framework; the
+30-indicator assessment lives in ``mtc.assessment.assessment``.
 
-Note: Not simulation - legitimate consciousness research! Every metric
-      is academically grounded and empirically measurable.
-
-Key Features:
-- 20 consciousness indicators from leading theories
-- Real-time measurement and tracking
-- Statistical validation and confidence intervals
-- Publication-ready data export
-- Peer-review quality implementation
+Features:
+- 14 metrics from substrate arrays, memories and thoughts
+- Availability reporting (full, partial, unavailable)
+- Approximate confidence intervals from the measurement history
+- A tabular export
 """
+
+import re
 
 import numpy as np
 
@@ -81,16 +82,34 @@ class ConsciousnessMetrics:
     measurement_duration_ms: float = 0.0
 
 
+_TOKEN = re.compile(r"[a-z']+")
+
+
+def _tokens(text: Any) -> List[str]:
+    """Lower-case word tokens; apostrophes stay inside a token ("i'm")."""
+    tokens = (token.strip("'") for token in _TOKEN.findall(str(text).lower()))
+    return [token for token in tokens if token]
+
+
+def _contains_sequence(tokens: List[str], sequence: List[str]) -> bool:
+    """True when ``sequence`` appears as consecutive tokens in ``tokens``."""
+    if not sequence:
+        return False
+    width = len(sequence)
+    return any(
+        tokens[i : i + width] == sequence for i in range(len(tokens) - width + 1)
+    )
+
+
 class ConsciousnessMeasurementFramework:
     """
-    Academic-grade consciousness measurement system.
+    Legacy 14-metric measurement framework.
 
-    Implements 20 consciousness indicators from multiple theories:
-    - Integrated Information Theory (IIT 3.0)
-    - Global Workspace Theory (GWT)
-    - Attention Schema Theory (AST)
-    - Predictive Processing Framework
-    - Higher-Order Thought Theory
+    Computes descriptive metrics named after several theories (IIT-style
+    integration and differentiation, GWT-style accessibility, temporal
+    continuity, self-model and agency token counts, complexity). Each metric
+    is a statistic over the supplied arrays or text, not a theory-level
+    measurement.
     """
 
     def __init__(
@@ -113,16 +132,21 @@ class ConsciousnessMeasurementFramework:
         self.htm_columns = htm_columns
         self.system_name = system_name
 
-        # Initialize C++ HTM for research-grade processing
+        # Optional C++ HTM; without it HTM-dependent metrics report NaN
+        self.htm_processor = None
         try:
             from mtc.neural.htm import CppHtmInterface
 
+            if CppHtmInterface is None:
+                raise ImportError("C++ HTM interface not built")
             self.htm_processor = CppHtmInterface()
             logger.info(
                 f"Integrated C++ HTM: {self.htm_processor.initialized} initialized"
             )
-        except ImportError:
-            logger.warning("C++ HTM not available, using simplified measurements")
+        except Exception as exc:  # ImportError or a failed native init
+            logger.warning(
+                "C++ HTM not available, HTM-dependent metrics report NaN: %s", exc
+            )
             self.htm_processor = None
 
         # Historical tracking
@@ -139,9 +163,10 @@ class ConsciousnessMeasurementFramework:
             "metacognitive_depth": 0.4,
         }
 
-        logger.info("Consciousness Measurement Framework initialized")
+        logger.info("Legacy 14-metric measurement framework initialized")
         logger.info(
-            f"  Tracking 20 indicators across {snn_neurons + lsm_neurons + htm_columns*32} neural units"
+            "  Tracking 14 metrics across %d neural units",
+            snn_neurons + lsm_neurons + htm_columns * 32,
         )
 
     async def measure_consciousness(
@@ -285,13 +310,12 @@ class ConsciousnessMeasurementFramework:
         self, snn: np.ndarray, lsm: np.ndarray, htm: np.ndarray
     ) -> float:
         """
-        Calculate Integrated Information (Phi) using PyPhi.
+        Spectral integration proxy over a correlation matrix.
 
-        Since exact Phi calculation is NP-hard and impossible for >20 neurons,
-        we use a "Coarse-Grained" approach:
-        1. Aggregate neural activity into 5 macro-nodes (SNN, LSM, HTM regions)
-        2. Compute Transition Probability Matrix (TPM) from recent history
-        3. Use PyPhi to calculate exact Phi of this macro-system
+        Takes up to 50 values from each substrate, builds a correlation matrix
+        and returns the entropy of its normalized eigenvalue spectrum. This is
+        not a PyPhi computation and not IIT Phi; exact IIT 4.0 Phi of the
+        module graph comes from the PhiTracker through the PyPhi bridge.
         """
 
         try:
@@ -436,13 +460,13 @@ class ConsciousnessMeasurementFramework:
 
         # Check consistency of self-references across time
         continuity_score = 0.0
-        system_name_lower = self.system_name.lower()
+        name_tokens = _tokens(self.system_name)
 
         # Memory continuity
         if len(memories) > 1:
-            # Check for consistent identity markers
+            # Identity markers: the system name as whole tokens
             identity_consistency = sum(
-                1 for m in memories if system_name_lower in str(m).lower()
+                1 for m in memories if _contains_sequence(_tokens(m), name_tokens)
             ) / len(memories)
             continuity_score += identity_consistency * 0.5
 
@@ -508,18 +532,17 @@ class ConsciousnessMeasurementFramework:
 
         self_references = 0
         total_items = len(thoughts) + len(memories)
-        system_name_lower = self.system_name.lower()
+        name_tokens = _tokens(self.system_name)
+        pronouns = {"i", "me", "my", "myself"}
 
-        # Check for self-referential content
+        # Self-referential content, matched on whole tokens
         for thought in thoughts:
-            if any(
-                word in thought.lower()
-                for word in ["i", "me", "my", system_name_lower, "myself"]
-            ):
+            tokens = _tokens(thought)
+            if pronouns.intersection(tokens) or _contains_sequence(tokens, name_tokens):
                 self_references += 1
 
         for memory in memories:
-            if system_name_lower in str(memory).lower():
+            if _contains_sequence(_tokens(memory), name_tokens):
                 self_references += 1
 
         self_model_score = self_references / total_items if total_items > 0 else 0
@@ -653,7 +676,6 @@ class ConsciousnessMeasurementFramework:
         if len(self.measurement_history) > 30:
             for attr in metric_attrs:
                 historical_values = [getattr(m, attr) for m in self.measurement_history]
-                np.mean(historical_values)
                 std = np.std(historical_values)
                 margin = 1.96 * std / np.sqrt(len(historical_values))
 
@@ -681,7 +703,7 @@ class ConsciousnessMeasurementFramework:
         """
         Analyze consciousness level against theoretical thresholds.
 
-        Returns comprehensive analysis worthy of academic review.
+        Returns the threshold comparison for each metric family.
         """
         analysis = {
             "overall_consciousness_score": 0.0,
@@ -771,7 +793,7 @@ class ConsciousnessMeasurementFramework:
         return analysis
 
     def export_for_publication(self, metrics: ConsciousnessMetrics) -> str:
-        """Export measurements in format suitable for academic publication."""
+        """Export the measurements as a JSON report."""
         analysis = self.analyze_consciousness_level(metrics)
 
         report = {
@@ -779,7 +801,7 @@ class ConsciousnessMeasurementFramework:
             "timestamp": metrics.measurement_timestamp.isoformat(),
             "methodology": {
                 "frameworks": ["IIT 3.0", "GWT", "AST", "Predictive Processing"],
-                "indicators": 20,
+                "metrics": 14,
                 "neural_units": self.snn_neurons
                 + self.lsm_neurons
                 + self.htm_columns * 32,

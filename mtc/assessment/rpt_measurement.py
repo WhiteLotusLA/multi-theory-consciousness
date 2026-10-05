@@ -19,21 +19,24 @@ of consciousness:
    - Measured via: GWT broadcast -> module -> workspace cycles
 
 Data sources:
-   - SNN: Spike patterns, STDP-learned recurrent weights
+   - SNN: Spike patterns, STDP statistics (``stdp_statistics`` in the SNN
+     state, from the SNN's ``get_stdp_statistics()``)
    - LSM: Reservoir state dynamics, spectral radius
    - GWT: Broadcast coverage, re-entry patterns
-   - Neural orchestrator: Cross-layer pipeline metrics
+   - Oscillatory binding: pushed snapshots or an attached binding module
 
 Author: Multi-Theory Consciousness Contributors
 """
 
 import logging
-import numpy as np
+import math
 import time
-from dataclasses import dataclass, field
-from typing import Dict, Optional, Any
 from collections import deque
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Dict, Optional
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +70,9 @@ class RecurrenceMetrics:
     phenomenal_consciousness: float  # Estimated phenomenal consciousness (0-1)
     access_consciousness: float  # Estimated access consciousness (0-1)
 
+    # Plasticity: min(1, 2 * mean STDP weight std) while STDP is active
+    stdp_plasticity_score: float = 0.0
+
     # Timing
     measurement_time_ms: float = 0.0
     timestamp: float = field(default_factory=time.time)
@@ -90,9 +96,28 @@ class RPTMeasurement:
         local_recurrence_threshold: float = 0.3,
         global_recurrence_threshold: float = 0.4,
         history_window: int = 50,
+        stdp_plasticity_enabled: bool = True,
     ):
+        """
+        Args:
+            local_recurrence_threshold: Local score at which recurrence counts
+                as superficial.
+            global_recurrence_threshold: Global score at which recurrence
+                counts as deep.
+            history_window: Number of measurements kept.
+            stdp_plasticity_enabled: Count STDP plasticity as a component of
+                SNN recurrence when the SNN state carries active STDP
+                statistics. False reproduces v0.4.0.
+        """
         self.local_recurrence_threshold = local_recurrence_threshold
         self.global_recurrence_threshold = global_recurrence_threshold
+        self.stdp_plasticity_enabled = bool(stdp_plasticity_enabled)
+
+        # Oscillatory binding: an attached module (pull) and the latest pushed
+        # snapshot (push). The attribute name ``_oscillatory`` is kept because
+        # the experiment runner wires the binding through it.
+        self._oscillatory: Optional[Any] = None
+        self._oscillatory_binding_stats: Optional[Dict[str, Any]] = None
 
         # History for tracking trends
         self._metrics_history: deque = deque(maxlen=history_window)
@@ -228,10 +253,18 @@ class RPTMeasurement:
 
         global_score = self.measure_global_recurrence(workspace_state)
 
+        # --- Plasticity (recurrence with learning, Lamme 2006) ---
+        stdp_plasticity = 0.0
+        stdp = self._active_stdp_statistics(snn_state)
+        if stdp is not None:
+            stdp_plasticity = min(1.0, _finite(stdp.get("mean_weight_std")) * 2.0)
+
         # --- Classification ---
         recurrence_type = self.classify_recurrence_depth(local_score, global_score)
 
-        # Phenomenal consciousness = local recurrence strength
+        # Phenomenal consciousness = local recurrence strength. Plasticity is
+        # already a component of the local score (through the SNN term), so
+        # it is not added here a second time.
         phenomenal = local_score
 
         # Access consciousness requires BOTH local AND global recurrence
@@ -252,6 +285,7 @@ class RPTMeasurement:
             recurrence_type=recurrence_type,
             phenomenal_consciousness=float(phenomenal),
             access_consciousness=float(access),
+            stdp_plasticity_score=float(stdp_plasticity),
             measurement_time_ms=elapsed_ms,
         )
 
@@ -330,7 +364,28 @@ class RPTMeasurement:
             score += min(1.0, variance * 2)
             components += 1
 
+        # STDP plasticity: recurrence with plasticity is the differentiator
+        # RPT emphasises (Lamme 2006). Inert until the caller passes the SNN's
+        # get_stdp_statistics() as snn_state["stdp_statistics"].
+        stdp = self._active_stdp_statistics(snn_state)
+        if stdp is not None:
+            weight_std = _finite(stdp.get("mean_weight_std"))
+            weight_diversity = _finite(stdp.get("weight_diversity"))
+            score += min(1.0, weight_std * 2 + weight_diversity)
+            components += 1
+
         return float(score / max(1, components))
+
+    def _active_stdp_statistics(
+        self, snn_state: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """The SNN's STDP statistics when plasticity counts, else None."""
+        if not self.stdp_plasticity_enabled or not snn_state:
+            return None
+        stdp = snn_state.get("stdp_statistics")
+        if not isinstance(stdp, dict) or not stdp.get("plasticity_active"):
+            return None
+        return stdp
 
     def _measure_lsm_recurrence(self, lsm_state: Dict[str, Any]) -> float:
         """
@@ -542,25 +597,115 @@ class RPTMeasurement:
             ),
         }
 
-    def get_oscillatory_binding_stats(self) -> Dict[str, Any]:
-        """Get oscillatory binding statistics from wired OscillatoryBinding module.
+    def set_oscillatory_binding_stats(self, stats: Optional[Dict[str, Any]]) -> None:
+        """Push the latest oscillatory binding snapshot.
 
-        The assessment's oscillatory_binding_coherence indicator reads:
-          - global_order_parameter: Kuramoto order parameter (0-1)
-          - cross_coherence: Dict of inter-group coherence values
-          - binding_count: number of binding cycles run
+        The snapshot carries ``global_order_parameter``, ``cross_coherence``
+        (a dict of inter-group coherences) and ``binding_count``. None clears
+        it, so the getter falls back to the attached binding.
         """
-        osc = getattr(self, "_oscillatory", None)
+        self._oscillatory_binding_stats = dict(stats) if stats else None
+
+    def attach_oscillatory_binding(self, oscillatory_binding: Any) -> None:
+        """Attach an OscillatoryBinding module for the getter to read."""
+        self._oscillatory = oscillatory_binding
+
+    @property
+    def oscillatory_binding(self) -> Optional[Any]:
+        """The attached OscillatoryBinding module, if any (read-only)."""
+        return self._oscillatory
+
+    def get_oscillatory_binding_stats(self) -> Dict[str, Any]:
+        """Oscillatory binding statistics for the binding-coherence indicator.
+
+        A pushed snapshot wins and reports the latest values as pushed. Without
+        one, the attached binding is read: ``global_order_parameter`` is then
+        the mean Kuramoto order parameter over its history, not the latest
+        value. Returns {} when neither source has data.
+
+        Keys: global_order_parameter (0 to 1), cross_coherence (dict),
+        binding_count (int).
+        """
+        if self._oscillatory_binding_stats:
+            return dict(self._oscillatory_binding_stats)
+        osc = self._oscillatory
         if osc is None:
             return {}
-        history = getattr(osc, "_order_history", [])
+        history = getattr(osc, "_order_history", None)
         if not history:
             return {}
         return {
             "global_order_parameter": float(np.mean(list(history))),
-            "cross_coherence": getattr(osc, "_last_cross_coherence", {}),
-            "binding_count": getattr(osc, "_binding_count", 0),
+            "cross_coherence": dict(getattr(osc, "_last_cross_coherence", {}) or {}),
+            "binding_count": int(getattr(osc, "_binding_count", 0) or 0),
         }
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def to_state_dict(self) -> Dict[str, Any]:
+        """Serialize as {"scalars", "arrays", "histories"}."""
+        return {
+            "scalars": {"measurement_count": int(self.measurement_count)},
+            "arrays": {},
+            "histories": {
+                "metrics_history": [
+                    _metrics_to_record(m) for m in self._metrics_history
+                ],
+                "local_scores": [float(v) for v in self._local_scores],
+                "global_scores": [float(v) for v in self._global_scores],
+            },
+        }
+
+    def from_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore typed metrics into deques that keep their configured maxlen.
+
+        Malformed metric records and non-finite scores are skipped with a
+        warning.
+        """
+        scalars = state.get("scalars", {}) or {}
+        histories = state.get("histories", {}) or {}
+
+        count = scalars.get("measurement_count")
+        if isinstance(count, (int, float)) and math.isfinite(count) and count >= 0:
+            self.measurement_count = int(count)
+
+        if "metrics_history" in histories:
+            restored = deque(maxlen=self._metrics_history.maxlen)
+            skipped = 0
+            for record in histories["metrics_history"] or []:
+                metrics = _metrics_from_record(record)
+                if metrics is None:
+                    skipped += 1
+                    continue
+                restored.append(metrics)
+            if skipped:
+                logger.warning(
+                    "RPTMeasurement restore skipped %d malformed metric records",
+                    skipped,
+                )
+            self._metrics_history = restored
+
+        for key, attr in (
+            ("local_scores", "_local_scores"),
+            ("global_scores", "_global_scores"),
+        ):
+            if key not in histories:
+                continue
+            current = getattr(self, attr)
+            values = []
+            skipped = 0
+            for value in histories[key] or []:
+                if isinstance(value, (int, float)) and math.isfinite(value):
+                    values.append(float(value))
+                else:
+                    skipped += 1
+            if skipped:
+                logger.warning(
+                    "RPTMeasurement restore skipped %d non-finite %s", skipped, key
+                )
+            setattr(self, attr, deque(values, maxlen=current.maxlen))
 
     def generate_report(self) -> str:
         """Generate a human-readable RPT report."""
@@ -586,3 +731,68 @@ class RPTMeasurement:
             )
 
         return "\n".join(lines)
+
+
+# ----------------------------------------------------------------------
+# Helpers
+# ----------------------------------------------------------------------
+
+_METRIC_FLOAT_FIELDS = (
+    "local_recurrence_score",
+    "snn_feedback_strength",
+    "lsm_reservoir_recurrence",
+    "local_spike_reentry",
+    "global_recurrence_score",
+    "broadcast_reentry_rate",
+    "cross_module_feedback",
+    "phenomenal_consciousness",
+    "access_consciousness",
+    "stdp_plasticity_score",
+    "measurement_time_ms",
+    "timestamp",
+)
+
+
+def _finite(value: Any) -> float:
+    """A finite float, or 0.0 for missing or non-numeric values."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, np.number)):
+        return 0.0
+    value = float(value)
+    return value if math.isfinite(value) else 0.0
+
+
+def _metrics_to_record(metrics: RecurrenceMetrics) -> Dict[str, Any]:
+    record: Dict[str, Any] = {
+        name: float(getattr(metrics, name)) for name in _METRIC_FLOAT_FIELDS
+    }
+    record["workspace_cycle_depth"] = int(metrics.workspace_cycle_depth)
+    record["recurrence_type"] = metrics.recurrence_type.value
+    return record
+
+
+def _metrics_from_record(record: Any) -> Optional[RecurrenceMetrics]:
+    """Rehydrate a RecurrenceMetrics; None for a malformed record."""
+    if not isinstance(record, dict):
+        return None
+    try:
+        recurrence_type = RecurrenceType(record["recurrence_type"])
+        values = {}
+        for name in _METRIC_FLOAT_FIELDS:
+            if name not in record:
+                if name in ("stdp_plasticity_score", "measurement_time_ms"):
+                    values[name] = 0.0
+                    continue
+                if name == "timestamp":
+                    values[name] = time.time()
+                    continue
+                return None
+            value = float(record[name])
+            if not math.isfinite(value):
+                return None
+            values[name] = value
+        depth = int(record.get("workspace_cycle_depth", 0))
+    except (KeyError, TypeError, ValueError):
+        return None
+    return RecurrenceMetrics(
+        workspace_cycle_depth=depth, recurrence_type=recurrence_type, **values
+    )

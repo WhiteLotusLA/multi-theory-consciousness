@@ -235,3 +235,113 @@ class TestCausalEmergenceAnalyzer:
         analyzer2 = CausalEmergenceAnalyzer()
         analyzer2.from_state_dict(state)
         assert analyzer2._analysis_count == analyzer._analysis_count
+
+
+# ---------------------------------------------------------------------------
+# Row order: the PhiTracker indexes TPM rows big-endian, the EI math reads bit
+# i of a state index as node i (little-endian).
+# ---------------------------------------------------------------------------
+
+
+class _FixedTracker:
+    """A warm tracker stand-in that returns a fixed node-factored TPM."""
+
+    warming_up = False
+    latest_phi = None
+
+    def __init__(self, tpm):
+        self._tpm = np.asarray(tpm, dtype=np.float64)
+
+    def build_tpm(self):
+        return self._tpm.copy()
+
+
+def _asymmetric_little_endian_tpm() -> np.ndarray:
+    """A 5-node node-factored TPM whose dynamics depend on specific nodes.
+
+    Row s (little-endian: bit i of s is node i) gives P(node_i ON next).
+    Node 0 copies node 4, node 1 is the AND of nodes 0 and 2, node 2 negates
+    node 3, node 3 keeps itself and node 4 is noisy; the asymmetry makes a
+    row-order slip change the macro analysis.
+    """
+    rng = np.random.default_rng(11)
+    tpm = np.zeros((32, 5))
+    for s in range(32):
+        bits = [(s >> i) & 1 for i in range(5)]
+        tpm[s, 0] = 0.9 if bits[4] else 0.1
+        tpm[s, 1] = 0.85 if (bits[0] and bits[2]) else 0.15
+        tpm[s, 2] = 0.2 if bits[3] else 0.8
+        tpm[s, 3] = 0.95 if bits[3] else 0.05
+        tpm[s, 4] = 0.3 + 0.4 * rng.random()
+    return tpm
+
+
+def test_big_endian_rows_give_same_ce_as_little_endian():
+    from mtc.consciousness.pyphi_bridge import to_little_endian_rows
+
+    tpm_le = _asymmetric_little_endian_tpm()
+    tpm_be = to_little_endian_rows(tpm_le)  # bit reversal is its own inverse
+    little = CausalEmergenceAnalyzer(tpm_row_order="little_endian").analyze_modules(
+        _FixedTracker(tpm_le)
+    )
+    big = CausalEmergenceAnalyzer(tpm_row_order="big_endian").analyze_modules(
+        _FixedTracker(tpm_be)
+    )
+    assert abs(little.causal_emergence - big.causal_emergence) < 1e-12
+    assert little.optimal_partition_label == big.optimal_partition_label
+    assert abs(little.micro_ei - big.micro_ei) < 1e-12
+
+
+def test_little_endian_option_uses_rows_as_given():
+    tpm = _asymmetric_little_endian_tpm()
+    result = CausalEmergenceAnalyzer(tpm_row_order="little_endian").analyze_modules(
+        _FixedTracker(tpm)
+    )
+    state_tpm = node_tpm_to_state_tpm(tpm)
+    assert abs(result.micro_ei - compute_ei(state_tpm)) < 1e-12
+    best = max(
+        compute_ei(build_macro_tpm(state_tpm, p, 5))
+        for p in generate_bell_partitions(5)
+    )
+    assert abs(result.optimal_macro_ei - max(best, result.micro_ei)) < 1e-12
+
+    # The same rows read as big-endian reach a different macro analysis.
+    swapped = CausalEmergenceAnalyzer(tpm_row_order="big_endian").analyze_modules(
+        _FixedTracker(tpm)
+    )
+    assert (
+        abs(swapped.causal_emergence - result.causal_emergence) > 1e-9
+        or swapped.optimal_partition_label != result.optimal_partition_label
+    )
+
+
+def test_invalid_row_order_rejected():
+    import pytest
+
+    with pytest.raises(ValueError, match="tpm_row_order"):
+        CausalEmergenceAnalyzer(tpm_row_order="middle_endian")
+
+
+def test_ce_with_real_phi_tracker():
+    from types import SimpleNamespace
+
+    from mtc.consciousness.phi_tracker import PhiTracker
+
+    tracker = PhiTracker(min_transitions=20)
+    rng = np.random.default_rng(5)
+    level = 0.5
+    for _ in range(60):
+        level = float(np.clip(level + rng.normal(0.0, 0.15), 0.0, 1.0))
+        state = SimpleNamespace(
+            integration_level=level,
+            protoself_stability=float(rng.random()),
+            feeling_of_knowing=1.0 - level,
+            homeostatic_urgency=("curiosity", float(rng.random())),
+            binding_quality=float(rng.random()),
+        )
+        tracker.record_module_states(state)
+    assert not tracker.warming_up
+    result = CausalEmergenceAnalyzer().analyze_modules(tracker)
+    assert result is not None
+    assert np.isfinite(result.causal_emergence)
+    assert len(result.all_partitions) == 52
