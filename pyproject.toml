@@ -88,6 +88,13 @@ assessment = [
 embeddings = [
     "sentence-transformers>=2.2",
 ]
+# api: the HTTP and websocket server (mtc.api); the HTTP client is the one the
+# framework's test client needs.
+api = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "httpx>=0.27",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
@@ -101,7 +108,7 @@ iit = [
     "pyphi @ git+https://github.com/wmayner/pyphi.git@46ca11273f676b0c91eb79860f34f4ee63dc7a6e ; python_version >= '3.12'",
 ]
 all = [
-    "multi-theory-consciousness[neural,fep,databases,llm,anthropic,assessment,embeddings,dev]",
+    "multi-theory-consciousness[neural,fep,databases,llm,anthropic,assessment,embeddings,api,dev]",
 ]
 
 [project.urls]
