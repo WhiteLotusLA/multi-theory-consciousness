@@ -171,3 +171,48 @@ def test_fixtures_skip_without_opt_in():
     assert "failed" not in out, out
     # pytest folds identical skip reasons into one "SKIPPED [5]" line
     assert "SKIPPED [5] " in out and fixtures.OPT_IN_REASON in out, out
+
+
+DB_PROBE_SOURCE = """
+import pytest
+
+
+@pytest.mark.db
+def test_store_test_written_without_a_fixture():
+    raise AssertionError("a db test ran without the opt-in")
+"""
+
+
+def test_db_tests_skip_at_collection_without_opt_in(tmp_path):
+    probe = tmp_path / "test_db_probe.py"
+    probe.write_text(DB_PROBE_SOURCE, encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k != fixtures.OPT_IN_VARIABLE}
+    env["PYPHI_WELCOME_OFF"] = "yes"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-c",
+            str(ROOT / "pyproject.toml"),
+            "--rootdir",
+            str(ROOT),
+            "-p",
+            "tests.conftest",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+            "-rs",
+            str(probe),
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    out = result.stdout + result.stderr
+    assert result.returncode == 0, out
+    assert "1 skipped" in out, out
+    assert "failed" not in out and "error" not in out, out
+    assert fixtures.OPT_IN_REASON in out, out

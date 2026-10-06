@@ -1,7 +1,8 @@
 """Shared fixtures: throwaway stores for the ``db`` tests.
 
 Tests of a real store implementation are marked ``db`` and use the five
-fixtures below. Each fixture skips unless ``MTC_TEST_STORES=1`` is set, the
+fixtures below. Every ``db`` test is skipped at collection unless
+``MTC_TEST_STORES=1`` is set, and each fixture skips unless it is set, the
 client package is installed and the server answers within two seconds. Each
 creates a name from ``MTC_TEST_DB_PREFIX`` (default ``mtc_test``) plus eight
 random hex digits (Neo4j names use dashes), asserts the name matches that
@@ -24,13 +25,26 @@ What each fixture yields:
 
 The session also defaults ``MTC_DEVICE`` to ``cpu`` (set before any test
 module is imported); an exported ``MTC_DEVICE`` still wins.
+
+The session installs a hermetic network guard as well. An in-process
+connection attempt to a default service port from ``Settings`` (the API and
+model server ports always; the store ports unless ``MTC_TEST_STORES=1``) is
+refused before it leaves the process, fails the test that made it and is
+listed at the end of the run, so the suite never reaches a stack that may be
+live on the same machine. A test that needs a server starts its own on an
+ephemeral loopback port. Child processes are outside the guard: a test that
+starts one gives it its own ephemeral port and keeps every store disabled.
 """
 
+import errno
+import functools
 import os
 import re
 import secrets
+import socket
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, FrozenSet, Iterator, List, Optional, Set, Tuple
+from urllib.parse import urlsplit
 
 import pytest
 import pytest_asyncio
@@ -298,3 +312,178 @@ def throwaway_neo4j():
                 session.run(f"DROP DATABASE `{name}` IF EXISTS WAIT").consume()
         finally:
             driver.close()
+
+
+# ---------------------------------------------------------------------------
+# Hermetic network guard
+# ---------------------------------------------------------------------------
+
+ALWAYS_GUARDED_PORT_FIELDS = ("API_PORT", "LLM_PORT")
+STORE_PORT_FIELDS = ("POSTGRES_PORT", "MONGODB_PORT", "REDIS_PORT", "QDRANT_PORT")
+STORE_URI_FIELDS = ("NEO4J_URI",)
+GUARD_MESSAGE = "hermetic test guard"
+
+_REAL_CONNECT = socket.socket.connect
+_REAL_CONNECT_EX = socket.socket.connect_ex
+_REFUSED: List[Tuple[int, str]] = []
+_FORGIVEN: Set[int] = set()
+
+
+@functools.lru_cache(maxsize=None)
+def _default_ports(stores_opted_in: bool) -> FrozenSet[int]:
+    from mtc.core.config import Settings
+
+    fields = Settings.model_fields
+    ports = {int(fields[name].default) for name in ALWAYS_GUARDED_PORT_FIELDS}
+    if not stores_opted_in:
+        ports.update(int(fields[name].default) for name in STORE_PORT_FIELDS)
+        for name in STORE_URI_FIELDS:
+            port = urlsplit(str(fields[name].default)).port
+            if port is not None:
+                ports.add(port)
+    return frozenset(ports)
+
+
+def guarded_ports() -> FrozenSet[int]:
+    """Return the default service ports no test may connect to.
+
+    The API and model server defaults are always guarded. The store defaults
+    are guarded unless ``MTC_TEST_STORES=1``, when the throwaway fixtures
+    need them.
+    """
+    return _default_ports(os.environ.get(OPT_IN_VARIABLE) == "1")
+
+
+def _guarded_port(address: Any) -> Optional[int]:
+    if not isinstance(address, tuple) or len(address) < 2:
+        return None
+    port = address[1]
+    if isinstance(port, int) and port in guarded_ports():
+        return port
+    return None
+
+
+def _record_refusal(port: int) -> None:
+    where = os.environ.get("PYTEST_CURRENT_TEST", "outside a test")
+    _REFUSED.append((port, where))
+
+
+def _guarded_connect(self: Any, address: Any) -> Any:
+    port = _guarded_port(address)
+    if port is None:
+        return _REAL_CONNECT(self, address)
+    _record_refusal(port)
+    raise ConnectionRefusedError(
+        errno.ECONNREFUSED, f"{GUARD_MESSAGE}: port {port} is a default service port"
+    )
+
+
+def _guarded_connect_ex(self: Any, address: Any) -> int:
+    port = _guarded_port(address)
+    if port is None:
+        return _REAL_CONNECT_EX(self, address)
+    _record_refusal(port)
+    return errno.ECONNREFUSED
+
+
+def hermetic_guard_installed() -> bool:
+    """True while connection attempts pass through the guard."""
+    return (
+        socket.socket.connect is _guarded_connect
+        and socket.socket.connect_ex is _guarded_connect_ex
+    )
+
+
+def install_hermetic_guard() -> None:
+    """Route every in-process connection attempt through the guard."""
+    if hermetic_guard_installed():
+        return
+    socket.socket.connect = _guarded_connect  # type: ignore[method-assign]
+    socket.socket.connect_ex = _guarded_connect_ex  # type: ignore[method-assign]
+
+
+def remove_hermetic_guard() -> None:
+    """Restore the connection methods the guard replaced."""
+    if socket.socket.connect is _guarded_connect:
+        socket.socket.connect = _REAL_CONNECT  # type: ignore[method-assign]
+    if socket.socket.connect_ex is _guarded_connect_ex:
+        socket.socket.connect_ex = _REAL_CONNECT_EX  # type: ignore[method-assign]
+
+
+class HermeticRecord:
+    """The connection attempts the guard refused during one test."""
+
+    def __init__(self) -> None:
+        self._start = len(_REFUSED)
+
+    def attempts(self) -> List[Tuple[int, str]]:
+        """Return the ``(port, test id)`` pairs refused and not yet forgiven."""
+        return list(_REFUSED[self._start :])
+
+    def forgive(self) -> None:
+        """Accept the attempts so far; only the guard's own tests call this.
+
+        A forgiven attempt was still refused and still appears in the summary
+        at the end of the run.
+        """
+        _FORGIVEN.update(range(self._start, len(_REFUSED)))
+        self._start = len(_REFUSED)
+
+
+def hermetic_failure(record: HermeticRecord) -> Optional[str]:
+    """Return the failure text for a test with refused attempts, else None."""
+    attempts = record.attempts()
+    if not attempts:
+        return None
+    ports = sorted({port for port, _ in attempts})
+    return (
+        f"the {GUARD_MESSAGE} refused {len(attempts)} connection attempt(s) to "
+        f"default service port(s) {ports}; a test starts its own server on an "
+        "ephemeral loopback port or uses a fake"
+    )
+
+
+@pytest.fixture(autouse=True)
+def hermetic_network() -> Iterator[HermeticRecord]:
+    """Refuse connections to the default service ports and fail the caller."""
+    install_hermetic_guard()
+    record = HermeticRecord()
+    yield record
+    message = hermetic_failure(record)
+    if message is not None:
+        pytest.fail(message, pytrace=False)
+
+
+def pytest_collection_modifyitems(config: Any, items: List[Any]) -> None:
+    """Skip every ``db`` test at collection unless ``MTC_TEST_STORES=1``.
+
+    The fixtures skip on their own; this makes the skip independent of how a
+    store test is written, so no ``db`` test body or fixture runs against a
+    server without the opt-in.
+    """
+    if os.environ.get(OPT_IN_VARIABLE) == "1":
+        return
+    skip = pytest.mark.skip(reason=OPT_IN_REASON)
+    for item in items:
+        if item.get_closest_marker("db") is not None:
+            item.add_marker(skip)
+
+
+def pytest_configure(config: Any) -> None:
+    """Install the hermetic network guard for the session."""
+    install_hermetic_guard()
+
+
+def pytest_unconfigure(config: Any) -> None:
+    """Remove the hermetic network guard."""
+    remove_hermetic_guard()
+
+
+def pytest_terminal_summary(terminalreporter: Any) -> None:
+    """List every connection attempt the hermetic guard refused."""
+    if not _REFUSED:
+        return
+    terminalreporter.section("hermetic network guard")
+    for index, (port, where) in enumerate(_REFUSED):
+        note = " [forgiven]" if index in _FORGIVEN else ""
+        terminalreporter.line(f"refused a connection to port {port}: {where}{note}")
