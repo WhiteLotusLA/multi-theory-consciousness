@@ -92,6 +92,9 @@ NEURAL_INDEXES: Dict[str, List[IndexSpec]] = {
     "thought_streams": [
         IndexSpec((("timestamp", DESCENDING),)),
         IndexSpec((("stream_id", ASCENDING),)),
+        # the id child links resolve on; documents written before it existed
+        # carry none, so the index is not unique
+        IndexSpec((("thought_id", ASCENDING),)),
         IndexSpec((("parent_thought_id", ASCENDING),)),
         IndexSpec((("thought_type", ASCENDING), ("timestamp", DESCENDING))),
         # hashed: long thought texts cannot exceed the index key size limit
@@ -225,7 +228,10 @@ class ThoughtStream:
     The memory-management fields (``access_count``, ``importance_score``,
     ``retention_strength``, ``is_protected``, ``protection_reason`` and
     ``consolidated_into``) are what live documents carry; the scores are None
-    until something measures them.
+    until something measures them. ``thought_id`` is the thought's own id (a
+    burst shares one ``stream_id``); ``parent_thought_id`` and
+    ``child_thoughts`` hold thought ids, and ``link_child_thought`` resolves a
+    parent by it. It is None on documents written before the field existed.
     """
 
     timestamp: datetime
@@ -245,6 +251,7 @@ class ThoughtStream:
     is_protected: bool = False
     protection_reason: Optional[str] = None
     consolidated_into: Optional[str] = None
+    thought_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         self.timestamp = _aware(self.timestamp, "timestamp")
@@ -557,12 +564,58 @@ class NeuralDataManager:
     def update_thought_children(
         self, parent_stream_id: str, child_thought_id: str
     ) -> None:
-        """Add a child thought id to the parent's ``child_thoughts``."""
+        """Add a child thought id to the newest document with this stream id.
+
+        A stream id names a burst of thoughts, so it cannot single out one
+        parent; ``link_child_thought`` matches on the thought id instead.
+        """
         self._call(
             self.thought_streams.update_one,
             {"stream_id": parent_stream_id},
             {"$addToSet": {"child_thoughts": child_thought_id}},
         )
+
+    def link_child_thought(self, parent_thought_id: str, child_thought_id: str) -> bool:
+        """Add a child thought id to the parent found by its ``thought_id``.
+
+        Returns False when no document carries the parent id (a parent that
+        was never stored or was pruned), so the caller can tell a link that
+        did not resolve from one that did. Linking twice adds the child once.
+        """
+        result = self._call(
+            self.thought_streams.update_one,
+            {"thought_id": parent_thought_id},
+            {"$addToSet": {"child_thoughts": child_thought_id}},
+        )
+        return bool(result.matched_count)
+
+    def touch_thought(
+        self, thought_text: str, seen_at: datetime
+    ) -> Optional[Dict[str, Any]]:
+        """Count one more occurrence of a recurring thought and stamp it seen.
+
+        Like ``increment_thought_access`` (the newest thought with exactly this
+        text), and also sets ``metadata.last_seen``. Returns the matched
+        document as it was before the update (so its ``thought_id`` is
+        available), or None when no thought has this text.
+        """
+        found = self._call(
+            self.thought_streams.find_one_and_update,
+            {"thought_text": thought_text},
+            {
+                "$inc": {"access_count": 1},
+                "$set": {"metadata.last_seen": _aware(seen_at, "seen_at")},
+            },
+            sort=[("timestamp", DESCENDING)],
+        )
+        return None if found is None else _read(found)
+
+    def find_thoughts(self, query: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
+        """Return thoughts matching an equality query, newest first.
+
+        Raises ``StoreUnavailable`` when the server cannot be reached.
+        """
+        return self._find(self.thought_streams, query, "timestamp", DESCENDING, limit)
 
     def get_thought_chain(self, parent_thought_id: str) -> List[Dict[str, Any]]:
         """Return the thoughts that branched from a parent, oldest first."""

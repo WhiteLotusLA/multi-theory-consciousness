@@ -209,6 +209,17 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_BLT_GENUINE_THRESHOLD` | `0.4` |  |
 | `MTC_ATTENTION_GRAB_NOTICING_ENABLED` | `false` | Record captured and emotional attention shifts in the attention-capture journal |
 
+## Continuous thought
+
+| Variable | Default | Description |
+|---|---|---|
+| `MTC_CTM_ENABLED` | `true` | Whether the runtime builds the continuous thought machine; thoughts are private runtime data |
+| `MTC_CTM_CONFIG_DIR` | `config/ctm` | Directory of ctm.yaml, seeds/, seeds.d/ and the persona files for continuous thought; relative paths join PROJECT_ROOT |
+| `MTC_CTM_STORE` | `memory` | Where continuous thoughts persist: memory (in process) or mongo (the neural database; needs MONGODB_ENABLED and the mongo extra) |
+| `MTC_CTM_PROFILE` | `default` | Cadence profile in ctm.yaml: default (slow, background) or demo (fast, for a short run) |
+| `MTC_SENSITIVE_MEMORY_PHRASES` | `(empty)` | Comma-separated phrases; a memory containing one is down-weighted when thoughts replay memories, never excluded |
+| `MTC_SENSITIVE_MEMORY_REPLAY_WEIGHT` | `1.0` | Replay weight in (0, 1] for a memory matching SENSITIVE_MEMORY_PHRASES; a weight lowers its chance and never removes it |
+
 ## Assessment
 
 | Variable | Default | Description |

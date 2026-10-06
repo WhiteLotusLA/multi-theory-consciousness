@@ -479,6 +479,45 @@ class Settings(BaseSettings):
     )
 
     # ========================================================================
+    # CONTINUOUS THOUGHT (mtc.consciousness.continuous)
+    # ========================================================================
+
+    CTM_ENABLED: bool = Field(
+        True,
+        description="Whether the runtime builds the continuous thought machine; "
+        "thoughts are private runtime data",
+    )
+    CTM_CONFIG_DIR: str = Field(
+        "config/ctm",
+        description="Directory of ctm.yaml, seeds/, seeds.d/ and the persona "
+        "files for continuous thought; relative paths join PROJECT_ROOT",
+    )
+    CTM_STORE: Literal["memory", "mongo"] = Field(
+        "memory",
+        description="Where continuous thoughts persist: memory (in process) or "
+        "mongo (the neural database; needs MONGODB_ENABLED and the mongo extra)",
+    )
+    CTM_PROFILE: Literal["default", "demo"] = Field(
+        "default",
+        description="Cadence profile in ctm.yaml: default (slow, background) or "
+        "demo (fast, for a short run)",
+    )
+    SENSITIVE_MEMORY_PHRASES: str = Field(
+        "",
+        description="Comma-separated phrases; a memory containing one is "
+        "down-weighted when thoughts replay memories, never excluded",
+    )
+    SENSITIVE_MEMORY_REPLAY_WEIGHT: float = Field(
+        1.0,
+        gt=0,
+        le=1,
+        allow_inf_nan=False,
+        description="Replay weight in (0, 1] for a memory matching "
+        "SENSITIVE_MEMORY_PHRASES; a weight lowers its chance and never "
+        "removes it",
+    )
+
+    # ========================================================================
     # NEURAL NETWORK PARAMETERS
     # ========================================================================
 

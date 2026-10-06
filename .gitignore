@@ -95,3 +95,7 @@ config/rsi/canon.json
 
 # Operator persona (private); templates ship separately
 config/persona.yaml
+
+# Operator CTM persona and seed packs (private); templates ship separately
+config/ctm/persona.yaml
+config/ctm/seeds.d/

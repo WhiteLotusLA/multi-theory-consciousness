@@ -36,6 +36,7 @@ SECTIONS: List[Tuple[str, Tuple[str, ...]]] = [
     ("Consciousness modules", ("CONSCIOUSNESS_CYCLE", "CONSCIOUSNESS_ENABLED",
                                "META_", "SELF_", "GWT_", "AST_", "HOT_", "FEP_",
                                "IIT_", "RPT_", "BLT_", "ATTENTION_GRAB_")),
+    ("Continuous thought", ("CTM_", "SENSITIVE_MEMORY_")),
     ("Assessment", ("ASSESSMENT_", "ABLATION_", "LONGITUDINAL_", "NOISE_",
                     "TRACK_INDICATORS", "METRICS_", "CONSCIOUSNESS_SCORE",
                     "CONSCIOUSNESS_PASSING", "DCM_")),
