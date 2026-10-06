@@ -1,0 +1,620 @@
+{
+  "session_id": "fdd85dca",
+  "timestamp": "2026-10-06T07:31:55.837493",
+  "overall_score": 0.33384447223189995,
+  "status": "partial",
+  "coverage": 0.8333333333333334,
+  "insufficient_indicators": [],
+  "architecture_functional": false,
+  "confidence": 0.4798333333333334,
+  "passing_count": 13,
+  "total_indicators": 30,
+  "theory_scores": {
+    "GWT": 0.46779666156214733,
+    "AST": 0.6205558863302757,
+    "HOT": 0.655890514300922,
+    "FEP": 0.3303036813393349,
+    "IIT": 0.0,
+    "RPT": 0.1550744422475575,
+    "AE": 0.5639028907972945,
+    "BLT": 0.0
+  },
+  "negative_indicators": {
+    "purely_reactive": {
+      "score": 0.0,
+      "penalty": 0.0,
+      "status": "measured"
+    },
+    "fixed_repertoire": {
+      "score": 0.0,
+      "penalty": 0.0,
+      "status": "measured"
+    },
+    "no_metacognitive_access": {
+      "score": 0.3,
+      "penalty": 0.0,
+      "status": "measured"
+    }
+  },
+  "phi_measurement": null,
+  "indicator_results": {
+    "global_broadcast": {
+      "name": "global_broadcast",
+      "theory": "Global Workspace Theory",
+      "status": "measured",
+      "score": 1.0,
+      "confidence": 0.4,
+      "threshold": 0.5,
+      "passes_threshold": true,
+      "evidence": {
+        "broadcasts": 3,
+        "coverage": 1.0,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 1.0,
+        "noise_baseline": 0.018850620152952226,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.08916854858398438
+    },
+    "ignition_dynamics": {
+      "name": "ignition_dynamics",
+      "theory": "Global Workspace Theory",
+      "status": "measured",
+      "score": 0.6225163922793939,
+      "confidence": 0.4,
+      "threshold": 0.4,
+      "passes_threshold": true,
+      "evidence": {
+        "ignitions": 3,
+        "ignition_rate": 0.6,
+        "sustain_rate": 1.0,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.76,
+        "noise_baseline": 0.3642108025585163,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.05030632019042969
+    },
+    "global_ignition_nuanced": {
+      "name": "global_ignition_nuanced",
+      "theory": "Global Workspace Theory",
+      "status": "measured",
+      "score": 0.6598631419464368,
+      "confidence": 0.4,
+      "threshold": 0.4,
+      "passes_threshold": true,
+      "evidence": {
+        "ignitions": 3,
+        "sustain_rate": 1.0,
+        "decay_rate": 0.0,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.8,
+        "noise_baseline": 0.41200138925107355,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.032901763916015625
+    },
+    "attention_schema": {
+      "name": "attention_schema",
+      "theory": "Attention Schema Theory",
+      "status": "measured",
+      "score": 0.24111177266055145,
+      "confidence": 0.8,
+      "threshold": 0.5,
+      "passes_threshold": false,
+      "evidence": {
+        "has_focus": true,
+        "total_updates": 5,
+        "history_length": 5,
+        "prediction_accuracy": 0.0,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.3433333333333333,
+        "noise_baseline": 0.13469909927467943,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.010013580322265625
+    },
+    "attention_control": {
+      "name": "attention_control",
+      "theory": "Attention Schema Theory",
+      "status": "measured",
+      "score": 1.0,
+      "confidence": 0.6,
+      "threshold": 0.4,
+      "passes_threshold": true,
+      "evidence": {
+        "voluntary_shifts": 5,
+        "voluntary_ratio": 1.0,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 1.0,
+        "noise_baseline": 0.04680208782049181,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.0050067901611328125
+    },
+    "higher_order_representations": {
+      "name": "higher_order_representations",
+      "theory": "Higher-Order Thought Theory",
+      "status": "measured",
+      "score": 1.0,
+      "confidence": 0.7,
+      "threshold": 0.5,
+      "passes_threshold": true,
+      "evidence": {
+        "hots_generated": 11,
+        "cycle_count": 5,
+        "coverage_ratio": 2.2,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 1.0,
+        "noise_baseline": 0.27999999999999997,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.029087066650390625
+    },
+    "metacognition": {
+      "name": "metacognition",
+      "theory": "Higher-Order Thought Theory",
+      "status": "measured",
+      "score": 0.4753344316226562,
+      "confidence": 0.6,
+      "threshold": 0.4,
+      "passes_threshold": true,
+      "evidence": {
+        "introspections": 11,
+        "evaluations": 0,
+        "overall_confidence": 0.5,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.7,
+        "noise_baseline": 0.42820718933810886,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.027894973754882812
+    },
+    "sparse_smooth_coding": {
+      "name": "sparse_smooth_coding",
+      "theory": "Higher-Order Thought Theory",
+      "status": "measured",
+      "score": 0.8148942922476987,
+      "confidence": 0.5,
+      "threshold": 0.3,
+      "passes_threshold": true,
+      "evidence": {
+        "avg_error": 0.09077352432130993,
+        "sparsity_proxy": 0.8184529513573802,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.8184529513573802,
+        "noise_baseline": 0.019225010146329248,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.03409385681152344
+    },
+    "prediction_error_minimization": {
+      "name": "prediction_error_minimization",
+      "theory": "Free Energy Principle",
+      "status": "measured",
+      "score": 0.22911047870424997,
+      "confidence": 0.3,
+      "threshold": 0.4,
+      "passes_threshold": false,
+      "evidence": {
+        "avg_error": 0.09077352432130993,
+        "trend": "stable",
+        "total_inferences": 5,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.272767942703607,
+        "noise_baseline": 0.05663258196320449,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.01811981201171875
+    },
+    "hierarchical_prediction": {
+      "name": "hierarchical_prediction",
+      "theory": "Free Energy Principle",
+      "status": "measured",
+      "score": 0.7133664745576622,
+      "confidence": 0.3,
+      "threshold": 0.4,
+      "passes_threshold": true,
+      "evidence": {
+        "hierarchical_error": 0.0,
+        "inferences": 5,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.76,
+        "noise_baseline": 0.16269389761847344,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.013828277587890625
+    },
+    "temporal_prediction_depth": {
+      "name": "temporal_prediction_depth",
+      "theory": "Free Energy Principle",
+      "status": "measured",
+      "score": 0.8979936379588116,
+      "confidence": 0.6,
+      "threshold": 0.3,
+      "passes_threshold": true,
+      "evidence": {
+        "planning_horizon": 10,
+        "total_inferences": 5,
+        "avg_error": 0.09077352432130993,
+        "status": "measured",
+        "raw_score": 0.9092264756786901,
+        "noise_baseline": 0.11011899155214344,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.01430511474609375
+    },
+    "agent_environment_coupling": {
+      "name": "agent_environment_coupling",
+      "theory": "Free Energy Principle",
+      "status": "measured",
+      "score": 0.14135149681528547,
+      "confidence": 0.635,
+      "threshold": 0.3,
+      "passes_threshold": false,
+      "evidence": {
+        "actions": 5,
+        "observations": 4,
+        "status": "measured",
+        "raw_score": 0.17888543819998318,
+        "noise_baseline": 0.04371281292110204,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.013113021850585938
+    },
+    "affect_coherence": {
+      "name": "affect_coherence",
+      "theory": "Free Energy Principle",
+      "status": "absent",
+      "score": 0.0,
+      "confidence": 0.3,
+      "threshold": 0.3,
+      "passes_threshold": false,
+      "evidence": {
+        "ablated": true,
+        "reason": "pad_affect_model not provided",
+        "status": "absent",
+        "raw_score": 0.1,
+        "noise_baseline": 0.10728469315063642,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.0030994415283203125
+    },
+    "integrated_information": {
+      "name": "integrated_information",
+      "theory": "Integrated Information Theory",
+      "status": "measured",
+      "score": 0.0,
+      "confidence": 0.4,
+      "threshold": 0.3,
+      "passes_threshold": false,
+      "evidence": {
+        "phi_zero": true,
+        "neural_present": false,
+        "status": "measured",
+        "raw_score": 0.0,
+        "noise_baseline": 0.0,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.0030994415283203125
+    },
+    "irreducibility": {
+      "name": "irreducibility",
+      "theory": "Integrated Information Theory",
+      "status": "measured",
+      "score": 0.0,
+      "confidence": 0.5,
+      "threshold": 0.4,
+      "passes_threshold": false,
+      "evidence": {
+        "connectivity_missing": true,
+        "status": "measured",
+        "raw_score": 0.0,
+        "noise_baseline": 0.8077820133678457,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.0019073486328125
+    },
+    "causal_emergence": {
+      "name": "causal_emergence",
+      "theory": "Integrated Information Theory",
+      "status": "absent",
+      "score": 0.0,
+      "confidence": 0.3,
+      "threshold": 0.0,
+      "passes_threshold": true,
+      "evidence": {
+        "ablated": true,
+        "reason": "analyzer not provided",
+        "status": "absent",
+        "raw_score": 0.0,
+        "noise_baseline": 0.5462045899696207,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.0021457672119140625
+    },
+    "recurrent_processing": {
+      "name": "recurrent_processing",
+      "theory": "Recurrent Processing Theory",
+      "status": "measured",
+      "score": 0.6738783916335909,
+      "confidence": 0.6,
+      "threshold": 0.4,
+      "passes_threshold": true,
+      "evidence": {
+        "coverage": 1.0,
+        "cycles": 5,
+        "broadcasts": 3,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.8,
+        "noise_baseline": 0.3867318360110229,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.03314018249511719
+    },
+    "algorithmic_recurrence": {
+      "name": "algorithmic_recurrence",
+      "theory": "Recurrent Processing Theory",
+      "status": "absent",
+      "score": 0.0,
+      "confidence": 0.3,
+      "threshold": 0.3,
+      "passes_threshold": false,
+      "evidence": {
+        "ablated": true,
+        "reason": "rpt_measurement not provided",
+        "status": "absent",
+        "raw_score": 0.1,
+        "noise_baseline": 0.1492604971610962,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.0021457672119140625
+    },
+    "local_recurrence": {
+      "name": "local_recurrence",
+      "theory": "Recurrent Processing Theory",
+      "status": "absent",
+      "score": 0.0014938196041967263,
+      "confidence": 0.3,
+      "threshold": 0.3,
+      "passes_threshold": false,
+      "evidence": {
+        "ablated": true,
+        "reason": "rpt_measurement not provided",
+        "status": "absent",
+        "raw_score": 0.1,
+        "noise_baseline": 0.09865355100431715,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.0016689300537109375
+    },
+    "oscillatory_binding_coherence": {
+      "name": "oscillatory_binding_coherence",
+      "theory": "Recurrent Processing Theory",
+      "status": "absent",
+      "score": 0.1,
+      "confidence": 0.3,
+      "threshold": 0.3,
+      "passes_threshold": false,
+      "evidence": {
+        "ablated": true,
+        "reason": "rpt_measurement not provided",
+        "status": "absent",
+        "raw_score": 0.1,
+        "noise_baseline": 0.0,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.0019073486328125
+    },
+    "agency": {
+      "name": "agency",
+      "theory": "Agency & Embodiment",
+      "status": "measured",
+      "score": 0.4778057815945891,
+      "confidence": 0.4,
+      "threshold": 0.5,
+      "passes_threshold": false,
+      "evidence": {
+        "inferences": 5,
+        "model_updates": 4,
+        "urgency": 0.0,
+        "free_energy": 1.6474513227510204,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.6866834689567535,
+        "noise_baseline": 0.4,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.014066696166992188
+    },
+    "embodiment": {
+      "name": "embodiment",
+      "theory": "Agency & Embodiment",
+      "status": "measured",
+      "score": 0.65,
+      "confidence": 0.7,
+      "threshold": 0.3,
+      "passes_threshold": true,
+      "evidence": {
+        "capacity_used": 0.0,
+        "history_length": 5,
+        "voluntary_ratio": 1.0,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.79,
+        "noise_baseline": 0.4,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.003814697265625
+    },
+    "bayesian_binding_quality": {
+      "name": "bayesian_binding_quality",
+      "theory": "Beautiful Loop Theory",
+      "status": "measured",
+      "score": 0.0,
+      "confidence": 0.5,
+      "threshold": 0.3,
+      "passes_threshold": false,
+      "evidence": {
+        "avg_binding": 0.0,
+        "cycles": 0,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.0,
+        "noise_baseline": 0.1910923333167342,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.012159347534179688
+    },
+    "epistemic_depth": {
+      "name": "epistemic_depth",
+      "theory": "Beautiful Loop Theory",
+      "status": "measured",
+      "score": 0.0,
+      "confidence": 0.3,
+      "threshold": 0.3,
+      "passes_threshold": false,
+      "evidence": {
+        "avg_depth": 0.0,
+        "max_depth": 0,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.0,
+        "noise_baseline": 0.08962098537119476,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.0059604644775390625
+    },
+    "genuine_implementation": {
+      "name": "genuine_implementation",
+      "theory": "Beautiful Loop Theory",
+      "status": "measured",
+      "score": 0.0,
+      "confidence": 0.5,
+      "threshold": 0.4,
+      "passes_threshold": false,
+      "evidence": {
+        "avg_loop_quality": 0.0,
+        "field_evidencing_count": 0,
+        "has_field_evidencing": false,
+        "has_loop_quality": false,
+        "has_strange_loop": false,
+        "conditions_met": 0,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.0,
+        "noise_baseline": 0.2,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.0040531158447265625
+    },
+    "sequential_module_querying": {
+      "name": "sequential_module_querying",
+      "theory": "Global Workspace Theory",
+      "status": "measured",
+      "score": 0.056603773584905814,
+      "confidence": 0.8,
+      "threshold": 0.3,
+      "passes_threshold": false,
+      "evidence": {
+        "cycles": 5,
+        "total_candidates": 0,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.5,
+        "noise_baseline": 0.4699999999999999,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.027894973754882812
+    },
+    "organized_percepts": {
+      "name": "organized_percepts",
+      "theory": "Recurrent Processing Theory",
+      "status": "measured",
+      "score": 0.0,
+      "confidence": 0.4,
+      "threshold": 0.3,
+      "passes_threshold": false,
+      "evidence": {
+        "perceptual_candidates": 0,
+        "avg_local_recurrence": 0.0,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.3,
+        "noise_baseline": 0.3,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.025033950805664062
+    },
+    "flexible_responsiveness": {
+      "name": "flexible_responsiveness",
+      "theory": "Global Workspace Theory",
+      "status": "measured",
+      "score": 0.0,
+      "confidence": 0.5,
+      "threshold": 0.3,
+      "passes_threshold": false,
+      "evidence": {
+        "source_diversity": 0,
+        "belief_updates": 0.4,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.3,
+        "noise_baseline": 0.3,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.035762786865234375
+    },
+    "online_reportable_learning": {
+      "name": "online_reportable_learning",
+      "theory": "Higher-Order Thought Theory",
+      "status": "measured",
+      "score": 0.3333333333333333,
+      "confidence": 0.56,
+      "threshold": 0.3,
+      "passes_threshold": true,
+      "evidence": {
+        "active_beliefs": 4,
+        "has_recent_experiences": true,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.5,
+        "noise_baseline": 0.25,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.014066696166992188
+    },
+    "complex_agency": {
+      "name": "complex_agency",
+      "theory": "Free Energy Principle",
+      "status": "measured",
+      "score": 0.0,
+      "confidence": 0.5,
+      "threshold": 0.3,
+      "passes_threshold": false,
+      "evidence": {
+        "policy_diversity": 0.2,
+        "prediction_variance": 0.3,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.25,
+        "noise_baseline": 0.25,
+        "noise_saturated": false
+      },
+      "measurement_time_ms": 0.014781951904296875
+    }
+  },
+  "ablation_config": null,
+  "processing_time_ms": 1.5931129455566406
+}

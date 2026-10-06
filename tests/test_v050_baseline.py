@@ -4,11 +4,27 @@
 output (stdout and stderr) with no preset, and
 ``tests/fixtures/baseline_v050_assessment.json`` is the seeded assessment CLI's
 report; ``tests/fixtures/baseline_v050_env.txt`` records the environment they
-were captured in. With PyPhi absent the tracker path falls back to the
-calculator, so both tests skip without PyPhi (and without pymdp, which the
-inference module needs).
+were captured in.
 
-A deliberate default change in a later phase regenerates both fixtures with
+What each test compares and needs:
+
+- The experiment test holds every metric line the runner prints, as the
+  printed string (only ``processing_ms`` and ``total_seconds`` are left
+  out). It needs pymdp, which the inference module imports, and PyPhi:
+  without PyPhi the tracker path falls back to the calculator and the
+  ``phi_source_used`` line changes.
+- The assessment test holds every field of the report (statuses, counts,
+  keys and booleans exactly, floats within 1e-9). Left out: the session id,
+  the timestamp, the timing fields, and the three counter readouts of
+  ``WALL_CLOCK_EVIDENCE_KEYS``, which follow the wall clock while the
+  introspection cooldown does. It needs pymdp only: a five-cycle warmup
+  leaves the tracker warming up, so the report is the same with and without
+  PyPhi.
+
+When a comparison fails, the message lists every differing line or field and
+then how the running environment differs from the recorded one.
+
+A deliberate default change regenerates both fixtures with
 
     PYPHI_WELCOME_OFF=yes python3 scripts/run_experiment.py \
         > tests/fixtures/baseline_v050_experiment.txt 2>&1
@@ -22,58 +38,70 @@ metric line verbatim), re-captures the environment file, and adds its rows to
 
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from tests.baseline_compare import (
+    WALL_CLOCK_EVIDENCE_KEYS,
+    assessment_diff,
+    current_environment,
+    diff_blocks,
+    explain,
+    metric_block,
+    recorded_environment,
+    runner_environment,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
 EXPERIMENT_BASELINE = FIXTURES / "baseline_v050_experiment.txt"
 ASSESSMENT_BASELINE = FIXTURES / "baseline_v050_assessment.json"
+ENVIRONMENT_RECORD = FIXTURES / "baseline_v050_env.txt"
 
-_ENV = {**os.environ, "PYPHI_WELCOME_OFF": "yes"}
 
-
-def _skip_without_optional_deps() -> None:
-    os.environ.setdefault("PYPHI_WELCOME_OFF", "yes")
+def _skip_without_pymdp() -> None:
     pytest.importorskip("pymdp")
+
+
+def _skip_without_pyphi() -> None:
+    os.environ.setdefault("PYPHI_WELCOME_OFF", "yes")
     pytest.importorskip("pyphi")
 
 
-def _metric(text: str, name: str) -> float:
-    match = re.search(rf"^{name}:\s*([0-9.]+)", text, re.M)
-    assert match, f"{name} missing from runner output"
-    return float(match.group(1))
+def _failure_message(differences) -> str:
+    return explain(
+        differences,
+        recorded_environment(ENVIRONMENT_RECORD.read_text()),
+        current_environment(),
+    )
 
 
 @pytest.mark.slow
-def test_v050_defaults_reproduce_fixture():
-    """The experiment runner without a preset lands on the v0.5.0 fixture."""
-    _skip_without_optional_deps()
-    baseline = EXPERIMENT_BASELINE.read_text()
+def test_v050_defaults_reproduce_fixture(tmp_path):
+    """The experiment runner without a preset prints the fixture's lines."""
+    _skip_without_pymdp()
+    _skip_without_pyphi()
+    expected = metric_block(EXPERIMENT_BASELINE.read_text())
     result = subprocess.run(
         [sys.executable, "scripts/run_experiment.py"],
         cwd=ROOT,
         capture_output=True,
         text=True,
         timeout=900,
-        env=_ENV,
+        env=runner_environment(ROOT, tmp_path),
     )
     assert result.returncode == 0, result.stderr[-2000:]
-    out = result.stdout
-    assert (
-        abs(_metric(out, "overall_score") - _metric(baseline, "overall_score")) <= 0.01
-    )
-    assert _metric(out, "passing_count") == _metric(baseline, "passing_count")
+    differences = diff_blocks(expected, metric_block(result.stdout))
+    assert differences == [], _failure_message(differences)
 
 
 @pytest.mark.slow
 def test_v050_assessment_fixture_reproduces(tmp_path):
     """The seeded assessment CLI lands on the v0.5.0 assessment fixture."""
-    _skip_without_optional_deps()
+    _skip_without_pymdp()
     baseline = json.loads(ASSESSMENT_BASELINE.read_text())
     json_path = tmp_path / "assessment.json"
     result = subprocess.run(
@@ -91,10 +119,13 @@ def test_v050_assessment_fixture_reproduces(tmp_path):
         capture_output=True,
         text=True,
         timeout=900,
-        env=_ENV,
+        env=runner_environment(ROOT, tmp_path),
     )
     assert result.returncode == 0, result.stderr[-2000:]
     report = json.loads(json_path.read_text())
-    assert report["overall_score"] is not None
-    assert abs(report["overall_score"] - baseline["overall_score"]) <= 0.01
-    assert report["passing_count"] == baseline["passing_count"]
+    # The seeded CLI runs with the module's wall-clock introspection
+    # cooldown, so the three counter readouts that follow it are not compared
+    differences = assessment_diff(
+        baseline, report, ignore_evidence=WALL_CLOCK_EVIDENCE_KEYS
+    )
+    assert differences == [], _failure_message(differences)

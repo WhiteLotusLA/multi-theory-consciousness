@@ -7,6 +7,12 @@ from pathlib import Path
 import pytest
 
 from mtc.consciousness.attention_schema import AttentionShiftType
+from tests.baseline_compare import (
+    diff_blocks,
+    format_differences,
+    metric_block,
+    runner_environment,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -55,15 +61,22 @@ def test_runner_forwards_ast_overrides_to_the_owned_schema():
     assert modules["global_workspace"].attention_schema.focus_threshold == 0.55
 
 
-@pytest.mark.slow
-def test_run_experiment_baseline():
-    """Baseline experiment (no overrides) should complete and print results."""
-    result = subprocess.run(
+def _run_runner(tmp_path) -> "subprocess.CompletedProcess[str]":
+    """The experiment runner from the repository root, on the CPU."""
+    return subprocess.run(
         [sys.executable, "scripts/run_experiment.py"],
+        cwd=ROOT,
         capture_output=True,
         text=True,
         timeout=600,
+        env=runner_environment(ROOT, tmp_path),
     )
+
+
+@pytest.mark.slow
+def test_run_experiment_baseline(tmp_path):
+    """Baseline experiment (no overrides) should complete and print results."""
+    result = _run_runner(tmp_path)
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert "overall_score:" in result.stdout
     assert "passing_count:" in result.stdout
@@ -71,19 +84,13 @@ def test_run_experiment_baseline():
 
 
 @pytest.mark.slow
-def test_run_experiment_deterministic():
-    """Two runs with same params produce identical scores."""
-    scores = []
-    for _ in range(2):
-        result = subprocess.run(
-            [sys.executable, "scripts/run_experiment.py"],
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        assert result.returncode == 0
-        for line in result.stdout.splitlines():
-            if line.startswith("overall_score:"):
-                scores.append(line.strip())
-    assert len(scores) == 2
-    assert scores[0] == scores[1], f"Non-deterministic: {scores}"
+def test_run_experiment_deterministic(tmp_path):
+    """Two runs with the same params print the same metric lines."""
+    blocks = []
+    for run in range(2):
+        result = _run_runner(tmp_path / f"run{run}")
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        blocks.append(metric_block(result.stdout))
+    assert "overall_score" in blocks[0]
+    differences = diff_blocks(blocks[0], blocks[1])
+    assert differences == [], "Non-deterministic:\n" + format_differences(differences)

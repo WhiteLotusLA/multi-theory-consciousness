@@ -3,7 +3,6 @@
 import asyncio
 import importlib.util
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,9 +11,13 @@ import pytest
 
 from mtc.consciousness.attention_schema import AttentionShiftType
 from mtc.consciousness.state_persistence import ConsciousnessStateManager
+from tests.baseline_compare import (
+    assessment_diff,
+    format_differences,
+    runner_environment,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
-_ENV = {**os.environ, "PYPHI_WELCOME_OFF": "yes"}
 
 
 def _load_script(name: str):
@@ -27,14 +30,14 @@ def _load_script(name: str):
     return module
 
 
-def _run_cli(*args: str) -> "subprocess.CompletedProcess[str]":
+def _run_cli(scratch: Path, *args: str) -> "subprocess.CompletedProcess[str]":
     return subprocess.run(
         [sys.executable, "scripts/run_assessment.py", *args],
         cwd=ROOT,
         capture_output=True,
         text=True,
         timeout=900,
-        env=_ENV,
+        env=runner_environment(ROOT, scratch),
     )
 
 
@@ -57,10 +60,17 @@ def test_cli_warmup_profiles_set_shift_types():
 
 @pytest.mark.slow
 def test_seeded_assessment_is_reproducible(tmp_path):
-    scores = []
+    """Two runs of one seed agree in every field of the report.
+
+    Three warmup cycles complete exactly one introspection pass (the first,
+    which no cooldown can block), so no field of this report follows the
+    wall clock and nothing is left out of the comparison.
+    """
+    reports = []
     for run in range(2):
         out = tmp_path / f"run{run}.json"
         result = _run_cli(
+            tmp_path,
             "--full",
             "--warmup-cycles",
             "3",
@@ -71,9 +81,11 @@ def test_seeded_assessment_is_reproducible(tmp_path):
             str(out),
         )
         assert result.returncode == 0, result.stderr[-2000:]
-        scores.append(json.loads(out.read_text())["overall_score"])
-    assert scores[0] is not None
-    assert scores[0] == scores[1]
+        reports.append(json.loads(out.read_text()))
+    assert reports[0]["overall_score"] is not None
+    assert len(reports[0]["indicator_results"]) == 30
+    differences = assessment_diff(reports[0], reports[1])
+    assert differences == [], format_differences(differences)
 
 
 @pytest.mark.slow
@@ -104,14 +116,20 @@ def test_state_dir_restores_and_assesses(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
     fresh_out = tmp_path / "fresh.json"
-    fresh = _run_cli("--state-dir", str(empty), "--json-path", str(fresh_out))
+    fresh = _run_cli(tmp_path, "--state-dir", str(empty), "--json-path", str(fresh_out))
     assert fresh.returncode == 0, fresh.stderr[-2000:]
     fresh_status = json.loads(fresh_out.read_text())["indicator_results"]
     assert fresh_status["global_broadcast"]["status"] == "insufficient_data"
 
     out = tmp_path / "report.json"
     result = _run_cli(
-        "--state-dir", str(tmp_path / "state"), "--json-path", str(out), "--seed", "5"
+        tmp_path,
+        "--state-dir",
+        str(tmp_path / "state"),
+        "--json-path",
+        str(out),
+        "--seed",
+        "5",
     )
     assert result.returncode == 0, result.stderr[-2000:]
     for name in ("gwt", "rpt", "phi", "pad_affect", "oscillatory_binding"):
