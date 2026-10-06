@@ -1,0 +1,67 @@
+# legacy_v04: reproduces the published v0.4.0 behaviour for comparison.
+# New installs use the defaults; this preset exists so the v0.4.0 numbers stay reproducible.
+[fep]
+world_model = "compact_8x5x4"
+hpp_hidden_dim_multiplier = 2
+hierarchy_observation = "hpp_top_level"
+meta_accuracy_method = "median"
+drive_model = "v04"
+drive_decay_floor = 0.0
+legacy_double_decay = true
+planning_horizon = 10
+num_actions = 2
+num_hidden_states = 2
+learning_rate_A = 0.3
+learning_rate_B = 0.15
+
+[gwt]
+competition_mode = "flat"
+thalamic_gate_enabled = false
+theory_interactions_enabled = false
+legacy_coverage_ratio = true
+body_metrics_enabled = false
+precision_feedback_enabled = false
+self_prediction_enabled = false
+
+[ast]
+provenance_mode = "legacy_strength"
+focus_threshold = 0.6
+hyperfocus_threshold = 0.9
+capture_salience_threshold = 0.8
+
+[runner]
+warmup_profile = "v04"
+
+[blt]
+loop_quality_formula = "v04"
+precision_floor_enabled = false
+require_recursive_confidence = false
+field_evidencing_threshold = 0.3
+
+[damasio]
+circadian = "v04_sawtooth"
+
+[assessment]
+saturated_baseline_min_range = 0.0
+indicator_formulas = "v04"
+missing_signal_policy = "v04_constants"
+irreducibility_method = "spectral_entropy"
+causal_emergence_threshold = 0.0
+phi_source = "calculator"
+
+[pad]
+coherence_method = "v04_variance"
+
+[causal_emergence]
+tpm_row_order = "little_endian"
+
+[rpt]
+stdp_plasticity_enabled = false
+
+[cycle]
+drive_candidates = false
+prospective_candidates = false
+crossmodal_binding = false
+gate_arousal = "workspace"
+pad_from_state = false
+candidate_cap = 0

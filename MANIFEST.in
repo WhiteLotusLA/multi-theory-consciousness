@@ -1,0 +1,43 @@
+# Source distribution contents. The wheel carries the mtc package with its
+# package data (mtc/resources and the onboarding templates); the sdist also
+# carries the files a checkout needs to set up stores and run the scripts.
+
+include LICENSE README.md CHANGELOG.md VERSION_HISTORY.md CONTRIBUTING.md
+include CODE_OF_CONDUCT.md THIRD_PARTY_LICENSES.md .env.example Makefile
+
+# pyproject.toml is the one dependency list; the tracked requirements.txt is
+# an older list that disagrees with it and stays out of the sdist.
+exclude requirements.txt
+
+graft migrations
+graft docker
+graft experiments
+graft examples
+graft scripts
+graft docs
+
+# Shipped configuration: examples and defaults only.
+recursive-include config *.example.yaml *.example.md *.example.json
+include config/neo4j.conf.example
+include config/ctm/ctm.yaml config/ctm/seeds/default.yaml
+include config/dreams.yaml config/transition_prompts.json config/pyphi_config.yml
+include config/qdrant.yaml config/validation/*.yaml
+include config/privacy/README.md config/privacy/allowlist.txt
+include config/privacy/denylist.txt
+
+# Shipped data: the DCM bundled spec and baselines only.
+graft data/dcm
+
+# Private or generated material never enters a distribution.
+exclude config/persona.yaml config/speakers.yaml config/ctm/persona.yaml
+exclude config/rsi/canon.json config/privacy/denylist.local.txt
+prune config/ctm/seeds.d
+prune docs/outreach
+exclude experiments/results.tsv
+prune agent_space
+prune backups
+prune logs
+prune results
+prune __pyphi_cache__
+prune data/dcm_cache
+global-exclude *.py[cod] *.so *.dylib *.log *.pid .DS_Store .env

@@ -1,0 +1,818 @@
+# =============================================================================
+# Consciousness parameter schema for the AutoConsciousness loop
+# =============================================================================
+# All tunable parameters across consciousness modules.
+# Sourced from actual module constructors.
+#
+# Each entry: type, default, min, max, description
+# Used by experiment runner for grid/random search and ablation studies.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# GWT: EnhancedGlobalWorkspace
+# -----------------------------------------------------------------------------
+
+[gwt.capacity]
+type = "int"
+default = 7
+min = 1
+max = 20
+description = "Maximum number of items in global workspace (cognitive capacity limit)"
+
+[gwt.ignition_threshold]
+type = "float"
+default = 0.3
+min = 0.0
+max = 1.0
+description = "Minimum salience for a workspace candidate to trigger ignition"
+
+[gwt.amplification_factor]
+type = "float"
+default = 2.0
+min = 1.0
+max = 10.0
+description = "Multiplier applied to winning coalition signals during broadcast"
+
+[gwt.competition_mode]
+type = "str"
+default = "hierarchical"
+choices = ["hierarchical", "flat"]
+description = "Workspace competition: per-level capacity with promotion (hierarchical), or one flat pool (flat, the v0.4.0 competition)"
+
+[gwt.thalamic_gate_enabled]
+type = "bool"
+default = true
+description = "Filter candidates through the thalamic gate before competition (false lets every candidate compete, as in v0.4.0)"
+
+[gwt.theory_interactions_enabled]
+type = "bool"
+default = true
+description = "Apply the cross-theory modulation (somatic and Phi signals) as the next cycle's salience bias (false is v0.4.0)"
+
+[gwt.legacy_coverage_ratio]
+type = "bool"
+default = false
+description = "Report a broadcast coverage ratio of 1.0 before any broadcast (v0.4.0); the default reports 0.0"
+
+[gwt.body_metrics_enabled]
+type = "bool"
+default = true
+description = "Feed real system metrics and the previous cycle duration to the protoself once per cycle (false is v0.4.0; machine dependent, so the experiment runner pins it off unless set)"
+
+[gwt.precision_feedback_enabled]
+type = "bool"
+default = true
+description = "Let workspace winners raise the active inference precision bias of their channels (false is v0.4.0)"
+
+[gwt.self_prediction_enabled]
+type = "bool"
+default = true
+description = "Have the self-model predict each cycle and score that prediction after the self-model update (false is v0.4.0)"
+
+# GWT: TemporalWorkspaceConfig
+
+[gwt.competition_duration_ms]
+type = "float"
+default = 250.0
+min = 50.0
+max = 1000.0
+description = "Duration of competitive selection phase in milliseconds"
+
+[gwt.ignition_threshold_time_ms]
+type = "float"
+default = 50.0
+min = 5.0
+max = 200.0
+description = "Time a candidate must exceed threshold before ignition fires (ms)"
+
+[gwt.broadcast_propagation_ms]
+type = "float"
+default = 30.0
+min = 5.0
+max = 150.0
+description = "Time for broadcast signal to propagate to all modules (ms)"
+
+[gwt.refractory_period_ms]
+type = "float"
+default = 500.0
+min = 100.0
+max = 2000.0
+description = "Minimum interval between consecutive ignition events (ms)"
+
+[gwt.timestep_ms]
+type = "float"
+default = 10.0
+min = 1.0
+max = 50.0
+description = "Simulation timestep for the temporal workspace dynamics (ms)"
+
+# -----------------------------------------------------------------------------
+# AST: AttentionSchemaModule
+# -----------------------------------------------------------------------------
+
+[ast.voluntary_boost]
+type = "float"
+default = 0.2
+min = 0.0
+max = 1.0
+description = "Additive boost applied to voluntarily attended items"
+
+[ast.focus_threshold]
+type = "float"
+default = 0.9
+min = 0.3
+max = 1.5
+description = "Attention level above which an item is considered focused (workspace salience scale, 0 to 1.5; v0.4.0 used 0.6 on a 0 to 1 scale)"
+
+[ast.hyperfocus_threshold]
+type = "float"
+default = 1.35
+min = 0.5
+max = 1.5
+description = "Attention level above which hyperfocus state is triggered (workspace salience scale, 0 to 1.5; v0.4.0 used 0.9)"
+
+[ast.capture_salience_threshold]
+type = "float"
+default = 1.2
+min = 0.5
+max = 1.5
+description = "Salience at or above which an inferred attention shift counts as captured (workspace salience scale; v0.4.0 used 0.8)"
+
+[ast.provenance_mode]
+type = "str"
+default = "typed"
+choices = ["typed", "legacy_strength"]
+description = "How shifts count as chosen or pulled: by shift type (typed), or the v0.4.0 rule where strength at or above 0.6 counts as voluntary (legacy_strength)"
+
+[ast.prediction_window_seconds]
+type = "float"
+default = 5.0
+min = 0.5
+max = 30.0
+description = "Lookahead window for attention prediction model (seconds)"
+
+[ast.history_size]
+type = "int"
+default = 50
+min = 5
+max = 500
+description = "Number of past attention states retained for prediction"
+
+# -----------------------------------------------------------------------------
+# HOT: MetacognitionModule
+# -----------------------------------------------------------------------------
+
+[hot.hot_generation_threshold]
+type = "float"
+default = 0.4
+min = 0.0
+max = 1.0
+description = "Minimum significance for a first-order state to generate a higher-order thought"
+
+[hot.max_first_order_buffer]
+type = "int"
+default = 100
+min = 10
+max = 1000
+description = "Maximum number of first-order states held in buffer"
+
+[hot.max_hot_buffer]
+type = "int"
+default = 50
+min = 5
+max = 500
+description = "Maximum number of higher-order thoughts held in buffer"
+
+[hot.introspection_cooldown]
+type = "float"
+default = 1.0
+min = 0.1
+max = 10.0
+description = "Minimum seconds between introspection cycles"
+
+[hot.enable_third_order]
+type = "bool"
+default = true
+description = "Whether to generate third-order thoughts (thoughts about thoughts about thoughts)"
+
+# -----------------------------------------------------------------------------
+# FEP: ActiveInferenceConfig
+# -----------------------------------------------------------------------------
+
+[fep.num_hidden_states]
+type = "int"
+default = 8
+min = 2
+max = 64
+description = "Number of hidden states in the generative model"
+
+[fep.num_observations]
+type = "int"
+default = 5
+min = 2
+max = 32
+description = "Number of observation modalities"
+
+[fep.num_actions]
+type = "int"
+default = 4
+min = 2
+max = 16
+description = "Number of available actions for active inference"
+
+[fep.planning_horizon]
+type = "int"
+default = 5
+min = 1
+max = 10
+description = "Number of future steps considered during planning (the fep.* defaults describe the compact world model; the default was 3 before v0.5.0)"
+
+[fep.learning_rate_A]
+type = "float"
+default = 0.1
+min = 0.0001
+max = 1.0
+description = "Learning rate for likelihood mapping (A matrix)"
+
+[fep.learning_rate_B]
+type = "float"
+default = 0.05
+min = 0.0001
+max = 1.0
+description = "Learning rate for transition model (B matrix)"
+
+[fep.learning_rate_D]
+type = "float"
+default = 0.01
+min = 0.0001
+max = 1.0
+description = "Learning rate for prior preferences (D vector)"
+
+[fep.gamma]
+type = "float"
+default = 16.0
+min = 1.0
+max = 64.0
+description = "Precision of action selection (inverse temperature)"
+
+[fep.enable_homeostasis]
+type = "bool"
+default = true
+description = "Whether homeostatic drive system is active"
+
+[fep.homeostatic_update_rate]
+type = "float"
+default = 0.1
+min = 0.001
+max = 1.0
+description = "Rate at which homeostatic setpoints are updated"
+
+[fep.enable_meta_inference]
+type = "bool"
+default = true
+description = "Whether meta-level inference over model parameters is enabled"
+
+[fep.world_model]
+type = "str"
+default = "compact_8x5x4"
+choices = ["compact_8x5x4", "conversational_16x10x8"]
+description = "Generative world model preset (compact 8x5x4, or the labelled conversational 16x10x8)"
+
+[fep.hpp_hidden_dim_multiplier]
+type = "int"
+default = 1
+min = 1
+max = 4
+description = "Hierarchical predictor hidden size as a multiple of the input size (v0.4.0 used 2, which made every update skip)"
+
+[fep.hierarchy_observation]
+type = "str"
+default = "content"
+choices = ["content", "hpp_top_level"]
+description = "Observation the workspace gives the discrete agent: the content-derived input (content), or the v0.4.0 route through the encoded top-level hierarchy beliefs (hpp_top_level)"
+
+[fep.meta_accuracy_method]
+type = "str"
+default = "ledger"
+choices = ["ledger", "median"]
+description = "How the meta-state judges a prediction accurate: scored forecast ledger, or the v0.4.0 running-median verdict"
+
+[fep.drive_model]
+type = "str"
+default = "f4"
+choices = ["f4", "v04"]
+description = "Homeostatic drive activity vocabulary (f4 matches the activity names callers send; v04 is the v0.4.0 vocabulary)"
+
+[fep.drive_decay_floor]
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.5
+description = "Natural drive decay stops at this fraction of each drive's optimal level"
+
+[fep.legacy_double_decay]
+type = "bool"
+default = false
+description = "Reproduce the v0.4.0 behaviour where idle curiosity and social drives decay twice per cycle"
+
+# -----------------------------------------------------------------------------
+# FEP Drives: attention_budget
+# -----------------------------------------------------------------------------
+
+[fep.drives.attention_budget.optimal_level]
+type = "float"
+default = 0.7
+min = 0.0
+max = 1.0
+description = "Target homeostatic level for attention budget"
+
+[fep.drives.attention_budget.decay_rate]
+type = "float"
+default = 0.01
+min = 0.0001
+max = 0.5
+description = "Rate at which attention budget depletes over time"
+
+[fep.drives.attention_budget.recovery_rate]
+type = "float"
+default = 0.05
+min = 0.001
+max = 1.0
+description = "Rate at which attention budget recovers toward optimal level"
+
+[fep.drives.attention_budget.importance]
+type = "float"
+default = 1.0
+min = 0.0
+max = 5.0
+description = "Relative weight of attention budget in drive arbitration"
+
+# -----------------------------------------------------------------------------
+# FEP Drives: curiosity
+# -----------------------------------------------------------------------------
+
+[fep.drives.curiosity.optimal_level]
+type = "float"
+default = 0.5
+min = 0.0
+max = 1.0
+description = "Target homeostatic level for curiosity drive"
+
+[fep.drives.curiosity.decay_rate]
+type = "float"
+default = 0.02
+min = 0.0001
+max = 0.5
+description = "Rate at which curiosity depletes when not stimulated"
+
+[fep.drives.curiosity.recovery_rate]
+type = "float"
+default = 0.1
+min = 0.001
+max = 1.0
+description = "Rate at which curiosity recovers toward optimal level"
+
+[fep.drives.curiosity.importance]
+type = "float"
+default = 0.8
+min = 0.0
+max = 5.0
+description = "Relative weight of curiosity in drive arbitration"
+
+# -----------------------------------------------------------------------------
+# FEP Drives: social_connection
+# -----------------------------------------------------------------------------
+
+[fep.drives.social_connection.optimal_level]
+type = "float"
+default = 0.6
+min = 0.0
+max = 1.0
+description = "Target homeostatic level for social connection drive"
+
+[fep.drives.social_connection.decay_rate]
+type = "float"
+default = 0.005
+min = 0.0001
+max = 0.5
+description = "Rate at which social connection depletes when isolated"
+
+[fep.drives.social_connection.recovery_rate]
+type = "float"
+default = 0.2
+min = 0.001
+max = 1.0
+description = "Rate at which social connection recovers during interaction"
+
+[fep.drives.social_connection.importance]
+type = "float"
+default = 0.9
+min = 0.0
+max = 5.0
+description = "Relative weight of social connection in drive arbitration"
+
+# -----------------------------------------------------------------------------
+# FEP Drives: coherence
+# -----------------------------------------------------------------------------
+
+[fep.drives.coherence.optimal_level]
+type = "float"
+default = 0.8
+min = 0.0
+max = 1.0
+description = "Target homeostatic level for internal coherence"
+
+[fep.drives.coherence.decay_rate]
+type = "float"
+default = 0.01
+min = 0.0001
+max = 0.5
+description = "Rate at which coherence degrades under conflicting inputs"
+
+[fep.drives.coherence.recovery_rate]
+type = "float"
+default = 0.15
+min = 0.001
+max = 1.0
+description = "Rate at which coherence recovers through integration"
+
+[fep.drives.coherence.importance]
+type = "float"
+default = 0.7
+min = 0.0
+max = 5.0
+description = "Relative weight of coherence in drive arbitration"
+
+# -----------------------------------------------------------------------------
+# FEP Drives: safety
+# -----------------------------------------------------------------------------
+
+[fep.drives.safety.optimal_level]
+type = "float"
+default = 0.9
+min = 0.0
+max = 1.0
+description = "Target homeostatic level for safety/self-preservation"
+
+[fep.drives.safety.decay_rate]
+type = "float"
+default = 0.001
+min = 0.0001
+max = 0.5
+description = "Rate at which safety level depletes under threat"
+
+[fep.drives.safety.recovery_rate]
+type = "float"
+default = 0.3
+min = 0.001
+max = 1.0
+description = "Rate at which safety level recovers when threat passes"
+
+[fep.drives.safety.importance]
+type = "float"
+default = 1.2
+min = 0.0
+max = 5.0
+description = "Relative weight of safety in drive arbitration (highest priority)"
+
+# -----------------------------------------------------------------------------
+# BLT: BeautifulLoop
+# -----------------------------------------------------------------------------
+
+[blt.num_levels]
+type = "int"
+default = 3
+min = 1
+max = 10
+description = "Number of hierarchical levels in the Beautiful Loop"
+
+[blt.precision_learning_rate]
+type = "float"
+default = 0.1
+min = 0.0001
+max = 1.0
+description = "Learning rate for precision-weight updates in Bayesian binding"
+
+[blt.min_binding_quality]
+type = "float"
+default = 0.2
+min = 0.0
+max = 1.0
+description = "Minimum binding quality threshold for cross-level integration"
+
+[blt.max_epistemic_depth]
+type = "int"
+default = 5
+min = 1
+max = 20
+description = "Maximum depth of epistemic recursion (meta-levels of self-modeling)"
+
+[blt.field_evidencing_threshold]
+type = "float"
+default = 0.3
+min = 0.0
+max = 1.0
+description = "Threshold for field-evidencing to contribute to consciousness detection"
+
+[blt.loop_quality_formula]
+type = "str"
+default = "recursive"
+choices = ["recursive", "v04"]
+description = "Loop quality formula (recursive adds recursive confidence and a momentum boost; v04 is the v0.4.0 weighting)"
+
+[blt.precision_floor_enabled]
+type = "bool"
+default = true
+description = "Uniformly high precision across levels earns a 0.4 precision-balance floor (v0.4.0 scored it near zero)"
+
+[blt.require_recursive_confidence]
+type = "bool"
+default = true
+description = "Field evidencing also needs the hyper-model recursive confidence above 0.3"
+
+# -----------------------------------------------------------------------------
+# Damasio: DamasioLayers
+# -----------------------------------------------------------------------------
+
+[damasio.stability_window]
+type = "int"
+default = 20
+min = 5
+max = 200
+description = "Number of recent ticks used to compute emotional stability"
+
+[damasio.circadian]
+type = "str"
+default = "sinusoid"
+choices = ["sinusoid", "v04_sawtooth", "wall_clock"]
+description = "Protoself circadian model (smooth sinusoid, the v0.4.0 sawtooth, or the wall clock in the configured timezone)"
+
+# -----------------------------------------------------------------------------
+# IIT: PhiTracker
+# -----------------------------------------------------------------------------
+
+[phi.scale]
+type = "float"
+default = 1.0
+min = 0.1
+max = 10.0
+description = "Multiplier on the PhiTracker integration proxy (raw bits at 1.0)"
+
+[phi.warmup_reference]
+type = "float"
+default = 5.0
+min = 0.1
+max = 50.0
+description = "Denominator for the PhiTracker's normalized readout before enough values are recorded for a percentile (a display calibration, not a measurement)"
+
+# -----------------------------------------------------------------------------
+# Runner: experiment and assessment warmup
+# -----------------------------------------------------------------------------
+
+[runner.warmup_profile]
+type = "str"
+default = "v05"
+choices = ["v05", "v04"]
+description = "Warmup attention feed: v05 alternates voluntary and captured shifts with goal-driven ones so typed provenance has chosen shifts to count; v04 feeds captured shifts only"
+
+# -----------------------------------------------------------------------------
+# PAD: PADAffectModel
+# -----------------------------------------------------------------------------
+
+[pad.history_window]
+type = "int"
+default = 100
+min = 10
+max = 1000
+description = "Number of past affect states retained for trend analysis"
+
+# -----------------------------------------------------------------------------
+# Oscillatory: OscillatoryBinding
+# -----------------------------------------------------------------------------
+
+[oscillatory.num_oscillators]
+type = "int"
+default = 30
+min = 4
+max = 128
+description = "Number of neural oscillators in the binding network"
+
+[oscillatory.phase_dim]
+type = "int"
+default = 16
+min = 4
+max = 64
+description = "Dimensionality of each oscillator's phase representation"
+
+[oscillatory.num_steps]
+type = "int"
+default = 20
+min = 5
+max = 100
+description = "Number of integration steps per binding cycle"
+
+[oscillatory.step_size]
+type = "float"
+default = 0.1
+min = 0.01
+max = 1.0
+description = "Integration step size for oscillator dynamics (dt)"
+
+[oscillatory.hebbian_lr]
+type = "float"
+default = 0.001
+min = 0.0001
+max = 0.1
+description = "Hebbian learning rate for coupling weight updates"
+
+[oscillatory.hebbian_decay]
+type = "float"
+default = 0.0001
+min = 0.00001
+max = 0.01
+description = "Decay rate for Hebbian coupling weights"
+
+[oscillatory.hebbian_cap]
+type = "float"
+default = 0.3
+min = 0.01
+max = 1.0
+description = "Maximum absolute value for Hebbian coupling weights"
+
+[oscillatory.salience_alpha]
+type = "float"
+default = 0.3
+min = 0.0
+max = 1.0
+description = "Mixing coefficient for salience-driven oscillator input"
+
+[oscillatory.sync_threshold]
+type = "float"
+default = 0.7
+min = 0.0
+max = 1.0
+description = "Phase coherence threshold above which oscillators are considered bound"
+
+[oscillatory.history_window]
+type = "int"
+default = 100
+min = 10
+max = 1000
+description = "Number of past binding states retained for temporal analysis"
+
+# -----------------------------------------------------------------------------
+# RPT: RPTMeasurement
+# -----------------------------------------------------------------------------
+
+[rpt.local_recurrence_threshold]
+type = "float"
+default = 0.3
+min = 0.0
+max = 1.0
+description = "Minimum recurrence strength for local (within-module) processing"
+
+[rpt.global_recurrence_threshold]
+type = "float"
+default = 0.4
+min = 0.0
+max = 1.0
+description = "Minimum recurrence strength for global (cross-module) processing"
+
+[rpt.history_window]
+type = "int"
+default = 50
+min = 5
+max = 500
+description = "Number of past recurrence measurements retained for analysis"
+
+[assessment.saturated_baseline_min_range]
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.5
+description = "Minimum headroom (1.0 minus the noise baseline) an indicator must leave before its normalized score counts; below it the indicator scores 0.0 as uninformative (v0.4.0: 0.0, no guard)"
+
+[assessment.indicator_formulas]
+type = "str"
+default = "v05"
+choices = ["v05", "v04"]
+description = "Indicator arithmetic: v05 reads the statistics the producers emit and scores quality; v04 runs the v0.4.0 formulas verbatim"
+
+[assessment.missing_signal_policy]
+type = "str"
+default = "insufficient_data"
+choices = ["insufficient_data", "v04_constants"]
+description = "What a present module with no evidence yet scores: insufficient_data reports it by name and leaves it out of the averages; v04_constants substitutes the v0.4.0 stand-in numbers"
+
+[assessment.irreducibility_method]
+type = "str"
+default = "weighted_fiedler"
+choices = ["weighted_fiedler", "spectral_entropy"]
+description = "Irreducibility of the supplied connectivity: weighted_fiedler (default) or the v0.4.0 spectral_entropy"
+
+[assessment.causal_emergence_threshold]
+type = "float"
+default = 0.5
+min = 0.0
+max = 1.0
+description = "Causal emergence value above which the causal_emergence indicator passes its emergence check (v0.4.0: 0.0)"
+
+[assessment.phi_source]
+type = "str"
+default = "tracker_preferred"
+choices = ["tracker_preferred", "calculator"]
+description = "Where integrated_information reads Phi: tracker_preferred uses the supplied PhiTracker when it has a result and falls back to the calculator; calculator never reads the tracker (v0.4.0)"
+
+[assessment.phi_normalization]
+type = "str"
+default = "fixed"
+choices = ["fixed", "percentile"]
+description = "How the calculator maps Phi to 0-1: fixed divides by phi_fixed_reference (the v0.4.0 behaviour); percentile divides by the rolling 95th percentile of recent values once 20 exist, so the score is relative"
+
+[assessment.phi_fixed_reference]
+type = "float"
+default = 5.0
+min = 0.1
+max = 50.0
+description = "Phi value that maps to 1.0 under fixed normalization (a display calibration, not a measurement)"
+
+# -----------------------------------------------------------------------------
+# PAD coherence, causal emergence, RPT plasticity
+# -----------------------------------------------------------------------------
+
+[pad.coherence_method]
+type = "str"
+default = "temporal_structure"
+choices = ["temporal_structure", "v04_variance"]
+description = "Affect coherence: temporal_structure rewards smooth structured history and scores noise low; v04_variance is the v0.4.0 variance-based value"
+
+[pad.coherence_window]
+type = "int"
+default = 20
+min = 5
+max = 100
+description = "Number of recent affect states the temporal_structure coherence reads (inert under v04_variance)"
+
+[pad.coherence_min_history]
+type = "int"
+default = 10
+min = 3
+max = 50
+description = "Affect states needed before a coherence is reported; fewer reports none (inert under v04_variance)"
+
+[causal_emergence.tpm_row_order]
+type = "str"
+default = "big_endian"
+choices = ["big_endian", "little_endian"]
+description = "Row order of the transition matrix the analyzer reads: big_endian matches the PhiTracker; little_endian is the v0.4.0 reading"
+
+[rpt.stdp_plasticity_enabled]
+type = "bool"
+default = true
+description = "Let RPT recurrence strengthen through spike-timing plasticity across measurements (false is v0.4.0)"
+
+# -----------------------------------------------------------------------------
+# Cycle: CycleAugmenter (per-cycle additions around each workspace cycle)
+# The defaults describe the live pipeline. Both runners pin every switch off
+# unless it is set, so the seeded numbers move only when a researcher opts in.
+# -----------------------------------------------------------------------------
+
+[cycle.drive_candidates]
+type = "bool"
+default = true
+description = "Admit urgent homeostatic drives as HOMEOSTATIC workspace candidates each cycle; the runners pin it off unless set (v0.4.0: off)"
+
+[cycle.drive_urgency_threshold]
+type = "float"
+default = 0.5
+min = 0.0
+max = 1.0
+description = "Urgency above which a drive becomes a candidate; inert while drive_candidates is off, which the runners pin unless set (v0.4.0: no drive candidates)"
+
+[cycle.prospective_candidates]
+type = "bool"
+default = true
+description = "Inject the prospective simulation generated after a cycle as an INTERNAL candidate of the next; the runners pin it off unless set (v0.4.0: off)"
+
+[cycle.crossmodal_binding]
+type = "bool"
+default = true
+description = "Run cross-modal binding over the candidates before competition; the runners pin it off unless set (v0.4.0: off)"
+
+[cycle.gate_arousal]
+type = "str"
+default = "protoself"
+choices = ["protoself", "pad", "workspace"]
+description = "Source of the thalamic gate's arousal: protoself feeds the protoself arousal through set_arousal, pad leaves the PAD arousal recorded on the state for the next cycle, workspace leaves the gate to its own derivation; the runners pin workspace unless set (v0.4.0: workspace)"
+
+[cycle.pad_from_state]
+type = "bool"
+default = true
+description = "Compute the PAD coordinate from the cycle's state and record it on the state; the runners pin it off unless set, and the experiment runner then keeps its random PAD feed (v0.4.0: off)"
+
+[cycle.candidate_cap]
+type = "int"
+default = 20
+min = 0
+max = 200
+description = "Pre-attentive cap on candidates by activation plus emotional salience, 0 for no cap; the runners pin 0 unless set (v0.4.0: 0)"

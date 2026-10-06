@@ -26,6 +26,11 @@ score (nothing is assumed in its place). A probe the brain does not answer
 and named in ``skipped_prompts``; no text is composed in the model's place.
 Alerts and the report name no system.
 
+The probes come from ``prompts_path`` when one is passed (``configured``),
+else from the shipped ``config/transition_prompts.json`` next to the code or
+under ``PROJECT_ROOT`` (``file``), else from its packaged copy (``package``);
+``prompts_source`` reports which, after ``load_prompts``.
+
 This is a tool a researcher runs around a model change, never part of the
 automatic cycle. Config keys read at call time: ``TRANSITION_HISTORY_DIR``
 (when no ``history_dir`` is passed). Persisted files: ``latest_baseline.json``
@@ -55,6 +60,7 @@ from typing import (
 from mtc.brain.protocol import BrainProtocol, NoAnswerError, strip_reasoning_blocks
 from mtc.core.config import get_settings
 from mtc.core.paths import resolve_path
+from mtc.core.resources import resolve_shipped
 
 logger = logging.getLogger(__name__)
 
@@ -266,7 +272,9 @@ class ModelTransitionProtocol:
         self.assess = assess
         self.brain = brain
         self.identity_source = identity_source
+        self._prompts_configured = bool(prompts_path)
         self.prompts_path = Path(prompts_path) if prompts_path else DEFAULT_PROMPTS_PATH
+        self.prompts_source: Optional[str] = None
         self._history_dir = Path(history_dir) if history_dir is not None else None
         self.thresholds = thresholds or TransitionThresholds()
         self._clock = clock or (lambda: datetime.now(timezone.utc))
@@ -286,31 +294,43 @@ class ModelTransitionProtocol:
         cfg = get_settings()
         return resolve_path(cfg.TRANSITION_HISTORY_DIR, settings=cfg)
 
+    def _prompts_file(self) -> Tuple[Path, str]:
+        """The probes file and its source (see the module docstring)."""
+        if self._prompts_configured:
+            return self.prompts_path, "configured"
+        default = Path(DEFAULT_PROMPTS_PATH)
+        if default.is_file():
+            return default, "file"
+        try:
+            path, where = resolve_shipped(
+                f"config/{default.name}", settings=get_settings()
+            )
+        except FileNotFoundError:
+            return default, "file"
+        return path, ("file" if where == "project" else "package")
+
     def load_prompts(self) -> List[Tuple[str, str]]:
         """The probe prompts as ``(id, text)`` pairs, read now."""
+        path, source = self._prompts_file()
         try:
-            data = json.loads(self.prompts_path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError as exc:
-            raise ValueError(
-                f"transition prompts file {self.prompts_path} is missing"
-            ) from exc
+            raise ValueError(f"transition prompts file {path} is missing") from exc
+        self.prompts_source = source
         entries = data.get("prompts") if isinstance(data, Mapping) else None
         if not isinstance(entries, list) or not entries:
             raise ValueError(
-                f"transition prompts file {self.prompts_path} needs a non-empty "
-                "'prompts' list"
+                f"transition prompts file {path} needs a non-empty " "'prompts' list"
             )
         prompts: List[Tuple[str, str]] = []
         seen = set()
         for entry in entries:
             if not isinstance(entry, Mapping):
-                raise ValueError(f"{self.prompts_path}: each prompt is a mapping")
+                raise ValueError(f"{path}: each prompt is a mapping")
             prompt_id = str(entry.get("id") or "").strip()
             text = str(entry.get("prompt") or "").strip()
             if not prompt_id or not text or prompt_id in seen:
-                raise ValueError(
-                    f"{self.prompts_path}: each prompt needs a unique id and text"
-                )
+                raise ValueError(f"{path}: each prompt needs a unique id and text")
             seen.add(prompt_id)
             prompts.append((prompt_id, text))
         return prompts

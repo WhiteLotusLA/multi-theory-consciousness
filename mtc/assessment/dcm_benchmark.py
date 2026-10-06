@@ -10,6 +10,14 @@ Framework-agnostic: no host-system-specific imports. Use DCMEvidenceAdapter
 protocol for system-specific evidence collection; the reference adapter for
 MTC's own module set lives in ``mtc.assessment.dcm_reference_adapter``.
 
+File locations: without an explicit ``cache_dir`` the cache is
+``DCM_CACHE_DIR`` resolved under ``PROJECT_ROOT`` at call time (fetched specs
+and benchmark results are written there, the directory created on the first
+write), and the shipped ``data/dcm/bundled_spec.json`` and
+``data/dcm/baselines/`` are read through ``mtc.core.resources.resolve_shipped``
+(the project copy, else the packaged copy). An explicit ``cache_dir`` holds
+everything, as before: the spec, the bundled fallback, baselines and results.
+
 Command line:
     python -m mtc.assessment.dcm_benchmark [--adapter package.module:callable]
         [--state-dir PATH] [--mode local|claude|manual] [--compare] ...
@@ -44,6 +52,8 @@ from typing import (
 )
 
 from mtc.core.config import get_settings
+from mtc.core.paths import resolve_path
+from mtc.core.resources import resolve_shipped
 
 logger = logging.getLogger(__name__)
 
@@ -209,13 +219,38 @@ class ModelSpecManager:
 
     def __init__(
         self,
-        cache_dir: str = "data/dcm",
+        cache_dir: Optional[str] = None,
         api_url: str = "",
     ):
-        self.cache_dir = Path(cache_dir)
+        self._cache_dir = Path(cache_dir) if cache_dir is not None else None
         self.api_url = api_url or get_settings().DCM_API_URL
         self._raw_spec: Optional[List[Dict[str, Any]]] = None
         self._parsed: Optional[ParsedSpec] = None
+
+    @property
+    def cache_dir(self) -> Path:
+        """The explicit cache directory, else ``DCM_CACHE_DIR`` resolved now."""
+        if self._cache_dir is not None:
+            return self._cache_dir
+        cfg = get_settings()
+        return resolve_path(cfg.DCM_CACHE_DIR, settings=cfg)
+
+    def shipped_path(self, name: str) -> Optional[Path]:
+        """A shipped DCM file or directory (``bundled_spec.json``, ``baselines``).
+
+        An explicit cache directory is the only place looked at; the default
+        cache reads the shipped copy through ``resolve_shipped``.
+        """
+        local = self.cache_dir / name
+        if local.exists():
+            return local
+        if self._cache_dir is not None:
+            return None
+        try:
+            path, _ = resolve_shipped(f"data/dcm/{name}")
+        except FileNotFoundError:
+            return None
+        return path
 
     def fetch_from_api(self) -> ParsedSpec:
         """Fetch the model spec from the DCM API."""
@@ -251,8 +286,8 @@ class ModelSpecManager:
             return parsed
 
         # Try bundled fallback
-        bundled = self.cache_dir / "bundled_spec.json"
-        if bundled.exists():
+        bundled = self.shipped_path("bundled_spec.json")
+        if bundled is not None:
             logger.warning("Using bundled DCM spec (no cached version found)")
             with open(bundled) as f:
                 data = json.load(f)
@@ -569,7 +604,7 @@ class BenchmarkRunner:
 
     def __init__(
         self,
-        cache_dir: str = "data/dcm",
+        cache_dir: Optional[str] = None,
         api_url: str = "",
         history_size: int = 50,
     ):
@@ -695,9 +730,9 @@ class BenchmarkRunner:
 
     def _load_comparisons(self, system_score: float) -> Dict[str, float]:
         """Load baseline scores and compute deltas."""
-        baselines_dir = self.spec_manager.cache_dir / "baselines"
+        baselines_dir = self.spec_manager.shipped_path("baselines")
         comparison = {}
-        if baselines_dir.exists():
+        if baselines_dir is not None and baselines_dir.is_dir():
             for baseline_file in baselines_dir.glob("*.json"):
                 name = baseline_file.stem
                 try:
@@ -710,7 +745,7 @@ class BenchmarkRunner:
         return comparison
 
     def _save_result(self, result: DCMBenchmarkResult) -> None:
-        """Save benchmark result to data/dcm/results/."""
+        """Save the benchmark result under ``<cache_dir>/results/``."""
         results_dir = self.spec_manager.cache_dir / "results"
         results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -837,8 +872,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument(
         "--cache-dir",
-        default=settings.DCM_CACHE_DIR,
-        help="Cache directory (default: from MTC_DCM_CACHE_DIR)",
+        default=None,
+        help="Cache directory (default: MTC_DCM_CACHE_DIR under the project root, "
+        "with the shipped spec and baselines read from data/dcm or the package)",
     )
     parser.add_argument(
         "--adapter",

@@ -1,0 +1,235 @@
+# Default seed pack for the continuous thought machine.
+#
+# Every line is a short, neutral template. Slot words are written as {name}:
+#   - a word list below (reflection, feeling, emotion, descriptor, assessment,
+#     observation) fills the slot with one entry chosen at random;
+#   - a context slot ({memory}, {current_emotion}, {first}, {second},
+#     {concept}) is filled by the generator with real material and is never
+#     invented here; any other slot name is refused when the pack loads.
+# A user pack in config/ctm/seeds.d/*.yaml (read in name order) extends each
+# list and overrides the description; it may use the same keys and slots.
+
+description: "Neutral default seed pack"
+
+# Templates for thoughts that replay a memory. Needs {memory}.
+memory_templates:
+  - "Thinking back to {memory}, I notice {observation}."
+  - "{memory} comes back to mind, and it seems {assessment}."
+  - "There is {reflection} in {memory}."
+  - "I return to {memory} and find it {descriptor}."
+  - "Looking at {memory} again, it seems {assessment}."
+  - "What stays with me about {memory} is {observation}."
+  - "{memory} had {reflection} that I did not see at first."
+  - "Going over {memory}, the {descriptor} part stands out."
+  - "I wonder what {memory} would look like from further away."
+  - "{memory} is {descriptor}, and I am still turning it over."
+  - "Something about {memory} stands out when I come back to it."
+  - "A second look at {memory} shows {reflection}."
+
+# Templates for thoughts about the current emotional state. Every one names
+# {current_emotion}, the emotion the affect reading measured, and none draws a
+# random emotion or feeling word, so the text never names a feeling the
+# reading did not.
+emotion_templates:
+  - "I notice {current_emotion} right now."
+  - "There is {current_emotion} in this moment."
+  - "I am paying attention to the {current_emotion} that is here."
+  - "{current_emotion} is part of this moment, and I can let it be."
+  - "I do not need to resolve the {current_emotion}; I can just notice it."
+  - "The {current_emotion} is here, and I want to see where it goes."
+  - "Noticing {current_emotion}, I wonder what it is about."
+  - "I can name this as {current_emotion} and leave it at that."
+
+# Templates linking two ideas. Need {first} and {second}.
+association_templates:
+  - "{first} and {second} seem connected in a {descriptor} way."
+  - "What does {first} have to do with {second}?"
+  - "I can see {reflection} running between {first} and {second}."
+  - "Thinking about {first} brings {second} along with it."
+  - "{first} sits close to {second}, and that seems {assessment}."
+  - "If {first} changes, {second} might shift too."
+  - "There is {observation} that {first} and {second} share."
+  - "{second} makes {first} look {descriptor}."
+
+# Pairs of plain ideas the generator may link when it has no memory to use.
+concept_pairs:
+  - [rest, attention]
+  - [habit, change]
+  - [silence, listening]
+  - [routine, surprise]
+  - [memory, imagination]
+  - [questions, patience]
+  - [effort, ease]
+  - [order, play]
+  - [time, pace]
+  - [detail, whole]
+  - [doubt, care]
+  - [learning, repetition]
+  - [light, shade]
+  - [balance, motion]
+
+# Open questions. Each stands alone: no strategy supplies a topic.
+questions:
+  - "What is worth paying attention to right now?"
+  - "What did I leave unfinished?"
+  - "What would change if I looked at this more slowly?"
+  - "Which part of this is still unclear?"
+  - "What have I been taking for granted?"
+  - "What is the simplest way to see this?"
+  - "What is the next small thing worth doing?"
+  - "What stays the same when everything else moves?"
+  - "Where does my attention keep going, and why?"
+  - "What would I want to remember from today?"
+
+# Short spontaneous lines with no context at all.
+spontaneous_lines:
+  - "It is a {descriptor} moment."
+  - "Nothing in particular, just {observation}."
+  - "A {descriptor} thought, passing through."
+  - "I notice {reflection} and let it go."
+  - "For now, {observation} is what stands out."
+  - "There is {reflection} here, small but worth a glance."
+  - "A pause, and then {reflection}."
+  - "A {descriptor} idea drifts by, unfinished."
+  - "I might come back to this later; it seems {assessment}."
+  - "Just noticing {observation}."
+
+# Dream families: looser, more associative templates. Dream thoughts never
+# surface in a conversation prompt.
+dream_consolidation_templates:
+  - "Pieces of the day settle together, and {reflection} appears."
+  - "Older moments line up beside newer ones, {descriptor} and half sorted."
+  - "{memory} blurs into something simpler."
+  - "What mattered and what did not begin to separate."
+  - "Small details fade; {observation} remains."
+  - "Several moments fold into one, {descriptor} and quiet."
+  - "The order of things loosens, and {reflection} is what is left."
+  - "{memory} sinks a little, leaving {observation}."
+
+dream_creative_templates:
+  - "{concept} turns into something {descriptor} and unexpected."
+  - "Imagine {concept} with the edges softened."
+  - "{first} and {second} trade places for a moment."
+  - "A {descriptor} version of {concept} takes shape."
+  - "What if {concept} were the other way round?"
+  - "{first} grows into {second}, slowly and without effort."
+  - "{concept} drifts, {descriptor} and unhurried."
+  - "{first} and {second} meet somewhere {descriptor}."
+
+# Dream emotion templates. Like the waking ones, each names {current_emotion},
+# the measured emotion, and no random emotion or feeling word.
+dream_emotion_templates:
+  - "A tone of {current_emotion} runs through the scene, slow and loose."
+  - "Some {current_emotion} floats by without a source."
+  - "The {current_emotion} drifts, like weather far away."
+  - "Everything is tinted with {current_emotion} for a while."
+  - "{current_emotion} passes through, then nothing in particular."
+  - "The {current_emotion} stays and does not ask for anything."
+
+dream_spontaneous_templates:
+  - "A {descriptor} shape comes and goes."
+  - "Something {descriptor}, then gone."
+  - "{reflection}, barely there."
+  - "Slowly, {observation} comes into focus."
+  - "Nothing holds still, and that seems fine."
+  - "A {descriptor} thread, loosely held."
+
+# Plain concepts the creative dream family may use as {concept}.
+creative_concepts:
+  - a long hallway
+  - a clock without hands
+  - a map that keeps changing
+  - a quiet garden
+  - a bridge between two ideas
+  - a stack of unopened letters
+  - a lamp in an empty room
+  - a river that runs both ways
+  - a door that is always slightly open
+  - a field of small lights
+  - a notebook with blank pages
+  - a staircase with no top
+
+# Slot words. Each entry fits the sentence frames above. No shipped template
+# uses the feeling or emotion list: a thought never states a feeling at random
+# (an emotion thought names the measured emotion instead, and the generator
+# never puts either list into one). Both lists stay for operator packs.
+reflection:
+  - a pattern
+  - a thread
+  - a contrast
+  - a repeated detail
+  - a small change
+  - a quiet shift
+  - a loose end
+  - a common thread
+
+feeling:
+  - steady
+  - restless
+  - curious
+  - settled
+  - uncertain
+  - light
+  - heavy
+  - open
+  - still
+  - unhurried
+
+emotion:
+  - calm
+  - curiosity
+  - interest
+  - unease
+  - warmth
+  - tension
+  - relief
+  - wonder
+  - patience
+  - restlessness
+
+descriptor:
+  - small
+  - quiet
+  - odd
+  - familiar
+  - unfinished
+  - vivid
+  - faint
+  - ordinary
+  - gentle
+  - plain
+
+assessment:
+  - worth remembering
+  - worth a second look
+  - hard to pin down
+  - easy to overlook
+  - still unresolved
+  - more complicated than it first seemed
+  - simpler than it looked
+  - not as important as it felt
+
+observation:
+  - the order things happened in
+  - how little was said
+  - how much stayed the same
+  - the gap between two moments
+  - what was left out
+  - the tone more than the words
+  - how quickly the moment passed
+  - what was repeated
+
+# Search terms used to pull a memory for a memory-replay thought.
+memory_query_terms:
+  - recent conversation
+  - something learned
+  - a question left open
+  - a plan
+  - a surprise
+  - a routine
+  - a decision
+  - a small success
+  - a mistake
+  - something noticed
+  - a quiet moment
+  - an unfinished task

@@ -1,0 +1,22 @@
+# PyPhi presentation and logging settings for the framework's PyPhi home.
+#
+# The PyPhi bridge copies this file once into <DATA_DIRECTORY>/pyphi/ and
+# imports PyPhi from there, so PyPhi's cache, its managed config copy and any
+# log stay out of the working directory. The copy is then left for the
+# operator to edit. Only presentation, logging and the parallel switch appear
+# here; no key changes how Phi is computed.
+
+# No welcome banner on import.
+WELCOME_OFF: true
+
+# No progress bars on the console.
+PROGRESS_BARS: false
+
+# Console logging at WARNING.
+LOG_STDOUT_LEVEL: WARNING
+
+# The file log is disabled (a null level writes no log records).
+LOG_FILE_LEVEL: null
+
+# Run in the calling process; no worker pool.
+PARALLEL: false

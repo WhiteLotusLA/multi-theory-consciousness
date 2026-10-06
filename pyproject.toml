@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multi-theory-consciousness"
-version = "0.5.0.dev0"
+version = "0.5.0"
 description = "A research framework implementing eight theories of consciousness as interacting computational modules"
 readme = "README.md"
 license = "Apache-2.0"
@@ -44,13 +44,35 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# neural: the spiking, reservoir and liquid-state substrates and the resource
+# guard's process statistics.
 neural = [
     "snntorch>=0.7",
     "torch>=2.0",
     "reservoirpy>=0.4",
+    "psutil>=5.9",
 ]
+# fep: active inference through pymdp (its NumPy agent: pymdp.legacy from 1.0,
+# pymdp.agent before). The workspace builds active inference unconditionally,
+# so mtc assess, mtc serve and the demos need this extra (mtc doctor reports
+# its absence as a required failure). It stays an extra rather than a core
+# dependency because pymdp 0.0.7 pulls in matplotlib, pandas, seaborn, pytest
+# and a documentation theme; the release gate may revisit this.
 fep = [
     "inferactively-pymdp>=0.0.7",
+]
+# iit: exact IIT 4.0 Phi via PyPhi. PyPhi is licensed GPLv3 or later; it is
+# never vendored, it is imported lazily through mtc.consciousness.pyphi_bridge
+# only when installed, and it is never part of "all". Installing it creates a
+# GPLv3 combination on that machine (see THIRD_PARTY_LICENSES.md).
+iit = [
+    "pyphi @ git+https://github.com/wmayner/pyphi.git@46ca11273f676b0c91eb79860f34f4ee63dc7a6e ; python_version >= '3.12'",
+]
+# embeddings: the sentence embedder for vector recall and the model download
+# behind mtc doctor --fetch-models.
+embeddings = [
+    "sentence-transformers>=2.2",
+    "huggingface_hub>=0.20",
 ]
 postgres = [
     "asyncpg>=0.29",
@@ -78,16 +100,6 @@ llm = [
 anthropic = [
     "anthropic>=0.50",
 ]
-# assessment: the DCM evaluator completes through the llm and anthropic
-# providers; the DCM benchmark still fetches its scheme with requests.
-assessment = [
-    "pymc>=5.0",
-    "requests>=2.28",
-    "multi-theory-consciousness[llm,anthropic]",
-]
-embeddings = [
-    "sentence-transformers>=2.2",
-]
 # api: the HTTP and websocket server (mtc.api); the HTTP client is the one the
 # framework's test client needs.
 api = [
@@ -95,31 +107,58 @@ api = [
     "uvicorn>=0.30",
     "httpx>=0.27",
 ]
+# research: the DCM benchmark's Bayesian inference (pymc) and its scheme fetch;
+# mtc.research itself needs only the core dependencies.
+research = [
+    "pymc>=5.0",
+    "requests>=2.28",
+]
+# assessment: an alias of research plus the Anthropic provider the DCM
+# evaluator's claude mode uses.
+assessment = [
+    "multi-theory-consciousness[research,anthropic]",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
+    "pytest-timeout>=2.3",
     "black>=23.0",
     "flake8>=6.0",
-    "pytest-timeout>=2.3",
+    "packaging>=23.0",
 ]
-# iit: exact IIT 4.0 Phi via PyPhi. PyPhi is licensed GPLv3+ and is never
-# vendored or imported unless the user installs this extra themselves.
-iit = [
-    "pyphi @ git+https://github.com/wmayner/pyphi.git@46ca11273f676b0c91eb79860f34f4ee63dc7a6e ; python_version >= '3.12'",
-]
+# all: every extra except iit (GPLv3 or later, opt-in only).
 all = [
-    "multi-theory-consciousness[neural,fep,databases,llm,anthropic,assessment,embeddings,api,dev]",
+    "multi-theory-consciousness[neural,fep,embeddings,postgres,mongo,redis,neo4j,qdrant,databases,llm,anthropic,api,research,assessment,dev]",
 ]
+
+[project.scripts]
+mtc = "mtc.cli.main:main"
 
 [project.urls]
 Repository = "https://github.com/WhiteLotusLA/multi-theory-consciousness"
 Documentation = "https://github.com/WhiteLotusLA/multi-theory-consciousness/tree/main/docs"
-
-# Note: CLI entry point removed -- run assessment via:
-#   python scripts/run_assessment.py --full --report
+Changelog = "https://github.com/WhiteLotusLA/multi-theory-consciousness/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["mtc*"]
+
+# Shipped defaults (generated copies, see scripts/sync_resources.py) and the
+# onboarding templates travel with the package, so an installed mtc works from
+# any directory.
+[tool.setuptools.package-data]
+"mtc.resources" = [
+    "**/*.yaml",
+    "**/*.yml",
+    "**/*.json",
+    "**/*.toml",
+    "**/*.md",
+    "**/*.txt",
+]
+"mtc.onboarding" = [
+    "templates/**/*.yaml",
+    "templates/**/*.md",
+    "templates/**/*.txt",
+]
 
 [tool.black]
 line-length = 88

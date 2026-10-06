@@ -4,6 +4,7 @@
 instruction per thought category and the labels that introduce each piece of
 context. It is configuration written by the operator: ``config/ctm/persona.yaml``
 (gitignored), else the shipped neutral ``config/ctm/persona.example.yaml``,
+else its packaged copy (``package``, only for the default ``CTM_CONFIG_DIR``),
 else the built-in neutral text below; ``source`` says which one was used. A
 partial file keeps the built-in text for every key it leaves out.
 
@@ -36,7 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from mtc.consciousness.continuous.config import ctm_config_dir
+from mtc.consciousness.continuous.config import ctm_config_dir, shipped_file
 from mtc.core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -144,7 +145,8 @@ class CTMPersona:
         *,
         settings: Optional[Settings] = None,
     ) -> "CTMPersona":
-        """Load ``persona.yaml``, else ``persona.example.yaml``, else built-in."""
+        """Load ``persona.yaml``, else ``persona.example.yaml``, else the
+        packaged example (for the shipped default directory), else built-in."""
         cfg = settings if settings is not None else get_settings()
         directory = ctm_config_dir(config_dir, settings=cfg)
         for file_name, source in (
@@ -154,6 +156,9 @@ class CTMPersona:
             path = directory / file_name
             if path.is_file():
                 return _from_file(path, source, cfg)
+        packaged = shipped_file(PERSONA_EXAMPLE_FILE, config_dir, settings=cfg)
+        if packaged is not None:
+            return _from_file(packaged, "package", cfg)
         logger.info(
             "no CTM persona file in %s; the built-in neutral text applies", directory
         )

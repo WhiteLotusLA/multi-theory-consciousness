@@ -8,7 +8,11 @@ lines (recent topics, an unresolved question, an emotional undertone) and a
 nap or night texture line, and returns the generation parameters. It never
 calls a model; the sleep scheduler sends the prompt through the brain seam.
 
-Configuration comes from ``config/dreams.yaml`` (or ``config_path``):
+Configuration comes from ``config_path`` when one is passed (``source``
+``configured``), else from the shipped ``config/dreams.yaml`` next to the code
+or under ``PROJECT_ROOT`` (``file``), else from its packaged copy
+(``package``, through ``mtc.core.resources``, for an install without a
+checkout). The file holds:
 
 - ``profiles.default`` is used when no developmental stage is given.
 - ``profiles.bands`` map an inclusive stage range to type weights and to a
@@ -40,7 +44,7 @@ import random
 import re
 import string
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Mapping, Optional, Tuple
 
@@ -117,6 +121,9 @@ class DreamEngineConfig:
     repeat_penalty: float = 0.5
     comforting_types: Tuple[str, ...] = ()
     comfort_multiplier: float = 12.0
+    # Where the file came from: configured, file or package; empty when the
+    # config was parsed from a mapping.
+    source: str = ""
 
 
 def _require(mapping: Mapping[str, Any], key: str, where: str) -> Any:
@@ -295,18 +302,33 @@ def parse_dream_config(raw: Mapping[str, Any]) -> DreamEngineConfig:
     )
 
 
+def _dream_config_file(path: Optional[Path]) -> Tuple[Path, str]:
+    if path is not None:
+        return Path(path), "configured"
+    default = Path(DEFAULT_CONFIG_PATH)
+    if default.is_file():
+        return default, "file"
+    from mtc.core.resources import resolve_shipped
+
+    try:
+        found, where = resolve_shipped(f"config/{default.name}")
+    except FileNotFoundError:
+        return default, "file"
+    return found, ("file" if where == "project" else "package")
+
+
 def load_dream_config(path: Optional[Path] = None) -> DreamEngineConfig:
     """Read and validate a dreams YAML file (the shipped file by default)."""
     import yaml
 
-    source = Path(path) if path is not None else DEFAULT_CONFIG_PATH
+    source, origin = _dream_config_file(path)
     if not source.is_file():
         raise FileNotFoundError(f"dreams config not found: {source}")
     with source.open("r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle)
     if not isinstance(raw, Mapping):
         raise ValueError(f"dreams config {source} is not a mapping")
-    return parse_dream_config(raw)
+    return replace(parse_dream_config(raw), source=origin)
 
 
 # ----------------------------------------------------------------------------

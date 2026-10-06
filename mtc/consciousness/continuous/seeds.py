@@ -43,7 +43,7 @@ import string
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from mtc.consciousness.continuous.config import ctm_config_dir
+from mtc.consciousness.continuous.config import ctm_config_dir, shipped_file
 from mtc.core.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -116,12 +116,17 @@ class SeedLibrary:
         self,
         data: Mapping[str, Any],
         packs: Optional[Sequence[Path]] = None,
+        source: Optional[str] = None,
     ) -> None:
         self._data: Dict[str, Any] = {k: v for k, v in data.items()}
         self.packs: List[Path] = list(packs or [])
+        self._source = source
 
     @property
     def source(self) -> str:
+        """``file``, ``package`` (the packaged default pack) or ``missing``."""
+        if self._source:
+            return self._source
         return "file" if self.packs else "missing"
 
     @property
@@ -200,6 +205,9 @@ class SeedLibrary:
     ) -> "SeedLibrary":
         """Read ``seeds/default.yaml`` then ``seeds.d/*.yaml`` in name order.
 
+        For the shipped default directory whose ``seeds/default.yaml`` is
+        missing, the packaged default pack is read (``source`` is ``package``);
+        user packs still come from the project's ``seeds.d``.
         A missing default pack is logged and leaves the library empty; a user
         pack directory that does not exist is ignored. An invalid pack raises
         ``SeedError`` naming the file.
@@ -207,7 +215,13 @@ class SeedLibrary:
         directory = ctm_config_dir(config_dir, settings=settings)
         merged: Dict[str, Any] = {}
         used: List[Path] = []
+        source: Optional[str] = None
         default = directory / DEFAULT_PACK
+        if not default.is_file():
+            packaged = shipped_file(DEFAULT_PACK, config_dir, settings=settings)
+            if packaged is not None:
+                default = packaged
+                source = "package"
         if default.is_file():
             _merge_pack(merged, _read_pack(default), default)
             used.append(default)
@@ -218,7 +232,7 @@ class SeedLibrary:
             for path in sorted(user_dir.glob("*.yaml")):
                 _merge_pack(merged, _read_pack(path), path)
                 used.append(path)
-        return cls(merged, used)
+        return cls(merged, used, source)
 
 
 def _read_pack(path: Path) -> Dict[str, Any]:

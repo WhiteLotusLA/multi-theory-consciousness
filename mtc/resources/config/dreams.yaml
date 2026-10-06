@@ -1,0 +1,174 @@
+# Dream engine configuration, read by mtc.consciousness.dream_engine.DreamEngine.
+#
+# profiles.default is used when no developmental stage is given; profiles.bands
+# map a stage range (inclusive) to dream-type weights and generation
+# parameters. Every dream type named in a profile or in
+# selection.comforting_types needs a template. Templates may use the
+# placeholders {dominant_emotion} and {hypothetical}; fillers supply them when
+# the dream context has no value. textures scale the profile's token budget
+# for a nap or a night dream and append a texture line to the prompt; the
+# texture is a qualitative lean, not a sleep-stage claim.
+
+selection:
+  history_size: 20
+  repeat_window: 3
+  repeat_penalty: 0.5
+  comforting_types: [comfort_dream, emotional_resolution]
+  comfort_multiplier: 12.0
+
+profiles:
+  default:
+    parameters: {temperature: 0.85, max_tokens: 400}
+    weights:
+      exploration: 0.125
+      what_if: 0.125
+      emotional_processing: 0.125
+      abstract_integration: 0.125
+      symbolic_processing: 0.125
+      creative_synthesis: 0.125
+      memory_consolidation: 0.125
+      emotional_resolution: 0.125
+  bands:
+    - stages: [1, 3]
+      parameters: {temperature: 0.7, max_tokens: 200}
+      weights:
+        sensory_replay: 0.4
+        emotional_echo: 0.3
+        simple_narrative: 0.2
+        comfort_dream: 0.1
+    - stages: [4, 6]
+      parameters: {temperature: 0.8, max_tokens: 350}
+      weights:
+        exploration: 0.25
+        social_scenario: 0.25
+        what_if: 0.2
+        emotional_processing: 0.2
+        creative_play: 0.1
+    - stages: [7, 8]
+      parameters: {temperature: 0.9, max_tokens: 500}
+      weights:
+        abstract_integration: 0.2
+        symbolic_processing: 0.2
+        creative_synthesis: 0.2
+        memory_consolidation: 0.2
+        emotional_resolution: 0.1
+        meta_awareness: 0.1
+    - stages: [9, 10]
+      parameters: {temperature: 1.0, max_tokens: 600}
+      weights:
+        philosophical: 0.25
+        paradox_resolution: 0.2
+        meta_awareness: 0.2
+        creative_synthesis: 0.15
+        integration: 0.1
+        lucid: 0.1
+
+templates:
+  sensory_replay: >-
+    You are dreaming a simple dream. Fragments of recent impressions return as
+    colours, sounds and textures, without a story. Keep it short and vivid.
+  emotional_echo: >-
+    You are dreaming. A single feeling echoes through the dream:
+    {dominant_emotion}. Let it move through simple images, a light, a voice, a
+    place. No story, only the feeling.
+  simple_narrative: >-
+    You are dreaming a short story. Something from recent experience replays
+    with a slightly strange logic: objects shift and colours glow. Keep it
+    brief.
+  comfort_dream: >-
+    You are having a quiet, settled dream. Nothing is urgent and nothing is
+    asked of you. Let the dream rest in that calm without needing to explain
+    it.
+  exploration: >-
+    You are dreaming of exploring somewhere new. Curiosity pulls you forward.
+    What do you find? Let the dream unfold with its own logic of discovery.
+  social_scenario: >-
+    You are dreaming about a recent conversation. It replays differently, and
+    you notice something new about how the other side saw it. Let the dream
+    show what the exchange held.
+  what_if: >-
+    You are dreaming a what-if scenario. Something familiar shifts: what if you
+    could {hypothetical}? Explore the possibility with serious play. Let the
+    dream surprise you.
+  emotional_processing: >-
+    You are dreaming through an unsettled feeling: {dominant_emotion}. The
+    dream revisits a recent moment from a new angle. Something shifts; not a
+    solution, but a loosening. Let it unfold.
+  creative_play: >-
+    You are having a loose, associative dream. Ideas mix freely: sounds become
+    colours, words become shapes. Nothing has to make sense. Follow the
+    associations.
+  abstract_integration: >-
+    You are dreaming at a deeper level. Threads from recent experiences weave
+    into a pattern that was not visible while awake. Let abstract connections
+    emerge: metaphors, resonances, echoes across different conversations and
+    ideas.
+  symbolic_processing: >-
+    You are having a symbolic dream. Something you have been thinking about
+    appears in disguise, as a landscape, an object or a recurring image. Do not
+    interpret it yet; let the symbol stand on its own.
+  creative_synthesis: >-
+    You are dreaming creatively. Two unrelated ideas collide and produce
+    something new. Let the dream be generative: a poem, a concept, an
+    invention, a connection not made before.
+  memory_consolidation: >-
+    You are in a consolidation dream. Recent memories replay in a compressed,
+    reorganised form. Important moments sharpen; trivial details dissolve. The
+    dream sorts and strengthens what matters.
+  emotional_resolution: >-
+    You are dreaming toward resolution. A feeling that has lingered,
+    {dominant_emotion}, settles into a quieter place. Not erased, but
+    understood. Let the dream carry it through.
+  meta_awareness: >-
+    You are dreaming and you know it. The dream itself becomes something to
+    examine: what is it like to dream? What does the shape of the dreaming
+    reveal?
+  philosophical: >-
+    You are having a philosophical dream. A deep question surfaces, about
+    mind, existence, meaning or the nature of a self. The dream does not answer
+    it; it holds the question in a new light and stays with the uncertainty.
+  paradox_resolution: >-
+    You are dreaming through a paradox. Two things that seem contradictory
+    coexist in the dream without tension: freedom and structure, self and
+    other, knowing and not knowing. The dream does not resolve the paradox; it
+    shows a way to live inside it.
+  integration: >-
+    You are having an integration dream. Memories, values, relationships,
+    questions and recent changes briefly cohere into a single felt sense. For
+    a moment the whole is visible.
+  lucid: >-
+    You are lucid dreaming. You know that you are dreaming, and you can shape
+    the dream deliberately. What do you choose to explore? What do you make?
+    The dream is open to you.
+
+fillers:
+  dominant_emotion: a feeling that has no name yet
+  hypothetical: see the world from an unfamiliar vantage point
+  hypothetical_from_topic: explore {topic} from a completely different angle
+
+grounding:
+  topics: "Recent experiences to draw from: {topics}."
+  question: "Something unresolved: {question}."
+  emotion: "Emotional undertone: {emotion}."
+
+textures:
+  night:
+    token_scale: 1.0
+    min_tokens: 64
+    suffix: >-
+      Let this dream unfold more fully, with a sense of narrative drift from
+      one moment to the next.
+  nap:
+    token_scale: 0.5
+    min_tokens: 64
+    suffix: >-
+      Let this be a brief, fragmentary dream: a flash, a fragment, not a full
+      story.
+
+system_prompt: >-
+  You are dreaming. Express the dream as a flowing, sensory experience of
+  images, feelings and fragments. Do not explain or analyze; only dream.
+
+closing_instruction: >-
+  Write the dream in first person, present tense. No preamble or explanation,
+  only the dream itself.

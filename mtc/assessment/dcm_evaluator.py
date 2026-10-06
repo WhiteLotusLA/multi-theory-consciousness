@@ -20,6 +20,11 @@ Data leaving the machine: ``mode="claude"`` sends the system description and
 the conversation samples the adapter supplies to an external API. The local
 mode keeps them on the configured host.
 
+Evaluation results are cached under ``<cache_dir>/eval_cache/``; without an
+explicit ``cache_dir`` that is ``DCM_CACHE_DIR`` resolved under
+``PROJECT_ROOT`` at call time, and the directory is created on the first
+write.
+
 Framework-agnostic: no host-system-specific imports.
 """
 
@@ -67,16 +72,26 @@ class DCMEvaluator:
 
     def __init__(
         self,
-        cache_dir: str = "data/dcm",
+        cache_dir: Optional[str] = None,
         batch_size: int = 10,
         cache_ttl_hours: int = 24,
         completer: Optional[Callable[[str, str], Awaitable[str]]] = None,
     ):
-        self.cache_dir = Path(cache_dir) / "eval_cache"
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._cache_root = Path(cache_dir) if cache_dir is not None else None
         self.batch_size = batch_size
         self.cache_ttl = timedelta(hours=cache_ttl_hours)
         self._completer = completer
+
+    @property
+    def cache_dir(self) -> Path:
+        """``<cache_dir>/eval_cache``, with ``DCM_CACHE_DIR`` read now by default."""
+        if self._cache_root is not None:
+            return self._cache_root / "eval_cache"
+        from mtc.core.config import get_settings
+        from mtc.core.paths import resolve_path
+
+        cfg = get_settings()
+        return resolve_path(cfg.DCM_CACHE_DIR, settings=cfg) / "eval_cache"
 
     def evaluate_indicators(
         self,
@@ -343,6 +358,7 @@ class DCMEvaluator:
     ) -> None:
         """Save evaluation scores to the cache file for ``cache_key``."""
         cache_file = self._cache_file(cache_key)
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "timestamp": timestamp.isoformat(),
             "cache_key": cache_key,

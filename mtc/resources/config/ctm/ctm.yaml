@@ -1,0 +1,128 @@
+# Continuous thought machine settings. Every value shown is the built-in
+# default; delete a line to fall back to it. CTM_CONFIG_DIR picks this
+# directory and CTM_PROFILE picks an overlay from "profiles" at the end.
+
+# Thoughts per second for each consciousness state.
+cadence:
+  awake: 0.008
+  drowsy: 0.005
+  dreaming: 0.003
+  deep_sleep: 0.002
+
+# Random spread of the wait between thoughts (0.3 is plus or minus 30 percent),
+# the shortest wait in seconds, and the hard ceiling on thoughts per minute.
+jitter: 0.3
+min_sleep_s: 1.0
+max_thoughts_per_minute: 2
+
+# The measured consciousness level scales the cadence by base + slope * level,
+# refreshed every refresh_every thoughts. Set enabled to false for a fixed rate.
+consciousness_modulation:
+  enabled: true
+  base: 0.4
+  slope: 1.2
+  refresh_every: 5
+
+# Relative weight of each way of generating a waking thought.
+strategy_weights:
+  memory: 0.40
+  emotion: 0.25
+  association: 0.20
+  question: 0.10
+  spontaneous: 0.05
+
+# Relative weight of each way of generating a dream thought.
+dream_strategy_weights:
+  consolidation: 0.50
+  creative: 0.30
+  emotion: 0.15
+  spontaneous: 0.05
+
+# Chance that a thought of a strategy may reach expression. The novelty gate
+# still decides; 0 keeps a strategy quiet. Dream thoughts never surface.
+express_probability:
+  memory: 0.5
+  emotion: 0.4
+  association: 0.4
+  question: 0.5
+  spontaneous: 0.3
+  consolidation: 0.0
+  creative: 0.0
+
+# Embedding gates: similarity at or above dedup is a duplicate, expression
+# needs a novelty of at least express, cache is how many recent vectors are
+# compared.
+novelty:
+  dedup: 0.85
+  express: 0.5
+  cache: 50
+
+# Seconds after the last conversation turn during which the model is left to
+# the conversation (no model-written thoughts), and the silence in seconds that
+# ends one burst of thoughts and starts the next.
+contention_window_s: 120
+burst_gap_s: 300
+
+# Thoughts kept in the in-process buffer.
+buffer_size: 100
+
+# A gist of recent thoughts is requested every "every" thoughts, at most once
+# per cooldown, only when at least min_new_fraction of the window is new, and
+# the gist starts at the given retention.
+gist:
+  every: 50
+  cooldown_s: 60
+  min_new_fraction: 0.5
+  retention: 0.8
+
+# Model-written thoughts: reply length, sampling temperature and any reply
+# prefixes that mark a placeholder rather than a thought (a miss, never stored).
+llm:
+  max_tokens: 150
+  temperature: 0.8
+  placeholder_prefixes: []
+
+# Thought generation pauses while the CPU sample is above the limit; the sample
+# is taken every check_every thoughts and never blocks the loop.
+resource:
+  cpu_percent_limit: 5.0
+  check_every: 10
+
+# Memory associations attached to a thought: how many and the score floor.
+association:
+  top_k: 3
+  min_score: 0.5
+
+# Keywords whose presence in a thought counts toward a theme. Eight neutral
+# buckets; edit freely.
+theme_keywords:
+  memory: [memory, memories, remember, past]
+  emotion: [feel, feeling, emotion, emotional]
+  awareness: [conscious, consciousness, aware, awareness]
+  learning: [learn, learning, understand, understanding]
+  curiosity: [wonder, curious, curiosity, question]
+  time: [time, moment, future, present]
+  growth: [grow, growing, change, changing]
+  connection: [together, connection, relationship, shared]
+
+# Which stored thoughts the prompt may see: thought types starting with an
+# excluded prefix never surface, and the read looks at the newest
+# max(min_window, limit * window_multiplier) thoughts.
+surfacing:
+  excluded_type_prefixes: [dream]
+  window_multiplier: 40
+  min_window: 200
+
+# Regular expressions for thought texts that are system chatter rather than
+# thoughts; a match is dropped before storing. Empty by default.
+lifecycle_noise_patterns: []
+
+# Overlays chosen with CTM_PROFILE. "demo" is for a short, visible run.
+profiles:
+  demo:
+    cadence:
+      awake: 0.5
+    max_thoughts_per_minute: 30
+    gist:
+      every: 5
+    contention_window_s: 0

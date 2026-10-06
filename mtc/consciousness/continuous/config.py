@@ -11,8 +11,11 @@ sizes and the theme keyword map. The defaults live in the model; the shipped
 ``CTMConfig.load`` reads ``ctm.yaml`` from the directory named by
 ``CTM_CONFIG_DIR`` (relative paths join ``PROJECT_ROOT``; the setting is read at
 call time), applies the overlay named by ``CTM_PROFILE`` and validates the
-result. A missing file means the built-in defaults and ``source`` says
-``defaults``; an unreadable file, an unknown key or an out-of-range value
+result. When the directory is the shipped default (``CTM_CONFIG_DIR`` left at
+``config/ctm`` and no directory passed) and its ``ctm.yaml`` is missing, the
+packaged copy is read and ``source`` says ``package`` (an install from a wheel
+has no project copy). Otherwise a missing file means the built-in defaults and
+``source`` says ``defaults``; an unreadable file, an unknown key or an out-of-range value
 raises ``CTMConfigError`` naming the file. The built-in demo overlay applies
 when the file is missing or has no ``profiles.demo`` entry. PyYAML is imported
 inside ``load``, never at module import. The module holds no thought text and
@@ -33,6 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from mtc.core.config import Settings, get_settings
 from mtc.core.paths import resolve_path
+from mtc.core.resources import resolve_shipped
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +250,8 @@ class CTMConfig(_Model):
 
     @property
     def source(self) -> str:
-        """``file`` when a ctm.yaml was read, ``defaults`` otherwise."""
+        """``file`` for the project's ctm.yaml, ``package`` for the packaged
+        copy, ``defaults`` otherwise."""
         return self._source
 
     @property
@@ -287,7 +292,13 @@ class CTMConfig(_Model):
             data, profiles = _read_file(path)
             source = "file"
         else:
-            logger.info("%s not found; the built-in CTM defaults apply", path)
+            packaged = shipped_file(CONFIG_FILE_NAME, config_dir, settings=cfg)
+            if packaged is not None:
+                data, profiles = _read_file(packaged)
+                source = "package"
+                path = packaged
+            else:
+                logger.info("%s not found; the built-in CTM defaults apply", path)
         if name != "default":
             overlay = profiles.get(name, BUILTIN_PROFILES.get(name))
             if overlay is None:
@@ -301,7 +312,7 @@ class CTMConfig(_Model):
         except ValidationError as exc:
             raise CTMConfigError(f"{path}: {_describe(exc)}") from exc
         config._source = source
-        config._path = path if source == "file" else None
+        config._path = path if source in ("file", "package") else None
         config._profile = name
         return config
 
@@ -314,6 +325,38 @@ def ctm_config_dir(
     return resolve_path(
         config_dir if config_dir is not None else cfg.CTM_CONFIG_DIR, settings=cfg
     )
+
+
+def uses_shipped_dir(
+    config_dir: Optional[Any] = None, *, settings: Optional[Settings] = None
+) -> bool:
+    """True when no directory is passed and ``CTM_CONFIG_DIR`` is its default."""
+    cfg = settings if settings is not None else get_settings()
+    default = Settings.model_fields["CTM_CONFIG_DIR"].default
+    return config_dir is None and cfg.CTM_CONFIG_DIR == default
+
+
+def shipped_file(
+    relative: Any,
+    config_dir: Optional[Any] = None,
+    *,
+    settings: Optional[Settings] = None,
+) -> Optional[Path]:
+    """The packaged copy of a shipped CTM file, or None.
+
+    Only for the shipped default directory, and only when its project copy is
+    missing: an operator's own directory is never filled from the package.
+    """
+    cfg = settings if settings is not None else get_settings()
+    if not uses_shipped_dir(config_dir, settings=cfg):
+        return None
+    default = Settings.model_fields["CTM_CONFIG_DIR"].default
+    source = f"{default}/{Path(relative).as_posix()}"
+    try:
+        path, where = resolve_shipped(source, settings=cfg)
+    except FileNotFoundError:
+        return None
+    return path if where == "package" else None
 
 
 def _read_file(path: Path):

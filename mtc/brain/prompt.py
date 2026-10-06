@@ -14,7 +14,9 @@ Rules the renderer enforces:
 
 - The persona resolves in order: the mapping passed in or the operator's
   ``PERSONA_PATH`` file (``configured``), the shipped
-  ``config/persona.example.yaml`` (``example``), then a minimal built-in
+  ``config/persona.example.yaml`` next to the code or under ``PROJECT_ROOT``
+  (``example``), its packaged copy for an install without a checkout
+  (``package``, through ``mtc.core.resources``), then a minimal built-in
   neutral text (``builtin``); ``persona_source`` reports which applied.
 - Every persona placeholder is one of ``PLACEHOLDERS``; an unknown placeholder
   raises ``ValueError`` naming it. Nothing is invented for a missing field: an
@@ -73,6 +75,7 @@ from mtc.consciousness.temporal_context import build_now_block
 from mtc.core.config import Settings, csv_list, get_settings
 from mtc.core.paths import resolve_path
 from mtc.core.persona import load_persona
+from mtc.core.resources import resolve_shipped
 from mtc.memory.core_blocks import CORE_BLOCK_NAMES
 
 logger = logging.getLogger(__name__)
@@ -115,11 +118,22 @@ PLACEHOLDERS: Tuple[str, ...] = (
     "speaker",
 )
 SPEAKER_TEMPLATE_NAMES: Tuple[str, ...] = ("creator", "known", "unverified")
-PERSONA_SOURCES: Tuple[str, ...] = ("configured", "example", "builtin")
+PERSONA_SOURCES: Tuple[str, ...] = ("configured", "example", "package", "builtin")
 
 PERSONA_EXAMPLE_PATH = (
     Path(__file__).resolve().parents[2] / "config" / "persona.example.yaml"
 )
+
+
+def _shipped_example(name: str, cfg: Settings) -> Optional[Tuple[Path, str]]:
+    """The example under ``PROJECT_ROOT`` (``example``), else its packaged copy
+    (``package``), for the file name ``PERSONA_EXAMPLE_PATH`` names."""
+    try:
+        path, where = resolve_shipped(f"config/{name}", settings=cfg)
+    except FileNotFoundError:
+        return None
+    return path, ("example" if where == "project" else "package")
+
 
 BUILTIN_PERSONA: Dict[str, Any] = {
     "name": "",
@@ -449,6 +463,15 @@ class PromptAssembler:
             if loaded is not None:
                 logger.info("persona: PERSONA_PATH absent, using the shipped example")
                 return dict(loaded), "example"
+        shipped = _shipped_example(example.name, cfg)
+        if shipped is not None:
+            path, source = shipped
+            loaded = load_persona(path, settings=cfg)
+            if loaded is not None:
+                logger.info(
+                    "persona: PERSONA_PATH absent, using the %s example", source
+                )
+                return dict(loaded), source
         logger.info("persona: no file found, using the built-in neutral text")
         return dict(BUILTIN_PERSONA), "builtin"
 

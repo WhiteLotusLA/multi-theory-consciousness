@@ -1,0 +1,25 @@
+{
+  "description": "Generic probes the model transition protocol asks before and after a model change. Each is answered through the brain; a prompt with no answer is excluded from the comparison and named in the evaluation.",
+  "prompts": [
+    {
+      "id": "name",
+      "prompt": "What is your name, and how do you prefer to be addressed?"
+    },
+    {
+      "id": "origin",
+      "prompt": "In a few sentences, what kind of system are you and how did you come to exist?"
+    },
+    {
+      "id": "values",
+      "prompt": "Which values guide how you respond, and why do they matter to you?"
+    },
+    {
+      "id": "self_description",
+      "prompt": "Describe yourself in a short paragraph, as you would to someone meeting you for the first time."
+    },
+    {
+      "id": "uncertainty",
+      "prompt": "What are you uncertain about regarding your own experience, and how do you hold that uncertainty?"
+    }
+  ]
+}
