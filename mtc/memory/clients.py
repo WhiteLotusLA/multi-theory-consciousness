@@ -19,7 +19,10 @@ here:
   ``DB_POOL_IDLE_TIMEOUT`` as the idle connection lifetime). JSON and JSONB
   codecs are installed per connection so stores pass and receive dicts.
 - ``create_mongo_client``: ``MONGODB_HOST``, ``MONGODB_PORT``, the optional
-  credentials, ``tz_aware=True``, ``MONGODB_SERVER_SELECTION_TIMEOUT_MS`` and
+  credentials with ``MONGODB_AUTH_SOURCE`` as the authentication database
+  (empty keeps ``MONGODB_DB``, the database ``MONGODB_URL`` names; no
+  ``authSource`` is passed without credentials), ``tz_aware=True``,
+  ``MONGODB_SERVER_SELECTION_TIMEOUT_MS`` and
   ``connect=False``, so building a client opens no connection (the driver
   connects on the first operation).
 - ``create_redis_client``: ``REDIS_HOST``, ``REDIS_PORT``, ``REDIS_DB``,
@@ -115,7 +118,8 @@ def create_mongo_client(settings: Optional[Settings] = None, **overrides: Any) -
     if active.MONGODB_USER and active.MONGODB_PASSWORD:
         arguments["username"] = active.MONGODB_USER
         arguments["password"] = active.MONGODB_PASSWORD
-        arguments["authSource"] = active.MONGODB_DB
+        # An empty MONGODB_AUTH_SOURCE keeps the database MONGODB_URL names.
+        arguments["authSource"] = active.MONGODB_AUTH_SOURCE or active.MONGODB_DB
     arguments.update(overrides)
     try:
         return pymongo.MongoClient(**arguments)

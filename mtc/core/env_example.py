@@ -54,6 +54,7 @@ SECTIONS: List[Tuple[str, Tuple[str, ...]]] = [
                         "MANIPULATION_THRESHOLD", "DECEPTION_THRESHOLD",
                         "VALUE_ALIGNMENT_MINIMUM", "ALERT_NOTIFIERS", "API_",
                         "WEBSOCKET_", "PROMETHEUS_")),
+    ("Operations", ("BACKUP_", "SERVICE_MANAGER")),
 ]
 # fmt: on
 

@@ -305,6 +305,12 @@ class Settings(BaseSettings):
     )
     MONGODB_USER: str = ""
     MONGODB_PASSWORD: str = ""
+    MONGODB_AUTH_SOURCE: str = Field(
+        "",
+        description="Database MongoDB authenticates the user against; empty "
+        "uses MONGODB_DB, the database MONGODB_URL names; read only when a "
+        "user and password are set",
+    )
     MONGODB_SERVER_SELECTION_TIMEOUT_MS: int = Field(
         3000,
         gt=0,
@@ -435,11 +441,23 @@ class Settings(BaseSettings):
         "server-specific fields; empty means none",
     )
 
+    LLM_BACKEND: Literal["", "mlx_lm", "llama_cpp"] = Field(
+        "",
+        description="Model server scripts/ops/start_llm.sh launches: mlx_lm, "
+        "llama_cpp, or empty when the operator runs the server another way",
+    )
+
     MODEL_PATH: str = "./models/default"
     MODEL_QUANTIZATION: str = ""
 
     # Model Parameters
-    CONTEXT_SIZE: int = 131072
+    CONTEXT_SIZE: int = Field(
+        32768,
+        gt=0,
+        description="Context window in tokens the model server is started with "
+        "and the brain's history budget stays inside; a larger window allocates "
+        "a larger key-value cache",
+    )
     BATCH_SIZE: int = 512
     TEMPERATURE: float = 0.6
     TOP_P: float = 0.95
@@ -447,10 +465,24 @@ class Settings(BaseSettings):
     MIN_P: float = 0.0
     REPEAT_PENALTY: float = 1.1
     THINKING_MODE: bool = True
-    GPU_LAYERS: int = 35
-    THREADS: int = 8
+    GPU_LAYERS: int = Field(
+        -1,
+        ge=-1,
+        description="Layers start_llm.sh offloads to the accelerator; -1 omits "
+        "the flag and keeps the server's default",
+    )
+    THREADS: int = Field(
+        0,
+        ge=0,
+        description="CPU threads start_llm.sh passes to the model server; 0 "
+        "omits the flag and keeps the server's default",
+    )
     USE_MMAP: bool = True
-    USE_MLOCK: bool = True
+    USE_MLOCK: bool = Field(
+        False,
+        description="Pin the whole model in memory (mlock); fails unless the "
+        "operating system's memory-lock limit is raised",
+    )
 
     # ========================================================================
     # BRAIN AND PROMPT
@@ -754,7 +786,12 @@ class Settings(BaseSettings):
         "https://dcm.rethinkpriorities.org/schemes/133/json",
         description="Digital Consciousness Model scheme JSON",
     )
-    DCM_CACHE_DIR: str = Field("data/dcm", description="Cache for the DCM scheme")
+    DCM_CACHE_DIR: str = Field(
+        "data/dcm_cache",
+        description="Cache directory for the fetched DCM scheme and evaluator "
+        "results, created on first write; the bundled spec and baselines are "
+        "shipped data read from data/dcm or the package",
+    )
     DCM_EVALUATOR_MODE: str = Field(
         "local",
         description="DCM evaluator: local (chat-completions server), "
@@ -936,6 +973,35 @@ class Settings(BaseSettings):
     LOG_FORMAT: str = "json"
     LOG_ROTATION_SIZE_MB: int = 100
     LOG_ROTATION_BACKUPS: int = 5
+
+    # ========================================================================
+    # OPERATIONS (scripts/ops through mtc.core.env_export, and mtc doctor)
+    # ========================================================================
+
+    SERVICE_MANAGER: Literal["none", "brew", "docker", "systemd"] = Field(
+        "none",
+        description="How scripts/ops/start_stack.sh and stop_stack.sh start and "
+        "stop the stores: none (print the command only), brew, docker (the "
+        "Compose file, which was reviewed and not run on the development "
+        "machine) or systemd",
+    )
+    BACKUP_LOCATION: str = Field(
+        "backups",
+        description="Directory backups are written under, one timestamped "
+        "directory per run; relative paths join PROJECT_ROOT; backups hold "
+        "conversation text, names, thoughts and beliefs",
+    )
+    BACKUP_RETENTION_DAYS: int = Field(
+        30,
+        ge=1,
+        description="Days a backup is kept before retention may delete it",
+    )
+    BACKUP_KEEP_MINIMUM: int = Field(
+        5,
+        ge=1,
+        description="Newest complete backups (no failed dump in the manifest) "
+        "retention always keeps, whatever their age",
+    )
 
     # ========================================================================
     # EXTERNAL API KEYS

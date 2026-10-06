@@ -1,0 +1,23 @@
+# Qdrant configuration for a host-installed release binary.
+#
+# scripts/ops/start_stack.sh runs `qdrant --config-path config/qdrant.yaml`
+# from the project directory, so the relative paths below resolve inside the
+# project (data/ is ignored by git). Keys follow Qdrant's configuration
+# reference; anything not set here keeps Qdrant's default.
+
+log_level: INFO
+
+storage:
+  # Collections and points (the MTC collection holds memory embeddings).
+  storage_path: ./data/qdrant/storage
+  # Snapshots written by the backup script.
+  snapshots_path: ./data/qdrant/snapshots
+
+service:
+  # Loopback only; MTC reaches it through QDRANT_HOST and QDRANT_PORT.
+  host: 127.0.0.1
+  http_port: 6333
+  grpc_port: 6334
+
+# No anonymous usage statistics are sent.
+telemetry_disabled: true

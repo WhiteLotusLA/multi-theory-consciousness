@@ -75,6 +75,7 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_MONGODB_DB` | `(empty)` | MongoDB database; empty derives <DB_PREFIX>_neural |
 | `MTC_MONGODB_USER` | `(empty)` |  |
 | `MTC_MONGODB_PASSWORD` | `(empty)` |  |
+| `MTC_MONGODB_AUTH_SOURCE` | `(empty)` | Database MongoDB authenticates the user against; empty uses MONGODB_DB, the database MONGODB_URL names; read only when a user and password are set |
 | `MTC_MONGODB_SERVER_SELECTION_TIMEOUT_MS` | `3000` | Milliseconds the MongoDB client waits for a reachable server |
 | `MTC_REDIS_HOST` | `localhost` |  |
 | `MTC_REDIS_PORT` | `6379` |  |
@@ -111,9 +112,10 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_LLM_REQUEST_TIMEOUT_S` | `600.0` | Seconds the local provider waits for a non-streamed reply or between streamed bytes (raised for streams to GENERATION_TIMEOUT_S plus 60 when that is longer) |
 | `MTC_LLM_MAX_TOKENS` | `4096` | Default completion budget in tokens when a caller sets none |
 | `MTC_LLM_EXTRA_BODY` | `{}` | JSON object merged last into every local request body, for server-specific fields; empty means none |
+| `MTC_LLM_BACKEND` | `(empty)` | Model server scripts/ops/start_llm.sh launches: mlx_lm, llama_cpp, or empty when the operator runs the server another way |
 | `MTC_MODEL_PATH` | `./models/default` |  |
 | `MTC_MODEL_QUANTIZATION` | `(empty)` |  |
-| `MTC_CONTEXT_SIZE` | `131072` |  |
+| `MTC_CONTEXT_SIZE` | `32768` | Context window in tokens the model server is started with and the brain's history budget stays inside; a larger window allocates a larger key-value cache |
 | `MTC_BATCH_SIZE` | `512` |  |
 | `MTC_TEMPERATURE` | `0.6` |  |
 | `MTC_TOP_P` | `0.95` |  |
@@ -121,10 +123,10 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_MIN_P` | `0.0` |  |
 | `MTC_REPEAT_PENALTY` | `1.1` |  |
 | `MTC_THINKING_MODE` | `true` |  |
-| `MTC_GPU_LAYERS` | `35` |  |
-| `MTC_THREADS` | `8` |  |
+| `MTC_GPU_LAYERS` | `-1` | Layers start_llm.sh offloads to the accelerator; -1 omits the flag and keeps the server's default |
+| `MTC_THREADS` | `0` | CPU threads start_llm.sh passes to the model server; 0 omits the flag and keeps the server's default |
 | `MTC_USE_MMAP` | `true` |  |
-| `MTC_USE_MLOCK` | `true` |  |
+| `MTC_USE_MLOCK` | `false` | Pin the whole model in memory (mlock); fails unless the operating system's memory-lock limit is raised |
 | `ANTHROPIC_API_KEY` | `(empty)` | Optional; enables the Anthropic provider and DCM evaluator mode |
 | `MTC_ANTHROPIC_MODEL` | `(empty)` | Anthropic model id for the DCM evaluator's claude mode and the Anthropic provider; empty disables claude mode |
 | `MTC_ANTHROPIC_MAX_TOKENS` | `8192` | Default completion budget for the Anthropic provider |
@@ -258,7 +260,7 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_TRACK_INDICATORS` | `true` |  |
 | `MTC_METRICS_UPDATE_INTERVAL` | `60` |  |
 | `MTC_DCM_API_URL` | `https://dcm.rethinkpriorities.org/schemes/133/json` | Digital Consciousness Model scheme JSON |
-| `MTC_DCM_CACHE_DIR` | `data/dcm` | Cache for the DCM scheme |
+| `MTC_DCM_CACHE_DIR` | `data/dcm_cache` | Cache directory for the fetched DCM scheme and evaluator results, created on first write; the bundled spec and baselines are shipped data read from data/dcm or the package |
 | `MTC_DCM_EVALUATOR_MODE` | `local` | DCM evaluator: local (chat-completions server), claude (Anthropic API) or manual |
 | `MTC_METRICS_EXPORT_INTERVAL` | `30` |  |
 
@@ -320,3 +322,12 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_WEBSOCKET_PING_TIMEOUT` | `10` |  |
 | `MTC_PROMETHEUS_ENABLED` | `false` |  |
 | `MTC_PROMETHEUS_PORT` | `9090` |  |
+
+## Operations
+
+| Variable | Default | Description |
+|---|---|---|
+| `MTC_SERVICE_MANAGER` | `none` | How scripts/ops/start_stack.sh and stop_stack.sh start and stop the stores: none (print the command only), brew, docker (the Compose file, which was reviewed and not run on the development machine) or systemd |
+| `MTC_BACKUP_LOCATION` | `backups` | Directory backups are written under, one timestamped directory per run; relative paths join PROJECT_ROOT; backups hold conversation text, names, thoughts and beliefs |
+| `MTC_BACKUP_RETENTION_DAYS` | `30` | Days a backup is kept before retention may delete it |
+| `MTC_BACKUP_KEEP_MINIMUM` | `5` | Newest complete backups (no failed dump in the manifest) retention always keeps, whatever their age |

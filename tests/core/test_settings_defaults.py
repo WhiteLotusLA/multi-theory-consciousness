@@ -80,5 +80,5 @@ def test_removed_keys_are_gone(clean_env):
 def test_dcm_settings_exist(clean_env):
     s = Settings()
     assert s.DCM_EVALUATOR_MODE == "local"
-    assert s.DCM_CACHE_DIR == "data/dcm"
+    assert s.DCM_CACHE_DIR == "data/dcm_cache"
     assert s.DCM_API_URL.startswith("https://")

@@ -1,0 +1,115 @@
+# MTC stores for a local machine: PostgreSQL, MongoDB, Redis, Qdrant and Neo4j.
+#
+# Written and reviewed against the vendors' official image documentation; it
+# was not run on the development machine (Docker is not installed there). See
+# docker/README.md for the verified image tags, healthcheck tools and data
+# paths.
+#
+# Start the services the setup enabled, reading the project's .env:
+#   docker compose --env-file .env -f docker/docker-compose.yml up -d --wait postgres mongo qdrant
+# (or: make db-up DB_SERVICES="postgres mongo qdrant")
+#
+# Every port is published on 127.0.0.1 only. Defaults below equal the Settings
+# defaults for DB_PREFIX=mtc; the wizard writes explicit values into .env.
+# The model server is not here: run it on the host or use the mock provider.
+
+name: mtc
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${MTC_POSTGRES_USER:-mtc}
+      POSTGRES_PASSWORD: ${MTC_POSTGRES_PASSWORD:?set MTC_POSTGRES_PASSWORD in .env (mtc init generates one)}
+      POSTGRES_DB: ${MTC_POSTGRES_DB:-mtc_consciousness}
+    ports:
+      - "127.0.0.1:${MTC_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - mtc_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:8
+    # No authentication: the port is published on loopback only. Enable
+    # authentication (and MTC_MONGODB_AUTH_SOURCE) for any non-local use.
+    ports:
+      - "127.0.0.1:${MTC_MONGODB_PORT:-27017}:27017"
+    volumes:
+      - mtc_mongodata:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    # Append-only persistence; when a memory limit is set, keys with a TTL are
+    # evicted first (some key families carry none).
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "volatile-lru"]
+    ports:
+      - "127.0.0.1:${MTC_REDIS_PORT:-6379}:6379"
+    volumes:
+      - mtc_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.2
+    environment:
+      QDRANT__TELEMETRY_DISABLED: "true"
+    ports:
+      - "127.0.0.1:${MTC_QDRANT_PORT:-6333}:6333"
+    volumes:
+      - mtc_qdrantdata:/qdrant/storage
+    healthcheck:
+      # The image ships neither curl nor wget; bash asks the readiness endpoint.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333 && printf 'GET /readyz HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      # Set MTC_NEO4J_PASSWORD (at least eight characters) before starting this
+      # service; the image refuses to start without a valid one.
+      NEO4J_AUTH: neo4j/${MTC_NEO4J_PASSWORD:-}
+      # Small heap and page cache for a small host; raise both for a large graph.
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 256m
+    ports:
+      - "127.0.0.1:7687:7687"
+    volumes:
+      - mtc_neo4jdata:/data
+    healthcheck:
+      # The HTTP endpoint answers without credentials, so no password is
+      # placed on a command line.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/7474 && printf 'GET / HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  mtc_pgdata:
+  mtc_mongodata:
+  mtc_redisdata:
+  mtc_qdrantdata:
+  mtc_neo4jdata:

@@ -44,6 +44,12 @@ logs/
 *.log
 *.pid
 
+# Backups (BACKUP_LOCATION); they hold conversation text, names and beliefs
+backups/
+
+# PyPhi's joblib cache when PyPhi is imported outside its prepared home
+__pyphi_cache__/
+
 # Models
 mlx_models/
 models/

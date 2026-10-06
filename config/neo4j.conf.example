@@ -1,0 +1,25 @@
+# Neo4j 5 configuration example for a host install (Homebrew or apt).
+#
+# Copy this file as neo4j.conf into a directory of your choice and set
+# NEO4J_CONF to that directory (NEO4J_CONF names the directory that holds
+# neo4j.conf, not the file itself). Keys follow the Neo4j 5 operations manual.
+
+# Listen on the loopback interface only.
+server.default_listen_address=127.0.0.1
+
+# The database MTC uses (NEO4J_DATABASE, default neo4j). Read only when the
+# DBMS is first initialized; the community edition holds one graph.
+initial.dbms.default_database=neo4j
+
+# Memory for a small host. Scale the heap and the page cache with the size of
+# the graph and the machine; `neo4j-admin server memory-recommendation`
+# prints values for a given machine.
+server.memory.heap.initial_size=512m
+server.memory.heap.max_size=512m
+server.memory.pagecache.size=256m
+
+# Authentication stays on.
+dbms.security.auth_enabled=true
+
+# Directories (data, logs, plugins and the rest) keep their defaults, which
+# are relative to NEO4J_HOME.
