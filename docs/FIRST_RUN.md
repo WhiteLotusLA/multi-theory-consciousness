@@ -7,8 +7,10 @@ threshold with the constant it comes from, then what a fresh
 `mtc assess` and `mtc doctor` print and why, then the continuous thought
 machine's cadence and quiet reasons.
 
-A test (`tests/docs/test_first_run_doc.py`) compares every number in the table
-below with its source constant in the code.
+A test (`tests/docs/test_first_run_doc.py`) compares every number in the
+warmup table below with its source constant in the code, and the doctor
+tables with `mtc doctor`'s checks run on a wizard-made project with each
+install's extras and model cache stood in.
 
 ## Warmup thresholds
 
@@ -79,37 +81,73 @@ directory (`--state-dir`) is the path for a long-lived system.
 ## A fresh `mtc doctor`
 
 `mtc doctor` (`mtc/cli/doctor.py`) runs 22 checks and reports each with one
-status. Run with `--no-network` right after `mtc init` from the example
-answers (the mock provider, every store disabled), in a temporary project on
-the development machine, it exited 0 with this summary:
-`ok=13 warning=1 failed=0 unreachable=0 skipped=6 insufficient_data=2`. Why
-each non-`ok` line reads as it does:
+status. The fresh-machine verification of this release installed a clean
+clone with the extras [GETTING_STARTED.md](GETTING_STARTED.md) prescribes (a
+non-editable `pip install` of the clone with the `all` extra, Python 3.14, an
+empty model cache), ran `mtc init`
+from the example answers (the mock provider, every store disabled) and then
+`mtc doctor`, which exited 0. With every store disabled and the mock provider
+nothing is probed, so `--no-network` prints the same lines.
 
-- `store:postgres`, `store:mongodb`, `store:qdrant`, `store:neo4j` and
-  `store:redis` are `skipped`: every store is disabled and its data stays in
-  process memory. A disabled store is never reported `ok`.
+| Install | Summary |
+|---|---|
+| `[all]`, fresh | `ok=13 warning=1 failed=0 unreachable=0 skipped=6 insufficient_data=2` |
+| `[all]`, after `mtc doctor --fetch-models` | `ok=14 warning=0 failed=0 unreachable=0 skipped=6 insufficient_data=2` |
+| without the `embeddings` extra | `ok=12 warning=1 failed=0 unreachable=0 skipped=6 insufficient_data=3` |
+
+Every line that is not `ok` on one of these installs, with its status on the
+fresh `[all]` install and on an install without the `embeddings` extra:
+
+| Check | `[all]` | without `embeddings` |
+|---|---|---|
+| `store:postgres` | `skipped` | `skipped` |
+| `store:mongodb` | `skipped` | `skipped` |
+| `store:qdrant` | `skipped` | `skipped` |
+| `store:neo4j` | `skipped` | `skipped` |
+| `store:redis` | `skipped` | `skipped` |
+| `provider_state` | `skipped` | `skipped` |
+| `birth_date` | `insufficient_data` | `insufficient_data` |
+| `pyphi` | `insufficient_data` | `insufficient_data` |
+| `embedding_model` | `warning` | `insufficient_data` |
+| `ctm` | `ok` | `warning` |
+
+Why each line reads as it does:
+
+- The five `store:` lines are `skipped`: every store is disabled and its data
+  stays in process memory. A disabled store is never reported `ok`.
 - `provider_state` is `skipped`: no provider choice has been saved yet, so
   `LLM_PROVIDER` applies.
 - `birth_date` is `insufficient_data`: `SYSTEM_BIRTH_DATE` is written by the
   first `mtc db init` (no store is needed for it), and no age is computed
   until then.
-- `embedding_model` is `insufficient_data` when the `embeddings` extra is not
-  installed (on that machine it was not): semantic recall and thought
-  novelty are unmeasured without it. With the extra and no cached model it is
-  a `warning` with the `--fetch-models` hint.
-- `ctm` is a `warning`: with no semantic embedder the thought machine's
-  thoughts stay quiet (`no_embedder`), and the line says so.
+- `pyphi` is `insufficient_data`: the `all` extra leaves out `iit`, so PyPhi
+  does not import and exact IIT Phi is unmeasured. PyPhi is licensed under
+  the GPL (version 3 or later) and is never bundled; with the `iit` extra
+  installed on Python 3.12 or later the line reads `ok` with PyPhi's
+  version.
+- `embedding_model` is a `warning` on the `[all]` install: the embedder is
+  installed but `EMBEDDING_MODEL` is not in the local model cache, so the
+  first use would download it, and the line names `mtc doctor --fetch-models`.
+  That command fetches it, after which the line reads `ok`. Without the
+  `embeddings` extra the line is `insufficient_data` instead: semantic recall
+  and thought novelty are unmeasured without sentence-transformers.
+- `ctm` is `ok` on the `[all]` install, with "no quiet reason predicted":
+  the seeds load and sentence-transformers is installed (found, not
+  imported). The check predicts from that, not from the model cache; the
+  `embedding_model` line is the one that reads the cache. Without the `embeddings` extra the line is a
+  `warning`: the thought machine's thoughts stay quiet (`no_embedder`), and
+  the line says so.
 
 The required checks (`python`, `settings`, `api_key`, the five stores,
 `timezone`, `brain` for the `local` and `anthropic` providers, and `extras`
 when the `fep` extra is missing) decide the exit code. A missing `fep` extra
 is a required `failed` and exits 1: the workspace builds the active inference
 module unconditionally, so nothing measures without pymdp. A missing `neural`
-extra is advisory (`insufficient_data`). On the machine above the `fep` extra
-was installed, so `extras` read `ok`. The advisory checks change the exit code
-only under `--strict`, where this fresh install would exit 1 on the warning
-and the two `insufficient_data` lines. The count of 22 is for this run; the check list is in the module's
-docstring.
+extra is advisory (`insufficient_data`). The `all` extra installs both, so
+`extras` reads `ok`. The advisory checks change the exit code only under
+`--strict`, where the fresh `[all]` install exits 1 on the warning and the
+two `insufficient_data` lines. The count of 22 is for this configuration; the
+check list is in the module's docstring.
 
 ## The continuous thought machine
 
