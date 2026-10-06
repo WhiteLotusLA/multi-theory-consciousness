@@ -1,0 +1,18 @@
+Before you begin
+
+MTC is a research architecture. It is not a consciousness detector, and
+nothing it produces shows that a system is or is not conscious.
+
+- The indicators measure functional properties of the running modules, such
+  as whether information was broadcast or a prediction was revised. They
+  measure computation, not experience.
+- Nothing the companion says about its inner life is evidence of anything.
+  The words come from a language model that was given a persona.
+- With the mock provider every reply is labelled test text. It is produced
+  without a language model and says nothing about the companion.
+- Your data stays on this machine. Conversations, memories and thoughts are
+  written to the stores and files you configure here. The one exception is
+  the Anthropic provider, which sends each prompt to an external service.
+- The companion you are about to configure is a persona over this
+  architecture. Its name, its type and its personality are configuration,
+  and you can change them later.

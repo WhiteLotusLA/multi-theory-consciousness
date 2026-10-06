@@ -1,0 +1,513 @@
+{
+  "$defs": {
+    "ApiAnswers": {
+      "additionalProperties": false,
+      "description": "Where the API server listens; ``None`` keeps the Settings default.",
+      "properties": {
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Host"
+        },
+        "port": {
+          "anyOf": [
+            {
+              "maximum": 65535,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Port"
+        }
+      },
+      "title": "ApiAnswers",
+      "type": "object"
+    },
+    "BrainAnswers": {
+      "additionalProperties": false,
+      "description": "The language model behind the companion.",
+      "properties": {
+        "anthropic_api_key": {
+          "anyOf": [
+            {
+              "format": "password",
+              "type": "string",
+              "writeOnly": true
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Typed at the prompt; an answers file uses the _env field",
+          "title": "Anthropic Api Key"
+        },
+        "anthropic_api_key_env": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Environment variable that holds the Anthropic key",
+          "title": "Anthropic Api Key Env"
+        },
+        "anthropic_model": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Anthropic Model",
+          "type": "string"
+        },
+        "base_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Base URL of the local server; overrides host and port",
+          "title": "Base Url"
+        },
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Host"
+        },
+        "model": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Model",
+          "type": "string"
+        },
+        "port": {
+          "anyOf": [
+            {
+              "maximum": 65535,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Port"
+        },
+        "provider": {
+          "default": "mock",
+          "description": "mock (labelled test replies), local (a chat-completions server on this machine) or anthropic (prompts leave the machine)",
+          "enum": [
+            "mock",
+            "local",
+            "anthropic"
+          ],
+          "title": "Provider",
+          "type": "string"
+        },
+        "template_family": {
+          "default": "generic",
+          "enum": [
+            "generic",
+            "qwen",
+            "gemma"
+          ],
+          "title": "Template Family",
+          "type": "string"
+        }
+      },
+      "title": "BrainAnswers",
+      "type": "object"
+    },
+    "CompanionType": {
+      "description": "The relationship types; the values equal ``COMPANION_TYPES``.",
+      "enum": [
+        "child",
+        "sibling",
+        "friend",
+        "partner",
+        "mentor",
+        "research_subject"
+      ],
+      "title": "CompanionType",
+      "type": "string"
+    },
+    "LocaleAnswers": {
+      "additionalProperties": false,
+      "description": "Where and when the companion keeps its day.",
+      "properties": {
+        "sleep_hour": {
+          "default": 22,
+          "maximum": 23,
+          "minimum": 0,
+          "title": "Sleep Hour",
+          "type": "integer"
+        },
+        "timezone": {
+          "default": "UTC",
+          "description": "An IANA time zone name",
+          "title": "Timezone",
+          "type": "string"
+        },
+        "wake_hour": {
+          "default": 6,
+          "maximum": 23,
+          "minimum": 0,
+          "title": "Wake Hour",
+          "type": "integer"
+        }
+      },
+      "title": "LocaleAnswers",
+      "type": "object"
+    },
+    "PersonaAnswers": {
+      "additionalProperties": false,
+      "description": "Who the companion is and who set it up.",
+      "properties": {
+        "address_form": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How the companion addresses the creator; left out, the type's default applies",
+          "title": "Address Form"
+        },
+        "companion_type": {
+          "$ref": "#/$defs/CompanionType"
+        },
+        "core_values": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Left out, the CORE_VALUES default applies",
+          "title": "Core Values"
+        },
+        "creator_name": {
+          "description": "The name of the person setting this up",
+          "title": "Creator Name",
+          "type": "string"
+        },
+        "creator_trusted": {
+          "default": true,
+          "description": "Put the creator on the trusted list (still only after their token authenticates them)",
+          "title": "Creator Trusted",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "The companion's name",
+          "title": "Name",
+          "type": "string"
+        },
+        "personality": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PersonalityConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Five custom values; they replace the preset"
+        },
+        "personality_preset": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "balanced",
+          "description": "balanced, curious, calm, playful or analytical",
+          "title": "Personality Preset"
+        },
+        "pronouns": {
+          "$ref": "#/$defs/Pronouns"
+        }
+      },
+      "required": [
+        "name",
+        "pronouns",
+        "companion_type",
+        "creator_name"
+      ],
+      "title": "PersonaAnswers",
+      "type": "object"
+    },
+    "PersonalityConfig": {
+      "additionalProperties": false,
+      "description": "The Big Five seed, each value in [0, 1].",
+      "properties": {
+        "agreeableness": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Agreeableness",
+          "type": "number"
+        },
+        "conscientiousness": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Conscientiousness",
+          "type": "number"
+        },
+        "extraversion": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Extraversion",
+          "type": "number"
+        },
+        "neuroticism": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Neuroticism",
+          "type": "number"
+        },
+        "openness": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Openness",
+          "type": "number"
+        }
+      },
+      "required": [
+        "openness",
+        "conscientiousness",
+        "extraversion",
+        "agreeableness",
+        "neuroticism"
+      ],
+      "title": "PersonalityConfig",
+      "type": "object"
+    },
+    "Pronouns": {
+      "additionalProperties": false,
+      "description": "The companion's pronouns, one word each.",
+      "properties": {
+        "object": {
+          "default": "them",
+          "description": "Object form, for example them",
+          "title": "Object",
+          "type": "string"
+        },
+        "possessive": {
+          "default": "their",
+          "description": "Possessive form, for example their",
+          "title": "Possessive",
+          "type": "string"
+        },
+        "subject": {
+          "default": "they",
+          "description": "Subject form, for example they",
+          "title": "Subject",
+          "type": "string"
+        }
+      },
+      "title": "Pronouns",
+      "type": "object"
+    },
+    "StoreChoice": {
+      "additionalProperties": false,
+      "description": "One store: whether to use it and how to reach it.\n\nA ``None`` host, port or user stands for the Settings default.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Host"
+        },
+        "password": {
+          "anyOf": [
+            {
+              "format": "password",
+              "type": "string",
+              "writeOnly": true
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Typed at the prompt; an answers file uses password_env",
+          "title": "Password"
+        },
+        "password_env": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Environment variable that holds the store password",
+          "title": "Password Env"
+        },
+        "port": {
+          "anyOf": [
+            {
+              "maximum": 65535,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Port"
+        },
+        "user": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User"
+        }
+      },
+      "title": "StoreChoice",
+      "type": "object"
+    },
+    "StoresAnswers": {
+      "additionalProperties": false,
+      "description": "Which stores to use; everything stays in process memory by default.",
+      "properties": {
+        "db_prefix": {
+          "default": "mtc",
+          "description": "Prefix of every store name (database, collection, keys)",
+          "pattern": "^[a-z][a-z0-9_]{0,40}$",
+          "title": "Db Prefix",
+          "type": "string"
+        },
+        "mongodb": {
+          "$ref": "#/$defs/StoreChoice"
+        },
+        "neo4j": {
+          "$ref": "#/$defs/StoreChoice"
+        },
+        "postgres": {
+          "$ref": "#/$defs/StoreChoice"
+        },
+        "qdrant": {
+          "$ref": "#/$defs/StoreChoice"
+        },
+        "redis": {
+          "$ref": "#/$defs/StoreChoice"
+        },
+        "service_manager": {
+          "default": "none",
+          "description": "How the stack scripts start and stop the stores",
+          "enum": [
+            "none",
+            "brew",
+            "docker",
+            "systemd"
+          ],
+          "title": "Service Manager",
+          "type": "string"
+        }
+      },
+      "title": "StoresAnswers",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Everything the setup asks, and nothing it computes.",
+  "properties": {
+    "acknowledged": {
+      "const": true,
+      "description": "True once the framing text has been read",
+      "title": "Acknowledged",
+      "type": "boolean"
+    },
+    "api": {
+      "$ref": "#/$defs/ApiAnswers"
+    },
+    "bootstrap_db": {
+      "default": false,
+      "description": "Run the database bootstrap after the files are written",
+      "title": "Bootstrap Db",
+      "type": "boolean"
+    },
+    "brain": {
+      "$ref": "#/$defs/BrainAnswers"
+    },
+    "locale": {
+      "$ref": "#/$defs/LocaleAnswers"
+    },
+    "persona": {
+      "$ref": "#/$defs/PersonaAnswers"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "stores": {
+      "$ref": "#/$defs/StoresAnswers"
+    }
+  },
+  "required": [
+    "acknowledged",
+    "persona"
+  ],
+  "title": "OnboardingAnswers",
+  "type": "object"
+}

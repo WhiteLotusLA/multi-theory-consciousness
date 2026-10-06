@@ -14,9 +14,13 @@ and the Big Five seeds ``OPENNESS`` to ``NEUROTICISM``.
   this framework, the self-knowledge line every companion type shares (it
   knows it is an AI research system and does not claim certainty about its
   own consciousness), the core values, and the persona's pronouns and
-  self-description when configured.
+  self-description when configured. A pronoun mapping renders as
+  ``subject/object/possessive``; a self-description that already carries
+  the self-knowledge line adds the rest of its text, so the line is
+  stated once.
 - ``persona``: the Big Five seed and the communication-style notes when
-  configured.
+  configured, closed with one sentence mark whether or not the notes end
+  in one.
 - ``human``: the creator's name, address form and relationship label. It
   holds no trust value, no bond strength, no birth date and no model name:
   trust comes only from token-checked speaker entries, never from a block.
@@ -63,11 +67,35 @@ NEUTRAL_TEMPLATES: Dict[str, str] = {
     "human": "{creator_name} is the {creator_relationship} of {system_name}.",
 }
 
+PRONOUN_KEYS = ("subject", "object", "possessive")
+
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
+_SENTENCE_MARKS = (".", "!", "?")
 
 
 def _text(value: Any) -> str:
     return str(value).strip() if value is not None else ""
+
+
+def _pronouns(value: Any) -> str:
+    """A pronoun mapping as ``subject/object/possessive``; other text as written."""
+    if isinstance(value, Mapping):
+        parts = [_text(value.get(key)) for key in PRONOUN_KEYS]
+        return "/".join(part for part in parts if part)
+    return _text(value)
+
+
+def _closed(text: str) -> str:
+    """``text`` ending in one sentence mark."""
+    return text if text.endswith(_SENTENCE_MARKS) else f"{text}."
+
+
+def _without(text: str, sentence: str) -> str:
+    """``text`` without ``sentence``; left as written when it holds no copy."""
+    flat = " ".join(text.split())
+    if sentence not in flat:
+        return text
+    return " ".join(flat.replace(sentence, " ").split())
 
 
 def _section(persona: Mapping[str, Any], key: str) -> Mapping[str, Any]:
@@ -123,7 +151,7 @@ def render_core_blocks(
         "creator_address": creator_address,
         "creator_relationship": cfg.CREATOR_RELATIONSHIP,
         "core_values": _core_values(persona, cfg),
-        "pronouns": _text(persona.get("pronouns")),
+        "pronouns": _pronouns(persona.get("pronouns")),
     }
     traits: Dict[str, str] = {}
     for trait in BIG_FIVE_TRAITS:
@@ -134,14 +162,18 @@ def render_core_blocks(
     identity = _fill(NEUTRAL_TEMPLATES["identity"], values)
     if values["pronouns"]:
         identity += f" Pronouns: {values['pronouns']}."
+    # The template above already states the self-knowledge line, with the
+    # name filled or still as a placeholder in the persona's own text.
     description = _text(persona.get("self_description"))
+    for line in (_fill(SELF_KNOWLEDGE_LINE, values), SELF_KNOWLEDGE_LINE):
+        description = _without(description, line)
     if description:
         identity += f" {description}"
 
     persona_block = _fill(NEUTRAL_TEMPLATES["persona"], {**values, **traits})
     style = _text(persona.get("communication_style"))
     if style:
-        persona_block += f" Communication style: {style}."
+        persona_block += f" Communication style: {_closed(style)}"
 
     human = _fill(NEUTRAL_TEMPLATES["human"], values)
     if creator_address != creator_name:

@@ -1,0 +1,258 @@
+{
+  "$defs": {
+    "CompanionType": {
+      "description": "The relationship types; the values equal ``COMPANION_TYPES``.",
+      "enum": [
+        "child",
+        "sibling",
+        "friend",
+        "partner",
+        "mentor",
+        "research_subject"
+      ],
+      "title": "CompanionType",
+      "type": "string"
+    },
+    "CoreMemoryOverrides": {
+      "additionalProperties": false,
+      "description": "Optional text that replaces a rendered core memory block.",
+      "properties": {
+        "human": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Human"
+        },
+        "identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Identity"
+        },
+        "persona": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Persona"
+        }
+      },
+      "title": "CoreMemoryOverrides",
+      "type": "object"
+    },
+    "CreatorConfig": {
+      "additionalProperties": false,
+      "description": "The creator as the persona names them.",
+      "properties": {
+        "address_form": {
+          "description": "How the companion addresses the creator; empty uses the name",
+          "title": "Address Form",
+          "type": "string"
+        },
+        "name": {
+          "description": "The creator's name; empty renders CREATOR_NAME",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "address_form"
+      ],
+      "title": "CreatorConfig",
+      "type": "object"
+    },
+    "PersonalityConfig": {
+      "additionalProperties": false,
+      "description": "The Big Five seed, each value in [0, 1].",
+      "properties": {
+        "agreeableness": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Agreeableness",
+          "type": "number"
+        },
+        "conscientiousness": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Conscientiousness",
+          "type": "number"
+        },
+        "extraversion": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Extraversion",
+          "type": "number"
+        },
+        "neuroticism": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Neuroticism",
+          "type": "number"
+        },
+        "openness": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Openness",
+          "type": "number"
+        }
+      },
+      "required": [
+        "openness",
+        "conscientiousness",
+        "extraversion",
+        "agreeableness",
+        "neuroticism"
+      ],
+      "title": "PersonalityConfig",
+      "type": "object"
+    },
+    "Pronouns": {
+      "additionalProperties": false,
+      "description": "The companion's pronouns, one word each.",
+      "properties": {
+        "object": {
+          "default": "them",
+          "description": "Object form, for example them",
+          "title": "Object",
+          "type": "string"
+        },
+        "possessive": {
+          "default": "their",
+          "description": "Possessive form, for example their",
+          "title": "Possessive",
+          "type": "string"
+        },
+        "subject": {
+          "default": "they",
+          "description": "Subject form, for example they",
+          "title": "Subject",
+          "type": "string"
+        }
+      },
+      "title": "Pronouns",
+      "type": "object"
+    },
+    "SpeakerTemplates": {
+      "additionalProperties": false,
+      "description": "One speaker block per verification outcome.",
+      "properties": {
+        "creator": {
+          "description": "For the speaker a token verified as the creator",
+          "title": "Creator",
+          "type": "string"
+        },
+        "known": {
+          "description": "For any other verified speaker",
+          "title": "Known",
+          "type": "string"
+        },
+        "unverified": {
+          "description": "For a name that no token backs",
+          "title": "Unverified",
+          "type": "string"
+        }
+      },
+      "required": [
+        "creator",
+        "known",
+        "unverified"
+      ],
+      "title": "SpeakerTemplates",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The persona file; the fields are the documented persona keys.",
+  "properties": {
+    "communication_style": {
+      "description": "How the companion speaks",
+      "title": "Communication Style",
+      "type": "string"
+    },
+    "companion_type": {
+      "$ref": "#/$defs/CompanionType"
+    },
+    "core_memory": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CoreMemoryOverrides"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "core_values": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Core Values",
+      "type": "array"
+    },
+    "creator": {
+      "$ref": "#/$defs/CreatorConfig"
+    },
+    "name": {
+      "description": "The companion's name; empty renders SYSTEM_NAME",
+      "title": "Name",
+      "type": "string"
+    },
+    "personality": {
+      "$ref": "#/$defs/PersonalityConfig"
+    },
+    "pronouns": {
+      "$ref": "#/$defs/Pronouns"
+    },
+    "self_description": {
+      "description": "Who the companion is, in the third person; it carries the self-knowledge line",
+      "title": "Self Description",
+      "type": "string"
+    },
+    "speaker_templates": {
+      "$ref": "#/$defs/SpeakerTemplates"
+    },
+    "style_rules": {
+      "description": "The prompt's style section, one rule per line",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 40,
+      "title": "Style Rules",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "pronouns",
+    "companion_type",
+    "creator",
+    "self_description",
+    "communication_style",
+    "core_values",
+    "personality",
+    "style_rules",
+    "speaker_templates"
+  ],
+  "title": "PersonaConfig",
+  "type": "object"
+}

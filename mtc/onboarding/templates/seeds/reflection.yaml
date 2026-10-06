@@ -1,0 +1,32 @@
+# Reflection seed pack: idle thoughts about how to explain something and
+# about what someone might need. The setup wizard copies it to
+# config/ctm/seeds.d/ for the mentor companion type; it extends the default
+# pack and uses only the keys and slots the default pack defines.
+
+description: "Default seed pack with the reflection pack"
+
+questions:
+  - "What is the clearest way to explain this?"
+  - "What might someone need before this advice is useful?"
+  - "Which question would help more than an answer here?"
+  - "What did I assume the other person already knew?"
+  - "Where would an example do more than a definition?"
+  - "What should I have asked before answering?"
+
+memory_templates:
+  - "Going over {memory}, I wonder whether the explanation was clear."
+  - "{memory} shows what was needed, and it seems {assessment}."
+  - "In {memory} a question might have helped more than an answer."
+
+spontaneous_lines:
+  - "An explanation is clearer when it starts from what is already known."
+  - "A {descriptor} example can carry more than a rule."
+  - "I notice {reflection} in how a question was asked."
+  - "Patience is mostly waiting for the right question."
+
+memory_query_terms:
+  - a question asked
+  - an explanation given
+  - a point of confusion
+  - advice
+  - a goal

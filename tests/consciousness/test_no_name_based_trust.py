@@ -40,6 +40,20 @@ ALLOWED_CREATOR_NAME_READERS: Tuple[Tuple[str, str], ...] = (
         "renders the persona and the authenticated creator's speaker block; "
         "never trust",
     ),
+    (
+        "mtc/onboarding/wizard.py",
+        "writes the configured creator name; never trust",
+    ),
+    (
+        "mtc/cli/main.py",
+        "default speaker name for the local chat client; trust still "
+        "requires the token",
+    ),
+    (
+        "mtc/cli/doctor.py",
+        "compares the configured creator name with the persona file's and "
+        "reports only whether they differ; never printed, never trust",
+    ),
 )
 CONFIG_MODULE = PACKAGE / "core" / "config.py"
 

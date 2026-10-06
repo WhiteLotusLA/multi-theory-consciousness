@@ -1,0 +1,60 @@
+# Example answers for a non-interactive setup:
+#
+#   mtc init --print-example-answers > answers.yaml
+#   mtc init --from answers.yaml --yes --no-probe
+#
+# Every name here is a synthetic sample. The file matches the schema in
+# docs/schemas/onboarding-answers.schema.json. With these answers nothing
+# leaves the machine and nothing needs a database: the mock provider gives
+# labelled test replies and every store stays in process memory.
+
+schema_version: 1
+
+# Set to true only after reading the framing text that `mtc init` shows.
+acknowledged: true
+
+persona:
+  name: Tessera
+  pronouns:
+    subject: they
+    object: them
+    possessive: their
+  # child, sibling, friend, partner, mentor or research_subject.
+  companion_type: friend
+  creator_name: Alice
+  # Leave address_form out to use the type's default.
+  # balanced, curious, calm, playful or analytical; or give the five
+  # personality values, each from 0 to 1, under a personality key.
+  personality_preset: balanced
+  creator_trusted: true
+
+locale:
+  timezone: UTC
+  wake_hour: 6
+  sleep_hour: 22
+
+stores:
+  db_prefix: mtc
+  # none, brew, docker or systemd.
+  service_manager: none
+  # For an enabled store, host, port and user default to the configured
+  # defaults. A password is generated unless password_env names an
+  # environment variable that holds one; a secret never belongs in this file.
+  postgres:
+    enabled: false
+  mongodb:
+    enabled: false
+  qdrant:
+    enabled: false
+  redis:
+    enabled: false
+  neo4j:
+    enabled: false
+
+brain:
+  # mock, local (a chat-completions server on this machine) or anthropic.
+  provider: mock
+
+api: {}
+
+bootstrap_db: false

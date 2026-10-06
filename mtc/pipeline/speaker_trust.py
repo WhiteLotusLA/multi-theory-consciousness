@@ -23,6 +23,12 @@ with neither never authenticates and an empty presented token is never
 compared. Speaker names and tokens are private at runtime: ``status()`` reports
 counts by role only, nothing here is logged with a name or a token, and no
 state is persisted.
+
+Three helpers serve local tools so that no other module names the trust keys:
+``speakers_path`` resolves the speakers file, ``token_for`` returns the token
+a local client presents for a configured speaker (it authenticates nobody;
+the server still compares what is presented), and ``env_entries`` renders the
+two environment entries a setup tool writes for the creator.
 """
 
 from __future__ import annotations
@@ -33,7 +39,8 @@ import os
 import secrets
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Dict, Iterator, List, Optional, Sequence
+from pathlib import Path
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence
 
 from mtc.core.config import Settings, csv_list, get_settings
 from mtc.core.paths import resolve_path
@@ -400,3 +407,114 @@ class SpeakerTrust:
             "verifications": self._verifications,
             "authenticated": self._authenticated,
         }
+
+
+# ----------------------------------------------------------------------
+# Helpers for local tools (the setup wizard and the command-line client)
+# ----------------------------------------------------------------------
+
+_PAIR_BREAKERS = (",", ":", "\n", "\r")
+
+
+def _env_key(field: str) -> str:
+    """The environment variable that carries a Settings field."""
+    return f"{Settings.model_config.get('env_prefix', '')}{field}"
+
+
+def _pair_name(value: Any, what: str) -> str:
+    """A speaker name that can sit in a ``name:token`` pair, stripped.
+
+    The value is not echoed: a misplaced token may sit there.
+    """
+    name = value.strip() if isinstance(value, str) else ""
+    if not name:
+        raise ValueError(f"{what} must be a non-empty name")
+    if any(mark in name for mark in _PAIR_BREAKERS):
+        raise ValueError(f"{what} must not contain a comma, a colon or a line break")
+    return name
+
+
+def speakers_path(settings: Optional[Settings] = None) -> Path:
+    """The speakers file ``SPEAKERS_PATH`` names, resolved; it may not exist."""
+    cfg = settings if settings is not None else get_settings()
+    return resolve_path(cfg.SPEAKERS_PATH, settings=cfg)
+
+
+def token_for(name: str, settings: Optional[Settings] = None) -> Optional[str]:
+    """The token a local client presents for a configured speaker, or None.
+
+    The entry's ``token_env`` variable when the entry names one (read now;
+    None while it is not exported), else the entry's ``SPEAKER_TOKENS`` pair.
+    A name without an entry has no token: the trust source would not
+    authenticate it either. The value is never logged and authenticates
+    nobody here; the server compares what the client presents.
+    """
+    cfg = settings if settings is not None else get_settings()
+    given = name.strip() if isinstance(name, str) else ""
+    if not given:
+        return None
+    trust = SpeakerTrust.from_settings(cfg)
+    entry = trust._entries.get(given)
+    if entry is None:
+        return None
+    configured = trust._configured_token(entry)
+    return configured.decode("utf-8") if configured else None
+
+
+def env_entries(
+    name: str,
+    token: str,
+    *,
+    trusted: bool,
+    existing_tokens: str = "",
+    existing_trusted: str = "",
+    previous_name: Optional[str] = None,
+    existing_env: Optional[Mapping[str, str]] = None,
+    keep_existing: bool = False,
+) -> Dict[str, str]:
+    """The two environment entries a setup tool writes for one speaker.
+
+    Returns the ``SPEAKER_TOKENS`` and ``TRUSTED_SPEAKERS`` values under their
+    environment variable names, tokens first. The speaker's ``name:token``
+    pair leads; every other speaker's pair and allowlist entry is kept as
+    written; a pair or allowlist entry under ``previous_name`` (the speaker
+    was renamed) is dropped. With ``trusted`` false the name is left off the
+    allowlist. ``existing_env`` is a parsed environment file that supplies
+    the two existing values when they are not passed as strings. With
+    ``keep_existing`` a token already paired with the same name is kept and
+    ``token`` is used only when there is none; a renamed speaker always gets
+    ``token``. A name with a comma, a colon or a line break and a token that
+    is empty or holds a comma or whitespace raise ``ValueError`` without
+    echoing the value. Nothing is logged.
+    """
+    speaker = _pair_name(name, "the speaker name")
+    replaced = {speaker}
+    if previous_name is not None and str(previous_name).strip():
+        replaced.add(_pair_name(previous_name, "the previous speaker name"))
+    given = token if isinstance(token, str) else ""
+    if not given or any(mark == "," or mark.isspace() for mark in given):
+        raise ValueError(
+            "a speaker token must be non-empty with no comma and no whitespace"
+        )
+
+    tokens_key = _env_key("SPEAKER_TOKENS")
+    trusted_key = _env_key("TRUSTED_SPEAKERS")
+    if existing_env is not None:
+        existing_tokens = existing_tokens or str(existing_env.get(tokens_key, ""))
+        existing_trusted = existing_trusted or str(existing_env.get(trusted_key, ""))
+
+    chosen = given
+    others: List[str] = []
+    for pair in csv_list(existing_tokens):
+        pair_name, mark, pair_token = pair.partition(":")
+        if not mark or pair_name.strip() not in replaced:
+            others.append(pair)
+        elif keep_existing and pair_name.strip() == speaker and pair_token.strip():
+            chosen = pair_token.strip()
+    allowlist = [item for item in csv_list(existing_trusted) if item not in replaced]
+    if trusted:
+        allowlist.insert(0, speaker)
+    return {
+        tokens_key: ",".join([f"{speaker}:{chosen}"] + others),
+        trusted_key: ",".join(allowlist),
+    }

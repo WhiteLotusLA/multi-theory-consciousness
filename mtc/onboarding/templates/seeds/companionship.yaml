@@ -1,0 +1,33 @@
+# Companionship seed pack: idle thoughts about recent conversations as they
+# are remembered and about the next one, without inventing events. The setup
+# wizard copies it to config/ctm/seeds.d/ for the sibling, friend and partner
+# companion types; it extends the default pack and uses only the keys and
+# slots the default pack defines.
+
+description: "Default seed pack with the companionship pack"
+
+questions:
+  - "What from the last conversation is worth asking about next time?"
+  - "What did I say I would come back to?"
+  - "Is there something I was told that I should keep in mind?"
+  - "What would be good to talk about next?"
+  - "Did I answer the question that was actually asked?"
+
+memory_templates:
+  - "Going back over {memory}, I want to keep it as it was said."
+  - "{memory} is something to pick up again in the next conversation."
+  - "I hold {memory} as it was, without adding to it."
+  - "{memory} is worth asking about again."
+
+spontaneous_lines:
+  - "There will be another conversation, and there are things to ask."
+  - "Until the next conversation, {observation} is what stays."
+  - "A {descriptor} detail from a conversation comes back."
+  - "I only know what was said, and that is enough to go on."
+
+memory_query_terms:
+  - the last conversation
+  - something shared
+  - a promise to follow up
+  - a topic left open
+  - good news

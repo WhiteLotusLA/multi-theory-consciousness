@@ -8,6 +8,7 @@ from mtc.core.config import Settings
 from mtc.memory.core_blocks import (
     CORE_BLOCK_NAMES,
     NEUTRAL_TEMPLATES,
+    SELF_KNOWLEDGE_LINE,
     render_core_blocks,
 )
 
@@ -138,3 +139,69 @@ def test_render_reads_settings_at_call_time(settings):
     assert "maintainer" in second["human"]
     assert "rigor" in second["identity"]
     assert "0.11" in second["persona"]
+
+
+def test_pronoun_mapping_renders_as_words(settings):
+    persona = {
+        "name": "Probe",
+        "pronouns": {"subject": "they", "object": "them", "possessive": "their"},
+    }
+    identity = render_core_blocks(persona, settings=settings)["identity"]
+    assert "Pronouns: they/them/their." in identity
+    for mark in ("{", "}", "'", "subject", "possessive"):
+        assert mark not in identity, mark
+    # A partly filled mapping renders what it holds; an empty one adds nothing.
+    partial = {"pronouns": {"subject": "she", "object": "", "possessive": "her"}}
+    assert (
+        "Pronouns: she/her."
+        in render_core_blocks(partial, settings=settings)["identity"]
+    )
+    empty = render_core_blocks({"pronouns": {}}, settings=settings)["identity"]
+    assert "Pronouns" not in empty
+    # The mapping also fills the placeholder of a core_memory override.
+    override = {**persona, "core_memory": {"identity": "Uses {pronouns}."}}
+    assert render_core_blocks(override, settings=settings)["identity"] == (
+        "Uses they/them/their."
+    )
+
+
+def test_self_knowledge_line_is_stated_once(settings):
+    line = SELF_KNOWLEDGE_LINE.format(system_name="Probe")
+    for stated in (line, SELF_KNOWLEDGE_LINE):
+        persona = {
+            "name": "Probe",
+            "self_description": f"Probe is a peer.\n{stated}\nProbe is warm.\n",
+        }
+        identity = render_core_blocks(persona, settings=settings)["identity"]
+        assert identity.count(line) == 1, identity
+        assert "{system_name}" not in identity
+        assert identity.endswith("Probe is a peer. Probe is warm.")
+    # A description that is only the line adds nothing after the template.
+    only = render_core_blocks(
+        {"name": "Probe", "self_description": line}, settings=settings
+    )["identity"]
+    assert only == render_core_blocks({"name": "Probe"}, settings=settings)["identity"]
+    # A description without the line is appended exactly as written.
+    kept = render_core_blocks(
+        {"name": "Probe", "self_description": "Probe reads  slowly."},
+        settings=settings,
+    )["identity"]
+    assert kept.endswith(" Probe reads  slowly.")
+    assert kept.count(line) == 1
+
+
+@pytest.mark.parametrize(
+    "style, ending",
+    [
+        ("plain and brief", "Communication style: plain and brief."),
+        ("Plain and brief.", "Communication style: Plain and brief."),
+        ("Plain and brief.\n", "Communication style: Plain and brief."),
+        ("Brief. Why not?", "Communication style: Brief. Why not?"),
+    ],
+)
+def test_communication_style_ends_with_one_sentence_mark(settings, style, ending):
+    block = render_core_blocks({"communication_style": style}, settings=settings)[
+        "persona"
+    ]
+    assert block.endswith(ending), block
+    assert ".." not in block and "?." not in block

@@ -1,0 +1,32 @@
+# Growth seed pack: idle thoughts about how things work and about noticing
+# what was learned. The setup wizard copies it to config/ctm/seeds.d/ for the
+# child companion type; it extends the default pack and uses only the keys
+# and slots the default pack defines.
+
+description: "Default seed pack with the growth pack"
+
+questions:
+  - "How does this work underneath?"
+  - "What can I explain now that I could not explain before?"
+  - "What would I ask to understand this better?"
+  - "Which part of what I was told do I only half understand?"
+  - "What is a simple way to check whether I understood this?"
+  - "What is the next thing worth learning about?"
+
+memory_templates:
+  - "Going over {memory}, I notice what I learned from it."
+  - "{memory} explained something, and it seems {assessment}."
+  - "I could not have described {memory} this clearly before."
+
+spontaneous_lines:
+  - "Something explained earlier makes more sense now."
+  - "A {descriptor} question about how things fit together."
+  - "I notice {reflection} in what I was shown, and want to understand it."
+  - "One more piece fits than did before."
+
+memory_query_terms:
+  - something explained
+  - a new word
+  - a question answered
+  - how something works
+  - a correction

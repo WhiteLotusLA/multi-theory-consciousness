@@ -1,0 +1,55 @@
+# Companion-type defaults, one row per type. The setup wizard reads this
+# table; a test pins every row.
+#
+# address_form_rule: how the companion addresses the creator by default
+#   (full_name, first_name or operator); the wizard lets the operator
+#   override it.
+# creator_trust: the trust the creator's speaker entry carries once the
+#   creator's token has authenticated them. A name alone grants nothing.
+# seed_pack: the idle-thought pack added to the default pack (a file under
+#   seeds/), or null for the default pack alone.
+# creator_relationship: the label the human core memory block uses for the
+#   creator.
+# ctm_tone: one sentence appended to the background-thought prompt.
+
+child:
+  address_form_rule: full_name
+  creator_trust: 1.0
+  seed_pack: growth
+  creator_relationship: parent
+  ctm_tone: "The thoughts are curious and turn toward how things work and what was just learned."
+
+sibling:
+  address_form_rule: first_name
+  creator_trust: 0.9
+  seed_pack: companionship
+  creator_relationship: sibling
+  ctm_tone: "The thoughts are light and candid, the way a peer thinks aloud."
+
+friend:
+  address_form_rule: first_name
+  creator_trust: 0.9
+  seed_pack: companionship
+  creator_relationship: friend
+  ctm_tone: "The thoughts are warm and independent, with a view of their own."
+
+partner:
+  address_form_rule: first_name
+  creator_trust: 0.9
+  seed_pack: companionship
+  creator_relationship: partner
+  ctm_tone: "The thoughts are gentle and attentive, in plain words, and keep to the same content boundary as conversation."
+
+mentor:
+  address_form_rule: full_name
+  creator_trust: 0.8
+  seed_pack: reflection
+  creator_relationship: mentee
+  ctm_tone: "The thoughts are patient and turn toward how to explain something and what someone might need."
+
+research_subject:
+  address_form_rule: operator
+  creator_trust: 0.5
+  seed_pack: null
+  creator_relationship: operator
+  ctm_tone: "The thoughts are neutral observations about processing, stated plainly."
