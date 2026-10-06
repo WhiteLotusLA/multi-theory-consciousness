@@ -13,10 +13,11 @@ Phase 7's migrations, ``init_mongo``, ``init_qdrant``, ``init_neo4j``,
 ``bootstrap`` and ``verify`` read this registry and nothing else; they do not
 import store modules by name. Each store module keeps its own ``ensure_*``
 safety net, and Phase 7's scripts are canonical. A phase that adds a store
-registers its constant here (Phase 6 registers its conversation repository's
-DDL); a test scans ``mtc`` for the artifact naming convention
-(``*_SCHEMA_SQL``, ``*_INDEXES``, ``COLLECTION_PARAMS``, ``PAYLOAD_INDEXES``,
-``CONSTRAINTS``, ``KEY_FAMILIES``) and fails when a constant is not registered.
+registers its constant here (the conversation repository's DDL,
+``CONVERSATION_SCHEMA_SQL``, is registered under ``postgres``); a test scans
+``mtc`` for the artifact naming convention (``*_SCHEMA_SQL``, ``*_INDEXES``,
+``COLLECTION_PARAMS``, ``PAYLOAD_INDEXES``, ``CONSTRAINTS``, ``KEY_FAMILIES``)
+and fails when a constant is not registered.
 
 Loading an artifact imports its module, and importing any ``mtc`` module loads
 none of the store client packages (asyncpg, pymongo, redis, neo4j,
@@ -34,6 +35,7 @@ SCHEMA_ARTIFACTS: Dict[str, Tuple[str, ...]] = {
         "mtc.memory.episodic_store.EPISODIC_SCHEMA_SQL",
         "mtc.memory.postgres_stores.RESEARCH_SCHEMA_SQL",
         "mtc.safety.stores.SAFETY_SCHEMA_SQL",
+        "mtc.memory.conversation_store.CONVERSATION_SCHEMA_SQL",
     ),
     "mongodb": (
         "mtc.neural.mongodb_schemas.NEURAL_INDEXES",

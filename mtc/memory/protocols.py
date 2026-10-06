@@ -52,6 +52,10 @@ Backend layout the later PostgreSQL and MongoDB implementations must match:
 - PostgreSQL table ``safety_audit`` with the columns ``SAFETY_AUDIT_FIELDS``
   and a uuid ``id``; MongoDB collections ``alerts`` (unique ``alert_id``) and
   ``privacy_audit_log`` (unique ``event_id``).
+- PostgreSQL tables ``conversations``, ``messages`` (with the ``to_speaker``
+  addressee column) and ``emotional_history`` for ``ConversationRepository``,
+  whose message reads are oldest first (the replay order of a history). The
+  rows hold conversation text and speaker names, private data at runtime.
 """
 
 import uuid
@@ -461,6 +465,218 @@ class ConversationTurnStore(Protocol):
         self, conversation_id: str, limit: int = 50
     ) -> List[Dict[str, Any]]:
         """Return the latest ``limit`` turns of a conversation in turn order."""
+        ...
+
+
+# Message roles a conversation repository stores (the brain's history roles).
+MESSAGE_ROLES = ("user", "assistant", "system")
+# Column widths of the conversation schema; both backends check them.
+SPEAKER_MAX_CHARS = 200
+ROLE_MAX_CHARS = 20
+EMOTION_LABEL_MAX_CHARS = 50
+EMOTIONAL_STATE_FIELDS = (
+    "timestamp",
+    "primary_emotion",
+    "intensity",
+    "valence",
+    "arousal",
+    "dominance",
+    "trigger_context",
+)
+_EMOTIONAL_NUMBERS = ("intensity", "valence", "arousal", "dominance")
+
+
+def conversation_uuid(conversation_id: Any) -> str:
+    """Return the canonical string form of a conversation id.
+
+    A conversation id is a UUID (the PostgreSQL column type); anything that
+    does not parse as one raises ValueError, so both backends refuse the same
+    ids.
+    """
+    try:
+        return str(uuid.UUID(str(conversation_id)))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError("conversation_id must be a UUID string") from exc
+
+
+def check_message_fields(
+    speaker: str, role: str, content: str, to_speaker: Optional[str]
+) -> None:
+    """Raise ValueError when a message does not fit the conversation schema.
+
+    ``speaker`` must be non-empty and at most ``SPEAKER_MAX_CHARS`` long,
+    ``role`` one of ``MESSAGE_ROLES``, ``content`` a string and ``to_speaker``
+    None or a non-empty string within the speaker width.
+    """
+    if not isinstance(speaker, str) or not speaker.strip():
+        raise ValueError("speaker must be a non-empty string")
+    if len(speaker) > SPEAKER_MAX_CHARS:
+        raise ValueError(f"speaker is longer than {SPEAKER_MAX_CHARS} characters")
+    if role not in MESSAGE_ROLES:
+        raise ValueError(f"role must be one of {MESSAGE_ROLES}")
+    if not isinstance(content, str):
+        raise ValueError("content must be a string")
+    if to_speaker is not None:
+        if not isinstance(to_speaker, str) or not to_speaker.strip():
+            raise ValueError("to_speaker must be None or a non-empty string")
+        if len(to_speaker) > SPEAKER_MAX_CHARS:
+            raise ValueError(
+                f"to_speaker is longer than {SPEAKER_MAX_CHARS} characters"
+            )
+
+
+def normalize_emotional_state(record: Mapping[str, Any]) -> Dict[str, Any]:
+    """Check an emotional-history record and return a full copy.
+
+    Every key must be one of ``EMOTIONAL_STATE_FIELDS``; a missing key reads as
+    None (unmeasured), never as a neutral value. The four coordinates are None
+    or finite numbers, ``primary_emotion`` is None or a label within
+    ``EMOTION_LABEL_MAX_CHARS``, and a naive ``timestamp`` raises ValueError (a
+    missing one is stamped by the store's clock).
+    """
+    unknown = sorted(set(record) - set(EMOTIONAL_STATE_FIELDS))
+    if unknown:
+        raise ValueError(f"unknown emotional-history fields {unknown}")
+    row: Dict[str, Any] = {name: record.get(name) for name in EMOTIONAL_STATE_FIELDS}
+    for name in _EMOTIONAL_NUMBERS:
+        value = row[name]
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{name} must be a number or None")
+        if value != value or value in (float("inf"), float("-inf")):
+            raise ValueError(f"{name} must be finite")
+        row[name] = float(value)
+    label = row["primary_emotion"]
+    if label is not None:
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError("primary_emotion must be None or a non-empty string")
+        if len(label) > EMOTION_LABEL_MAX_CHARS:
+            raise ValueError(
+                f"primary_emotion is longer than {EMOTION_LABEL_MAX_CHARS} characters"
+            )
+    if row["trigger_context"] is not None and not isinstance(
+        row["trigger_context"], str
+    ):
+        raise ValueError("trigger_context must be None or a string")
+    moment = row["timestamp"]
+    if moment is not None:
+        if not isinstance(moment, datetime):
+            raise ValueError("timestamp must be a datetime")
+        if moment.tzinfo is None or moment.utcoffset() is None:
+            raise ValueError("timestamps must be timezone-aware")
+    return row
+
+
+@runtime_checkable
+class ConversationRepository(Protocol):
+    """Conversations, messages and emotional history (private data).
+
+    The rows hold conversation text, speaker names and the trigger context of
+    emotional states, all private at runtime. The PostgreSQL implementation
+    writes the ``conversations``, ``messages`` and ``emotional_history``
+    tables of ``mtc.memory.conversation_store.CONVERSATION_SCHEMA_SQL``.
+
+    Contract (pinned by ``tests/memory/test_conversation_repository_contract.py``):
+
+    - Conversation ids are UUID strings (``conversation_uuid``); ids come back
+      in canonical form. A conversation lists its participants; a message's
+      ``role`` is one of ``MESSAGE_ROLES`` (``check_message_fields``).
+    - A message's ``to_speaker`` is None when it belongs to the conversation
+      with the system and names another addressee otherwise. Reads keep a row
+      whose ``to_speaker`` is None or equals the ``addressee`` argument, so a
+      message addressed elsewhere never enters the system's history.
+    - Message reads (``recent_messages`` and ``timeline``) return the newest
+      ``limit`` rows inside the window, ordered OLDEST first (the order a
+      history is replayed in), unlike the newest-first rule of the other
+      stores. A row has ``id``, ``conversation_id``, ``speaker``, ``role``,
+      ``content``, ``timestamp`` and ``to_speaker``. The window is the last
+      ``hours`` hours on the store's clock (rows strictly after the cutoff).
+    - ``recent_emotional_states`` is newest first. A missing coordinate is
+      None (``normalize_emotional_state``).
+    - Timestamps are timezone-aware and come back in UTC; a naive one raises
+      ValueError before anything is written. Rows are copies.
+    - A duplicate conversation id and a message for an unknown conversation
+      raise ValueError.
+    """
+
+    async def ensure_schema(self) -> None:
+        """Create the tables when missing (idempotent)."""
+        ...
+
+    async def add_conversation(
+        self,
+        conversation_id: str,
+        participants: Sequence[str],
+        started_at: datetime,
+        summary: Optional[str] = None,
+    ) -> str:
+        """Open a conversation and return its canonical id."""
+        ...
+
+    async def end_conversation(
+        self,
+        conversation_id: str,
+        ended_at: datetime,
+        summary: Optional[str] = None,
+    ) -> bool:
+        """Close a conversation; a None summary keeps the stored one. False
+        when no such conversation exists."""
+        ...
+
+    async def get_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        """Return ``id``, ``participants``, ``summary``, ``started_at`` and
+        ``ended_at`` of a conversation, or None."""
+        ...
+
+    async def add_message(
+        self,
+        conversation_id: str,
+        speaker: str,
+        role: str,
+        content: str,
+        timestamp: datetime,
+        to_speaker: Optional[str] = None,
+    ) -> int:
+        """Store one message and return its id."""
+        ...
+
+    async def add_emotional_state(self, record: Dict[str, Any]) -> int:
+        """Store one emotional-history row and return its id."""
+        ...
+
+    async def recent_emotional_states(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return the latest emotional-history rows, newest first."""
+        ...
+
+    async def latest_message_time(
+        self, participant: Optional[str] = None, *, addressee: Optional[str] = None
+    ) -> Optional[datetime]:
+        """Return the newest message timestamp (of conversations the
+        participant is in, when given), or None when there is none."""
+        ...
+
+    async def recent_messages(
+        self,
+        participant: str,
+        hours: float,
+        limit: int,
+        *,
+        addressee: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return the participant's messages of the last ``hours`` hours,
+        oldest first."""
+        ...
+
+    async def timeline(
+        self, hours: float, limit: int, *, addressee: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Return every conversation's messages of the last ``hours`` hours,
+        oldest first."""
+        ...
+
+    def status(self) -> Dict[str, Any]:
+        """Return ``backend``, ``available`` and ``last_error``."""
         ...
 
 

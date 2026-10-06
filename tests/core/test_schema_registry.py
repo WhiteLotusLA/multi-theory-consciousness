@@ -143,3 +143,14 @@ def test_loaded_artifacts_are_the_module_constants():
     from mtc.monitoring import stores
 
     assert load_artifact("mtc.monitoring.stores.ALERT_INDEXES") is stores.ALERT_INDEXES
+
+
+def test_conversation_schema_registered():
+    from mtc.memory import conversation_store
+
+    path = "mtc.memory.conversation_store.CONVERSATION_SCHEMA_SQL"
+    assert path in SCHEMA_ARTIFACTS["postgres"]
+    assert load_artifact(path) is conversation_store.CONVERSATION_SCHEMA_SQL
+    tables = " ".join(load_artifact(path)).lower()
+    for table in ("conversations", "messages", "emotional_history"):
+        assert f"create table if not exists {table} (" in " ".join(tables.split())

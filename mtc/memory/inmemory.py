@@ -19,7 +19,9 @@ timestamps, an injectable clock where time matters, and ``status()`` reporting
 reads ``VECTOR_SEARCH_LIMIT`` for a default ``top_k`` and refuses an embedder
 whose ``semantic`` attribute is not true unless ``allow_non_semantic=True``, so
 no hashed or random vector passes for a meaning. The episodic store has its own
-in-memory implementation next to its schema.
+in-memory implementation next to its schema. ``InMemoryConversationRepository``
+is the default ``ConversationRepository``: its message reads are oldest first
+within a window on the injected clock, as the protocol defines.
 
 ``InMemorySafetyAuditStore``, ``InMemoryAlertStore`` and
 ``InMemoryPrivacyAuditStore`` take ``(max_items, clock)``; the clock stamps a
@@ -59,7 +61,10 @@ from mtc.memory.protocols import (
     WORKING_MEMORY_TTL_S,
     SnapshotEvent,
     SnapshotRecord,
+    check_message_fields,
     clamp_working_capacity,
+    conversation_uuid,
+    normalize_emotional_state,
     normalize_safety_audit,
     severities_at_or_above,
 )
@@ -493,6 +498,219 @@ class InMemoryConversationTurnStore:
 
     def status(self) -> Dict[str, Any]:
         return {"backend": "memory", "available": True, "last_error": None}
+
+
+def _addressed_to(row: Dict[str, Any], addressee: Optional[str]) -> bool:
+    """True when a message belongs in the history read for ``addressee``."""
+    return row["to_speaker"] is None or row["to_speaker"] == addressee
+
+
+class InMemoryConversationRepository:
+    """Conversations, messages and emotional history in process memory.
+
+    The in-memory twin of ``PostgresConversationRepository``
+    (``mtc.memory.conversation_store``) with the same contract: UUID
+    conversation ids, message reads oldest first within a window on the
+    injected clock, the ``to_speaker`` addressee filter and ValueError for a
+    duplicate conversation or a message to an unknown one. Each of the three
+    collections keeps at most ``max_items`` rows and drops the oldest first;
+    dropping a conversation drops its messages too, as the PostgreSQL foreign
+    key cascades, so ``latest_message_time``, ``recent_messages`` and
+    ``timeline`` agree with or without a participant.
+    The rows hold conversation text and speaker names (private data).
+    """
+
+    def __init__(
+        self, max_items: int = DEFAULT_MAX_ITEMS, clock: Optional[Clock] = None
+    ) -> None:
+        self._max_items = _check_cap(max_items)
+        self._clock: Clock = clock or _utc_now
+        self._conversations: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        self._messages: Deque[Dict[str, Any]] = deque(maxlen=self._max_items)
+        self._emotions: Deque[Dict[str, Any]] = deque(maxlen=self._max_items)
+        self._message_seq = 0
+        self._emotion_seq = 0
+        self._lock = threading.RLock()
+
+    async def ensure_schema(self) -> None:
+        return None
+
+    async def add_conversation(
+        self,
+        conversation_id: str,
+        participants: Sequence[str],
+        started_at: datetime,
+        summary: Optional[str] = None,
+    ) -> str:
+        key = conversation_uuid(conversation_id)
+        names = [str(name) for name in participants]
+        stamp = _aware(started_at)
+        with self._lock:
+            if key in self._conversations:
+                raise ValueError("conversation id is already stored")
+            self._conversations[key] = {
+                "id": key,
+                "participants": names,
+                "summary": summary,
+                "started_at": stamp,
+                "ended_at": None,
+            }
+            evicted: Set[str] = set()
+            while len(self._conversations) > self._max_items:
+                dropped, _row = self._conversations.popitem(last=False)
+                evicted.add(dropped)
+            if evicted:
+                # Cascade, as the foreign key's ON DELETE CASCADE does
+                self._messages = deque(
+                    (m for m in self._messages if m["conversation_id"] not in evicted),
+                    maxlen=self._max_items,
+                )
+        return key
+
+    async def end_conversation(
+        self,
+        conversation_id: str,
+        ended_at: datetime,
+        summary: Optional[str] = None,
+    ) -> bool:
+        key = conversation_uuid(conversation_id)
+        stamp = _aware(ended_at)
+        with self._lock:
+            row = self._conversations.get(key)
+            if row is None:
+                return False
+            row["ended_at"] = stamp
+            if summary is not None:
+                row["summary"] = summary
+        return True
+
+    async def get_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        key = conversation_uuid(conversation_id)
+        with self._lock:
+            row = self._conversations.get(key)
+            return copy.deepcopy(row) if row is not None else None
+
+    async def add_message(
+        self,
+        conversation_id: str,
+        speaker: str,
+        role: str,
+        content: str,
+        timestamp: datetime,
+        to_speaker: Optional[str] = None,
+    ) -> int:
+        key = conversation_uuid(conversation_id)
+        check_message_fields(speaker, role, content, to_speaker)
+        stamp = _aware(timestamp)
+        with self._lock:
+            if key not in self._conversations:
+                raise ValueError("message refers to an unknown conversation")
+            self._message_seq += 1
+            self._messages.append(
+                {
+                    "id": self._message_seq,
+                    "conversation_id": key,
+                    "speaker": speaker,
+                    "role": role,
+                    "content": content,
+                    "timestamp": stamp,
+                    "to_speaker": to_speaker,
+                }
+            )
+            return self._message_seq
+
+    async def add_emotional_state(self, record: Dict[str, Any]) -> int:
+        row = normalize_emotional_state(record)
+        moment = row["timestamp"]
+        row["timestamp"] = _aware(self._clock() if moment is None else moment)
+        with self._lock:
+            self._emotion_seq += 1
+            row["id"] = self._emotion_seq
+            self._emotions.append(row)
+            return self._emotion_seq
+
+    async def recent_emotional_states(self, limit: int = 50) -> List[Dict[str, Any]]:
+        if limit <= 0:
+            return []
+        with self._lock:
+            rows = list(self._emotions)
+        rows.sort(key=lambda row: (row["timestamp"], row["id"]), reverse=True)
+        return [copy.deepcopy(row) for row in rows[:limit]]
+
+    def _participant_ids(self, participant: Optional[str]) -> Optional[Set[str]]:
+        if participant is None:
+            return None
+        return {
+            key
+            for key, row in self._conversations.items()
+            if participant in row["participants"]
+        }
+
+    def _select(
+        self,
+        participant: Optional[str],
+        hours: Optional[float],
+        addressee: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        with self._lock:
+            allowed = self._participant_ids(participant)
+            if allowed is None:
+                # Every read sees only messages of stored conversations, with
+                # or without a participant, as the joined SQL reads do
+                allowed = set(self._conversations)
+            rows = list(self._messages)
+        cutoff = (
+            _aware(self._clock()) - timedelta(hours=float(hours))
+            if hours is not None
+            else None
+        )
+        kept = [
+            row
+            for row in rows
+            if row["conversation_id"] in allowed
+            and (cutoff is None or row["timestamp"] > cutoff)
+            and _addressed_to(row, addressee)
+        ]
+        kept.sort(key=lambda row: (row["timestamp"], row["id"]))
+        return kept
+
+    async def latest_message_time(
+        self, participant: Optional[str] = None, *, addressee: Optional[str] = None
+    ) -> Optional[datetime]:
+        rows = self._select(participant, None, addressee)
+        return rows[-1]["timestamp"] if rows else None
+
+    async def recent_messages(
+        self,
+        participant: str,
+        hours: float,
+        limit: int,
+        *,
+        addressee: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        if limit <= 0:
+            return []
+        rows = self._select(participant, hours, addressee)
+        return [copy.deepcopy(row) for row in rows[-int(limit) :]]
+
+    async def timeline(
+        self, hours: float, limit: int, *, addressee: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        if limit <= 0:
+            return []
+        rows = self._select(None, hours, addressee)
+        return [copy.deepcopy(row) for row in rows[-int(limit) :]]
+
+    def status(self) -> Dict[str, Any]:
+        with self._lock:
+            return {
+                "backend": "memory",
+                "available": True,
+                "last_error": None,
+                "conversations": len(self._conversations),
+                "messages": len(self._messages),
+                "emotional_rows": len(self._emotions),
+            }
 
 
 _GIST_FIELDS = {f.name for f in fields(ThoughtGist)} - {"gist_id"}
