@@ -15,6 +15,7 @@ Provides type-safe access to all framework settings including:
 
 import json
 import os
+import re
 from datetime import date
 from typing import Annotated, Any, Dict, List, Literal, Optional
 from zoneinfo import ZoneInfo
@@ -41,6 +42,15 @@ COMPANION_TYPES = (
 
 # Alert notifier kinds ALERT_NOTIFIERS may name; no external push channel ships.
 ALERT_NOTIFIER_KINDS = ("console", "file")
+
+# Hosts the API server may bind without authentication. The endpoint audit
+# allows host literals in this module only; the server's bind check reads
+# this tuple instead of spelling the hosts itself.
+LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
+
+# A preset name is a bare file stem under experiments/presets: letters, digits,
+# underscores and hyphens, never a path.
+_PRESET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
 def csv_list(value: str) -> List[str]:
@@ -227,6 +237,36 @@ class Settings(BaseSettings):
         min_length=1,
         description="Prefix for store names: <prefix>_consciousness (PostgreSQL), "
         "<prefix>_neural (MongoDB), <prefix>_memories (Qdrant), '<prefix>:' (Redis)",
+    )
+
+    # Per-store enable keys (mtc.pipeline.runtime). Everything runs in process
+    # memory until the setup wizard turns a store on; a store that is off is
+    # never constructed and no client is built for it.
+    POSTGRES_ENABLED: bool = Field(
+        False,
+        description="Build the PostgreSQL stores (episodic memory, the "
+        "conversation repository, snapshots, the safety audit); false keeps "
+        "them in process memory",
+    )
+    MONGODB_ENABLED: bool = Field(
+        False,
+        description="Build the MongoDB stores (turns, documents, neural "
+        "telemetry, alerts, mongo thoughts); false keeps them in process memory",
+    )
+    REDIS_ENABLED: bool = Field(
+        False,
+        description="Build the Redis working memory behind its resilient "
+        "wrapper; false keeps working memory in process memory",
+    )
+    QDRANT_ENABLED: bool = Field(
+        False,
+        description="Build the Qdrant vector store with the sentence embedder; "
+        "false means no vector store and labelled text recall",
+    )
+    NEO4J_ENABLED: bool = Field(
+        False,
+        description="Build the Neo4j knowledge graph; false keeps the concept "
+        "graph in process memory",
     )
 
     # PostgreSQL (Primary Memory Database)
@@ -423,6 +463,13 @@ class Settings(BaseSettings):
         description="Seconds a generation may take before its first token; past "
         "it the turn ends with an honest timeout and nothing is stored",
     )
+    GENERATION_STALL_TIMEOUT_S: float = Field(
+        300.0,
+        gt=0,
+        allow_inf_nan=False,
+        description="Seconds of silence allowed after the first token of a "
+        "streamed generation; past it the turn ends with an honest timeout",
+    )
     THINKING_LOOP_MAX_RETRIES: int = Field(
         2,
         ge=0,
@@ -520,6 +567,47 @@ class Settings(BaseSettings):
     NARRATE_ALL: bool = Field(
         False,
         description="Experiment profile: turns on all ten NARRATE_ flags at once",
+    )
+
+    # ========================================================================
+    # RUNTIME (mtc.pipeline.runtime: the composition root)
+    # ========================================================================
+
+    PIPELINE_PRESET: str = Field(
+        "",
+        description="Preset name under experiments/presets applied to the live "
+        "workspace and cycle switches (for example legacy_v04); empty uses the "
+        "live defaults",
+    )
+    SLEEP_SCHEDULER_ENABLED: bool = Field(
+        True,
+        description="Run the sleep scheduler (naps, night sleep, dreams) as a "
+        "background task",
+    )
+    AUTONOMOUS_LIFE_ENABLED: bool = Field(
+        False,
+        description="Run the autonomous-life loop between conversations",
+    )
+    PHI_IDLE_SAMPLE_S: float = Field(
+        0.0,
+        ge=0,
+        allow_inf_nan=False,
+        description="Seconds between idle samples of the last state into the "
+        "PhiTracker between turns; 0 disables the sampler",
+    )
+    SELF_ASSESSMENT_INTERVAL_S: float = Field(
+        0.0,
+        ge=0,
+        allow_inf_nan=False,
+        description="Seconds between self-assessment round trips through the "
+        "brain, compared with the latest baseline; 0 disables them",
+    )
+    THINKING_HEARTBEAT_S: float = Field(
+        15.0,
+        gt=0,
+        allow_inf_nan=False,
+        description="Seconds of silence between the API's thinking heartbeats "
+        "while a turn generates",
     )
 
     # ========================================================================
@@ -813,10 +901,12 @@ class Settings(BaseSettings):
     # API SERVER CONFIGURATION
     # ========================================================================
 
-    API_HOST: str = "127.0.0.1"
+    API_HOST: str = Field(
+        "127.0.0.1",
+        description="Bind address of the API server; an address outside "
+        "LOOPBACK_HOSTS needs API_AUTH_ENABLED",
+    )
     API_PORT: int = 8200
-    API_WORKERS: int = 4
-    API_TIMEOUT: int = 300
     API_CORS_ORIGINS: str = "http://localhost:3000,http://localhost:3001"
 
     @computed_field  # type: ignore[prop-decorator]
@@ -996,6 +1086,17 @@ class Settings(BaseSettings):
                 f"LLM_HEALTH_PATHS entries {bad} must be URL paths under LLM_BASE_URL"
             )
         return value
+
+    @field_validator("PIPELINE_PRESET")
+    @classmethod
+    def _preset_is_a_bare_name(cls, value: str) -> str:
+        name = value.strip()
+        if name and not _PRESET_NAME.match(name):
+            raise ValueError(
+                "PIPELINE_PRESET must be a bare preset name (letters, digits, "
+                "underscores and hyphens), not a path"
+            )
+        return name
 
     @field_validator("VISION_ENABLED")
     @classmethod

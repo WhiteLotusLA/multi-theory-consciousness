@@ -96,6 +96,17 @@ Seven defects affect v0.4.0 measurements. All are fixed in v0.5.0, published v0.
 
 ---
 
+## 13. Limits of the conversation runtime
+
+- **Replies from the mock provider are labelled test text, not a model's answer.** They start with `[mock]`, exist so the pipeline, the demo and the tests run with no model server, and say nothing about what a model would have said.
+- **Narration is off by default, and the inner-state text a researcher enables is a rendering of computed values, not a report of experience.** Every `NARRATE_*` key is false; turning one on adds lines that describe module outputs.
+- **The PhiTracker value in status and state is an integration proxy over five module signals.** It is labelled `integration proxy` wherever it is reported, it is not IIT Phi, and it appears in no prompt.
+- **PAD inputs absent in a cycle use declared neutral defaults, and the turn record names them.** `pad_sources_measured` lists the inputs that were measured; an input missing from that list contributed its default, not a reading.
+- **Continuous thoughts stay quiet without a semantic embedder, and their templates are authored seed text.** The novelty gate needs a trained embedder to let a thought surface; the hash embedder is accepted only with an explicit opt-in and measures word overlap; the thought texts come from the seed packs under `config/ctm` and from whatever model answers.
+- **Four of the six theory modulations are computed and not applied.** Only the somatic and Phi salience biases reach the next cycle; the HOT, free energy, recurrence and depth modulations are reported with `consumed: false`.
+
+---
+
 ## Why Share It Anyway
 
 Given these limitations, why release this framework?

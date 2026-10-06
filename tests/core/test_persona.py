@@ -183,3 +183,41 @@ def test_yaml_imported_lazily():
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"
+
+
+def test_messages_name_the_path_relative_to_the_project_root(tmp_path, caplog):
+    """A log line or error never carries the absolute path (it holds the
+    machine's home directory): a file under PROJECT_ROOT is named relative to
+    it, a file elsewhere by its name alone, always with the key."""
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = _settings(project, "config/absent_persona.yaml")
+    with caplog.at_level(logging.WARNING, logger="mtc.core.persona"):
+        assert load_persona(settings=settings) is None
+    (warning,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+    message = warning.getMessage()
+    assert "config/absent_persona.yaml" in message
+    assert "PERSONA_PATH" in message
+    assert str(tmp_path) not in message
+
+    caplog.clear()
+    outside = tmp_path / "elsewhere" / "operator_persona.yaml"
+    with caplog.at_level(logging.WARNING, logger="mtc.core.persona"):
+        assert load_persona(outside, settings=settings) is None
+    (warning,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+    message = warning.getMessage()
+    assert "operator_persona.yaml" in message
+    assert str(tmp_path) not in message and "elsewhere" not in message
+
+    _write(project / "config" / "persona.yaml", "name: [unclosed\n")
+    with pytest.raises(ValueError) as info:
+        load_persona(settings=_settings(project))
+    assert "config/persona.yaml" in str(info.value)
+    assert str(tmp_path) not in str(info.value)
+
+    caplog.clear()
+    _write(project / "config" / "extra.yaml", "name: Unit\nfavourite_colour: green\n")
+    with caplog.at_level(logging.WARNING, logger="mtc.core.persona"):
+        load_persona(settings=_settings(project, "config/extra.yaml"))
+    message = " ".join(r.getMessage() for r in caplog.records)
+    assert "config/extra.yaml" in message and str(tmp_path) not in message

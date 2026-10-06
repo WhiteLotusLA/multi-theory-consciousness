@@ -154,3 +154,9 @@ def test_conversation_schema_registered():
     tables = " ".join(load_artifact(path)).lower()
     for table in ("conversations", "messages", "emotional_history"):
         assert f"create table if not exists {table} (" in " ".join(tables.split())
+    # A migration rendered from the registry stores a plugin's reply as a
+    # tool row: the role check lists the four message roles.
+    assert (
+        "role varchar(20) not null check "
+        "(role in ('user', 'assistant', 'system', 'tool'))"
+    ) in " ".join(tables.split())

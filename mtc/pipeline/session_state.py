@@ -3,8 +3,10 @@
 A ``Session`` is one speaker's live conversation: its conversation id, the
 history the brain sees (a list of entry dicts with ``role``, ``content``,
 ``speaker`` and ``timestamp``), the turn counter, start and last-turn times,
-the running summary and the verbatim quotes kept when old turns were
-summarized. ``SessionManager`` keys sessions by the string
+the running summary, the verbatim quotes kept when old turns were summarized
+and the speaker label the session's stored rows name the speaker by (the
+bracketed claim for a name no token backs; None for a session opened without
+one). ``SessionManager`` keys sessions by the string
 ``SpeakerTrust.session_key(identity)`` returns, never by a bare name, so a
 name presented without its token can never read or extend an authenticated
 speaker's session: the trust source gives the two different keys.
@@ -54,6 +56,7 @@ class Session:
     last_turn_at: Optional[datetime] = None
     summary: Optional[str] = None
     pinned_quotes: List[str] = field(default_factory=list)
+    speaker_label: Optional[str] = None
 
 
 class SessionManager:
@@ -97,10 +100,17 @@ class SessionManager:
         key: str,
         conversation_id: str,
         history: Optional[Sequence[Dict[str, Any]]] = None,
+        *,
+        speaker_label: Optional[str] = None,
     ) -> Session:
         """Open (or replace) the session for ``key`` with an optional history
         (for example one rehydrated from the repository), trimmed to
-        ``max_history``."""
+        ``max_history``, and the label its stored rows name the speaker by
+        (a non-empty string, or None)."""
+        if speaker_label is not None and (
+            not isinstance(speaker_label, str) or not speaker_label.strip()
+        ):
+            raise TypeError("a speaker label is a non-empty string or None")
         now = self._now()
         session = Session(
             key=self._check_key(key),
@@ -108,6 +118,7 @@ class SessionManager:
             history=[dict(entry) for entry in history or ()],
             started_at=now,
             last_turn_at=None,
+            speaker_label=speaker_label,
         )
         with self._lock:
             self._sessions[key] = session

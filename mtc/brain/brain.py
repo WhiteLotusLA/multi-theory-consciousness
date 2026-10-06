@@ -446,10 +446,13 @@ class LLMBrain:
         self.last_sections = list(assembled.sections)
 
         rendered_history = self._render_history(history)
+        # Every budget value comes from this brain's Settings, never the
+        # process ones.
+        ratio = float(cfg.CHARS_PER_TOKEN)
         budget = history_budget(
-            estimate_tokens(assembled.text), int(chosen_max), settings=cfg
+            estimate_tokens(assembled.text, ratio), int(chosen_max), settings=cfg
         )
-        fitted = fit_history(rendered_history, budget)
+        fitted = fit_history(rendered_history, budget, chars_per_token=ratio)
         self.last_budget = fitted
 
         messages: List[Dict[str, Any]] = [{"role": "system", "content": assembled.text}]

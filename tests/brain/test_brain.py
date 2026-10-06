@@ -196,6 +196,35 @@ async def test_one_budget_pass(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_budget_pass_reads_the_brains_own_settings(tmp_path, monkeypatch):
+    """CHARS_PER_TOKEN, HISTORY_TOKEN_BUDGET and CONTEXT_SIZE of the budget pass
+    come from the brain's Settings; the process Settings are never read."""
+    from mtc.brain import budget as budget_module
+
+    def forbidden():
+        raise AssertionError("the process Settings were read")
+
+    brain, _mock = _brain(tmp_path, CHARS_PER_TOKEN=7.0, HISTORY_TOKEN_BUDGET=30)
+    monkeypatch.setattr(budget_module, "get_settings", forbidden)
+    history = [
+        {
+            "role": "user" if i % 2 == 0 else "assistant",
+            "content": str(i) * 35,
+            "timestamp": T0,
+        }
+        for i in range(6)
+    ]
+    await brain.think_with_context("the current turn", conversation_history=history)
+    # 35 characters at 7.0 per token are 6 tokens: five entries fill the 30
+    assert brain.status()["last_budget"] == {
+        "kept": 5,
+        "dropped": 1,
+        "estimated_tokens": 30,
+        "budget_tokens": 30,
+    }
+
+
+@pytest.mark.asyncio
 async def test_temperature_from_generation_params(tmp_path):
     brain, mock = _brain(tmp_path)
     await brain.think_with_context(

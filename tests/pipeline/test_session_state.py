@@ -120,3 +120,19 @@ def test_default_speaker_key(trust):
     # the default speaker never shares a session with a named speaker
     assert key != source.session_key(source.verify("Alice", None))
     assert key != source.session_key(source.verify("User", None))
+
+
+def test_session_keeps_the_stored_speaker_label(trust):
+    """The label every stored row of the session names the speaker by is kept
+    on the session; a session opened without one has none."""
+    source, token = trust
+    manager = SessionManager(clock=Clock())
+    claimed = source.verify("Alice", None)
+    session = manager.start(source.session_key(claimed), "c1", speaker_label="[Alice]")
+    assert session.speaker_label == "[Alice]"
+    verified = source.verify("Alice", token)
+    other = manager.start(source.session_key(verified), "c2", speaker_label="Alice")
+    assert other.speaker_label == "Alice"
+    assert manager.start("k", "c3").speaker_label is None
+    with pytest.raises(TypeError):
+        manager.start("k2", "c4", speaker_label="")

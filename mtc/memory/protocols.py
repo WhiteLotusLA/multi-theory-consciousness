@@ -468,8 +468,10 @@ class ConversationTurnStore(Protocol):
         ...
 
 
-# Message roles a conversation repository stores (the brain's history roles).
-MESSAGE_ROLES = ("user", "assistant", "system")
+# Message roles a conversation repository stores: the brain's history roles
+# plus ``tool``, the role of a plugin's reply stored under the plugin's own
+# name (never the system's words). The DDL's role check lists the same four.
+MESSAGE_ROLES = ("user", "assistant", "system", "tool")
 # Column widths of the conversation schema; both backends check them.
 SPEAKER_MAX_CHARS = 200
 ROLE_MAX_CHARS = 20

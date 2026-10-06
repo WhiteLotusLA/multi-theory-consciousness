@@ -48,6 +48,11 @@ Components and stores:
   ``get_system_metrics``.
 - Accelerator cache clears go through the device manager in
   ``mtc.neural.mps_utils``; this module names no accelerator backend.
+- Settings: an orchestrator given a ``settings`` object reads ``DEBUG``,
+  ``CTM_ENABLED`` and ``DEVICE`` from it, builds its device manager over it
+  and hands it to the substrates it builds (the consolidator's Settings, the
+  bridge's SNN device), so a composed runtime never falls back to the process
+  Settings; without one, those reads go to the process Settings at call time.
 """
 
 import importlib
@@ -58,7 +63,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -72,6 +77,7 @@ logger = logging.getLogger(__name__)
 try:
     from mtc.neural.liquid.emotion_lsm_bridge import (
         EmotionLSMBridge,
+        EmotionLSMBridgeConfig,
         EmotionState,
         SubconsciousState,
     )
@@ -80,6 +86,7 @@ try:
 except ImportError:
     _HAS_EMOTION_BRIDGE = False
     EmotionLSMBridge = None
+    EmotionLSMBridgeConfig = None
     EmotionState = None
     SubconsciousState = None
 
@@ -317,18 +324,24 @@ def _reservoir_binding_metrics(trajectory: Any, coherence: Any) -> Dict[str, flo
     return out
 
 
-def _release_accelerator_cache(include_cuda: bool) -> Optional[str]:
+def _release_accelerator_cache(
+    include_cuda: bool, manager_source: Optional[Callable[[], Any]] = None
+) -> Optional[str]:
     """Empty the accelerator allocator cache through the device manager.
 
-    The manager (``mtc.neural.mps_utils``) is consulted only when torch is
-    already loaded: when it is not, nothing has allocated accelerator memory,
-    so there is nothing to release. A CUDA cache is released only when
-    ``include_cuda`` is true. Returns the device that was cleared, or None.
+    The manager (``manager_source()``, else the shared one in
+    ``mtc.neural.mps_utils``) is consulted only when torch is already loaded:
+    when it is not, nothing has allocated accelerator memory, so there is
+    nothing to release. A CUDA cache is released only when ``include_cuda`` is
+    true. Returns the device that was cleared, or None.
     """
     if "torch" not in sys.modules:
         return None
     try:
-        manager = importlib.import_module("mtc.neural.mps_utils").mps_manager
+        if manager_source is not None:
+            manager = manager_source()
+        else:
+            manager = importlib.import_module("mtc.neural.mps_utils").mps_manager
         device = getattr(getattr(manager, "device", None), "type", None)
         if not getattr(manager, "enabled", False) or device in (None, "cpu"):
             return None
@@ -415,6 +428,7 @@ class NeuralOrchestrator:
         emotion_bridge=None,
         memory_consolidator=None,
         thought_machine=None,
+        settings=None,
     ):
         """
         Initialize the neural orchestrator.
@@ -433,7 +447,13 @@ class NeuralOrchestrator:
             thought_machine: A continuous thought machine to attach; None
                 attaches none (``start_continuous_thought_machine`` builds an
                 in-memory one when asked)
+            settings: The Settings this orchestrator reads (``DEBUG``,
+                ``CTM_ENABLED`` and ``DEVICE``) and hands to the substrates
+                and the device manager it builds; None reads the process
+                Settings at call time
         """
+        self._settings = settings
+        self._device_manager = None
         self.brain = brain
         self.enable_mongodb = bool(enable_mongodb)
         self.neural_data_manager = neural_data_manager
@@ -568,13 +588,44 @@ class NeuralOrchestrator:
             setattr(self, attribute, self._build_component(attribute))
 
     def _build_component(self, attribute: str) -> Any:
+        """Build one substrate from its default config. With Settings the
+        bridge's SNN runs on their ``DEVICE`` and the consolidator reads them;
+        without, both read the process Settings as before."""
         manager = self.neural_data_manager
+        settings = getattr(self, "_settings", None)
         if attribute == "lsm_bridge":
+            bridge_kwargs: Dict[str, Any] = {}
+            if settings is not None and EmotionLSMBridgeConfig is not None:
+                bridge_kwargs["config"] = EmotionLSMBridgeConfig(
+                    device=str(settings.DEVICE)
+                )
             return EmotionLSMBridge(
                 neural_data_manager=manager,
                 store_states=bool(self.enable_mongodb and manager is not None),
+                **bridge_kwargs,
             )
-        return MemoryConsolidator(neural_data_manager=manager, consolidation_cycles=10)
+        consolidator_kwargs: Dict[str, Any] = {}
+        if settings is not None:
+            consolidator_kwargs["settings"] = settings
+        return MemoryConsolidator(
+            neural_data_manager=manager,
+            consolidation_cycles=10,
+            **consolidator_kwargs,
+        )
+
+    def _accelerator_manager(self) -> Any:
+        """The device manager for this orchestrator's Settings, built once on
+        first use (only once torch is loaded); without Settings, the shared
+        manager in ``mtc.neural.mps_utils``, read at call time."""
+        module = importlib.import_module("mtc.neural.mps_utils")
+        settings = getattr(self, "_settings", None)
+        if settings is None:
+            return module.mps_manager
+        manager = getattr(self, "_device_manager", None)
+        if manager is None:
+            manager = module.MPSManager(settings=settings)
+            self._device_manager = manager
+        return manager
 
     def _ensure_components(self) -> None:
         """Build the deferred components (the first experience or sleep does).
@@ -798,7 +849,9 @@ class NeuralOrchestrator:
 
         # Release cached accelerator allocations each cycle; without it the
         # MPS cache grows until the next consolidation.
-        _release_accelerator_cache(include_cuda=False)
+        _release_accelerator_cache(
+            include_cuda=False, manager_source=self._accelerator_manager
+        )
 
         # Check if time for sleep
         if self.should_sleep():
@@ -1615,11 +1668,20 @@ class NeuralOrchestrator:
             self.ctm_failures = counts
         return counts
 
-    @staticmethod
-    def _debug_enabled() -> bool:
+    def _active_settings(self, settings: Any = None) -> Any:
+        """``settings``, else this orchestrator's own, else the process ones
+        (read at call time)."""
+        if settings is not None:
+            return settings
+        own = getattr(self, "_settings", None)
+        if own is not None:
+            return own
         from mtc.core.config import get_settings
 
-        return bool(getattr(get_settings(), "DEBUG", False))
+        return get_settings()
+
+    def _debug_enabled(self) -> bool:
+        return bool(getattr(self._active_settings(), "DEBUG", False))
 
     def _ctm_failure(self, step: str, exc: BaseException) -> None:
         """Count a failed read of the thought machine by step name, log the
@@ -1642,13 +1704,9 @@ class NeuralOrchestrator:
         """The emotion bridge of the moment (built on the first experience)."""
         return getattr(self, "lsm_bridge", None)
 
-    @staticmethod
-    def _ctm_enabled(settings: Any = None) -> bool:
-        if settings is None:
-            from mtc.core.config import get_settings
-
-            settings = get_settings()
-        return bool(getattr(settings, "CTM_ENABLED", True))
+    def _ctm_enabled(self, settings: Any = None) -> bool:
+        active = self._active_settings(settings)
+        return bool(getattr(active, "CTM_ENABLED", True))
 
     async def start_continuous_thought_machine(
         self,
@@ -1682,8 +1740,11 @@ class NeuralOrchestrator:
                 with a conversation (used when this call builds the machine)
             level_provider: Async callable returning the consciousness level
                 (used when this call builds the machine)
-            settings: Settings to read; None reads the process settings
+            settings: Settings to read; None reads the orchestrator's own
+                Settings, and the process ones when it has none
         """
+        if settings is None:
+            settings = getattr(self, "_settings", None)
         if not self._ctm_enabled(settings):
             logger.info("Continuous thought machine disabled (CTM_ENABLED=false)")
             return
@@ -1759,6 +1820,9 @@ class NeuralOrchestrator:
     ) -> Dict[str, Any]:
         """
         Get current status of the continuous thought machine.
+
+        ``CTM_ENABLED`` is read from ``settings``, else the orchestrator's own
+        Settings, else the process ones.
 
         Returns:
             The machine's status with ``status`` set to ``running``, ``paused``
@@ -2030,7 +2094,9 @@ class NeuralOrchestrator:
         logger.info("Garbage collection complete")
 
         # 6. Clear accelerator memory cache (MPS or CUDA) when torch is loaded
-        released = _release_accelerator_cache(include_cuda=True)
+        released = _release_accelerator_cache(
+            include_cuda=True, manager_source=self._accelerator_manager
+        )
         if released:
             logger.info(f"{released.upper()} cache cleared")
 

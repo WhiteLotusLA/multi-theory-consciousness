@@ -100,6 +100,31 @@ async def test_conversation_round_trip(repo):
 
 
 @pytest.mark.asyncio
+async def test_every_message_role_round_trips(repo, clock):
+    """Each stored role reads back as stored; ``tool`` carries a plugin's reply
+    under the plugin's own name, apart from the system's words."""
+    assert protocols.MESSAGE_ROLES == ("user", "assistant", "system", "tool")
+    clock.now = T0 + timedelta(minutes=30)
+    cid = await _conversation(repo, "Alice")
+    speakers = {"user": "Alice", "tool": "echo"}
+    for offset, role in enumerate(protocols.MESSAGE_ROLES):
+        await repo.add_message(
+            cid,
+            speakers.get(role, SYSTEM),
+            role,
+            f"{role} text",
+            T0 + timedelta(minutes=offset),
+        )
+    rows = await repo.recent_messages("Alice", hours=1, limit=10)
+    assert [(r["role"], r["speaker"], r["content"]) for r in rows] == [
+        ("user", "Alice", "user text"),
+        ("assistant", SYSTEM, "assistant text"),
+        ("system", SYSTEM, "system text"),
+        ("tool", "echo", "tool text"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_message_fields_checked(repo):
     cid = await _conversation(repo, "Alice")
     with pytest.raises(ValueError, match="role"):

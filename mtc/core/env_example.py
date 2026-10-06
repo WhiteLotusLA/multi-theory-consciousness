@@ -31,6 +31,10 @@ SECTIONS: List[Tuple[str, Tuple[str, ...]]] = [
                           "VISION_ENABLED", "HISTORY_TOKEN_BUDGET",
                           "CHARS_PER_TOKEN", "PROMPT_", "TRANSITION_")),
     ("Narration", ("NARRATE_",)),
+    # Before the consciousness section, whose SELF_ prefix would otherwise
+    # capture SELF_ASSESSMENT_INTERVAL_S (the first matching section wins).
+    ("Runtime", ("PIPELINE_PRESET", "SLEEP_SCHEDULER_", "AUTONOMOUS_LIFE_",
+                 "PHI_IDLE_", "SELF_ASSESSMENT_", "THINKING_HEARTBEAT_S")),
     ("Neural substrates", ("DEVICE", "SNN_", "LSM_", "HTM_")),
     ("Speakers and trust", ("DEFAULT_SPEAKER", "DEFAULT_EMOTION", "SPEAKER",
                             "TRUST")),

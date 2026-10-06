@@ -21,6 +21,9 @@ identically. A neutral example ships as ``config/persona.example.yaml``.
   raises ValueError naming ``PERSONA_PATH`` or the offending field.
 - Unknown keys are kept in the returned mapping and reported in one WARNING;
   ``unknown_persona_keys`` lists them.
+- Every log line and error names the file relative to ``PROJECT_ROOT`` (by
+  its file name when it lies elsewhere), never by its absolute path, which
+  would carry the machine's home directory.
 
 PyYAML is imported inside ``load_persona``, never at module import. The
 persona holds the operator's identity choices and the creator's name; it is
@@ -32,7 +35,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
 
 from mtc.core.config import Settings, get_settings
-from mtc.core.paths import resolve_path
+from mtc.core.paths import project_root, resolve_path
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +83,17 @@ def unknown_persona_keys(persona: Mapping[str, Any]) -> List[str]:
     return sorted(unknown)
 
 
-def _validate(persona: Mapping[str, Any], source: Path) -> None:
+def _display_path(source: Path, cfg: Settings) -> str:
+    """How messages name the persona file: relative to ``PROJECT_ROOT`` when
+    it lies inside it, by its file name otherwise. The absolute path would
+    carry the machine's home directory into logs and errors."""
+    try:
+        return source.relative_to(project_root(cfg)).as_posix()
+    except ValueError:
+        return source.name
+
+
+def _validate(persona: Mapping[str, Any], source: str) -> None:
     for key, sub_keys in PERSONA_KEYS.items():
         value = persona.get(key)
         if sub_keys is not None and value is not None:
@@ -122,6 +135,7 @@ def load_persona(
     """
     cfg = settings if settings is not None else get_settings()
     source = resolve_path(path if path is not None else cfg.PERSONA_PATH, settings=cfg)
+    shown = _display_path(source, cfg)
     if not source.is_file():
         key = str(source)
         if key not in _WARNED_MISSING:
@@ -129,7 +143,7 @@ def load_persona(
             logger.warning(
                 "persona file %s (PERSONA_PATH) not found; the neutral core "
                 "blocks apply",
-                source,
+                shown,
             )
         return None
 
@@ -139,22 +153,22 @@ def load_persona(
         loaded = yaml.safe_load(source.read_text(encoding="utf-8"))
     except (yaml.YAMLError, UnicodeDecodeError) as exc:
         raise ValueError(
-            f"persona file {source} (PERSONA_PATH) could not be parsed: {exc}"
+            f"persona file {shown} (PERSONA_PATH) could not be parsed: {exc}"
         ) from exc
     if loaded is None:
         return {}
     if not isinstance(loaded, dict):
         raise ValueError(
-            f"persona file {source} (PERSONA_PATH) must hold a mapping at the "
+            f"persona file {shown} (PERSONA_PATH) must hold a mapping at the "
             f"top level, got {type(loaded).__name__}"
         )
-    _validate(loaded, source)
+    _validate(loaded, shown)
     unknown = unknown_persona_keys(loaded)
     if unknown:
         logger.warning(
             "persona file %s (PERSONA_PATH) has keys outside the documented "
             "schema, kept as given: %s",
-            source,
+            shown,
             ", ".join(unknown),
         )
     return loaded

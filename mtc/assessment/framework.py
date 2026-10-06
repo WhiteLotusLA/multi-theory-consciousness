@@ -144,8 +144,11 @@ class ConsciousnessMeasurementFramework:
                 f"Integrated C++ HTM: {self.htm_processor.initialized} initialized"
             )
         except Exception as exc:  # ImportError or a failed native init
+            # The exception text carries absolute module paths (and so the home
+            # directory); log only its type.
             logger.warning(
-                "C++ HTM not available, HTM-dependent metrics report NaN: %s", exc
+                "C++ HTM not available, HTM-dependent metrics report NaN (%s)",
+                type(exc).__name__,
             )
             self.htm_processor = None
 

@@ -34,10 +34,12 @@ Schema artifact: ``CONVERSATION_SCHEMA_SQL``, registered in
 ``mtc.core.schema_registry.SCHEMA_ARTIFACTS`` and applied idempotently by
 ``ensure_schema()`` as a safety net. Phase 7's migration written from this
 constant is canonical. The addressee column is part of the table definition
-(no runtime ALTER), participants have no default, and the DDL holds no role,
-password, seed row or default participant. The module reads no config key;
-host, port, database and credentials come from Settings through the pool
-factory. The repository never closes the pool: its owner does.
+(no runtime ALTER), the role column checks the four ``MESSAGE_ROLES`` (a
+plugin's reply is a ``tool`` row), participants have no default, and the DDL
+holds no database role, password, seed row or default participant. The
+module reads no config key; host, port, database and credentials come from
+Settings through the pool factory. The repository never closes the pool: its
+owner does.
 """
 
 import logging
@@ -71,7 +73,8 @@ CONVERSATION_SCHEMA_SQL = (
         conversation_id UUID NOT NULL
             REFERENCES conversations(id) ON DELETE CASCADE,
         speaker VARCHAR(200) NOT NULL,
-        role VARCHAR(20) NOT NULL,
+        role VARCHAR(20) NOT NULL
+            CHECK (role IN ('user', 'assistant', 'system', 'tool')),
         content TEXT NOT NULL,
         timestamp TIMESTAMPTZ NOT NULL,
         to_speaker VARCHAR(200)

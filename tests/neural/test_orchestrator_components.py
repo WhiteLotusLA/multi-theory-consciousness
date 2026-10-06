@@ -7,7 +7,10 @@ import importlib.util
 import logging
 from types import SimpleNamespace
 
+import pytest
+
 import mtc.neural.orchestrator as orch_mod
+from mtc.core.config import Settings
 from mtc.neural.orchestrator import NeuralOrchestrator
 
 PORT_TARGETS = {
@@ -149,3 +152,88 @@ def test_framework_gets_detected_sizes_not_constants(monkeypatch):
     assert framework.htm_columns == 16
     # No constant from the old construction survives.
     assert 5000 not in (framework.snn_neurons, framework.lsm_neurons)
+
+
+class _RecordingBridge(_FakeBridge):
+    build_on_first_use = True
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.kwargs = kwargs
+
+
+class _RecordingConsolidator(_FakeConsolidator):
+    build_on_first_use = True
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.kwargs = kwargs
+
+
+def _recording_substrates(monkeypatch):
+    monkeypatch.setattr(orch_mod, "_HAS_EMOTION_BRIDGE", True)
+    monkeypatch.setattr(orch_mod, "EmotionLSMBridge", _RecordingBridge)
+    monkeypatch.setattr(orch_mod, "_HAS_MEMORY_CONSOLIDATOR", True)
+    monkeypatch.setattr(orch_mod, "MemoryConsolidator", _RecordingConsolidator)
+
+
+def test_orchestrator_reads_the_settings_it_was_given(monkeypatch):
+    """Given a Settings object, the orchestrator reads DEBUG, CTM_ENABLED and
+    the device from it and hands it to the substrates it builds; the process
+    Settings are never read."""
+    from mtc.core import config as config_module
+
+    reads = []
+
+    def forbidden():
+        reads.append("get_settings")
+        raise AssertionError("the process Settings were read")
+
+    _recording_substrates(monkeypatch)
+    cfg = Settings(_env_file=None, DEVICE="cpu", CTM_ENABLED=False, DEBUG=True)
+    monkeypatch.setattr(config_module, "get_settings", forbidden)
+    orchestrator = NeuralOrchestrator(enable_mongodb=False, settings=cfg)
+    orchestrator._ensure_components()
+    assert orchestrator.memory_consolidator.kwargs["settings"] is cfg
+    assert orchestrator.lsm_bridge.kwargs["config"].device == "cpu"
+    assert orchestrator.get_continuous_thought_status()["status"] == "disabled"
+    # DEBUG comes from the orchestrator's own Settings: the failure is raised
+    with pytest.raises(RuntimeError, match="read failed"):
+        orchestrator._ctm_failure("recent_thoughts", RuntimeError("read failed"))
+    released = orch_mod._release_accelerator_cache(
+        include_cuda=False, manager_source=orchestrator._accelerator_manager
+    )
+    assert released is None  # the CPU has no cache to release
+    assert reads == []
+
+
+def test_accelerator_release_uses_a_manager_bound_to_the_settings():
+    pytest.importorskip("torch")
+    from mtc.neural import mps_utils
+
+    cfg = Settings(_env_file=None, DEVICE="cpu")
+    bound = NeuralOrchestrator(
+        enable_mongodb=False,
+        emotion_bridge=False,
+        memory_consolidator=False,
+        settings=cfg,
+    )
+    manager = bound._accelerator_manager()
+    assert isinstance(manager, mps_utils.MPSManager)
+    assert manager is not mps_utils.mps_manager
+    assert manager._settings is cfg
+    assert bound._accelerator_manager() is manager  # built once
+    assert manager.device.type == "cpu"
+    # without Settings the shared manager serves, as before
+    plain = NeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+    )
+    assert plain._accelerator_manager() is mps_utils.mps_manager
+
+
+def test_orchestrator_without_settings_builds_substrates_as_before(monkeypatch):
+    _recording_substrates(monkeypatch)
+    orchestrator = NeuralOrchestrator(enable_mongodb=False)
+    orchestrator._ensure_components()
+    assert "settings" not in orchestrator.memory_consolidator.kwargs
+    assert "config" not in orchestrator.lsm_bridge.kwargs

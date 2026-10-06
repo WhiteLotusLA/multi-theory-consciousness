@@ -85,3 +85,25 @@ def test_example_template_is_neutral():
     allowlist = load_allowlist(ROOT / "config" / "privacy" / "allowlist.txt")
     assert run_audit([EXAMPLE], denylist, allowlist, root=ROOT) == []
     assert load_identity_statement(EXAMPLE).startswith("# Identity statement")
+
+
+def test_log_lines_carry_the_file_name_never_its_directory(tmp_path, caplog):
+    """The statement's directory can hold the machine's home path or a user
+    name; log lines name the file and the key only."""
+    absent = tmp_path / "space" / "absent_statement.md"
+    with caplog.at_level(logging.INFO, logger=identity_statement.__name__):
+        assert load_identity_statement(absent) == ""
+    (info,) = caplog.records
+    assert "absent_statement.md" in info.getMessage()
+    assert "IDENTITY_STATEMENT_PATH" in info.getMessage()
+    assert str(tmp_path) not in info.getMessage()
+
+    caplog.clear()
+    large = tmp_path / "space" / "large_statement.md"
+    large.parent.mkdir(parents=True, exist_ok=True)
+    large.write_text("x" * 50, encoding="utf-8")
+    with caplog.at_level(logging.INFO, logger=identity_statement.__name__):
+        assert load_identity_statement(large, max_chars=10) == ""
+    (warning,) = caplog.records
+    assert "large_statement.md" in warning.getMessage()
+    assert str(tmp_path) not in warning.getMessage()

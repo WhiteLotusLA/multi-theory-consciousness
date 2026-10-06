@@ -8,6 +8,7 @@ from mtc.memory.conversation_store import (
     CONVERSATION_SCHEMA_SQL,
     PostgresConversationRepository,
 )
+from mtc.memory.protocols import MESSAGE_ROLES
 
 
 def _flat(sql: str) -> str:
@@ -42,6 +43,20 @@ def test_statements_are_idempotent_creates():
         assert f"{column} DOUBLE PRECISION" in emotions
     # the addressee column is in the table, never added at runtime
     assert not any("ALTER" in _flat(sql) for sql in CONVERSATION_SCHEMA_SQL)
+
+
+def test_role_check_matches_the_message_roles():
+    """The table refuses a role outside ``MESSAGE_ROLES``, the set both
+    backends check before writing, so the tool role is stored in PostgreSQL
+    exactly as in memory."""
+    messages = _table("messages")
+    match = re.search(
+        r"ROLE VARCHAR\(20\) NOT NULL CHECK \(ROLE IN \(([^)]*)\)\)", messages
+    )
+    assert match, messages
+    roles = tuple(part.strip().strip("'").lower() for part in match.group(1).split(","))
+    assert roles == MESSAGE_ROLES
+    assert "tool" in roles
 
 
 def test_no_drop_password_seed_or_default_participants():

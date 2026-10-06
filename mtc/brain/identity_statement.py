@@ -12,8 +12,10 @@ caller, and the loader returns the raw text.
 
 A missing file yields an empty string and one INFO log. A file longer than
 ``max_chars`` yields an empty string and a warning, so an oversized or wrong
-file never lands in a prompt. The statement may name people at runtime, so the
-file belongs in the gitignored agent space.
+file never lands in a prompt. Log lines name the file by its name and key
+only: its directory can hold the machine's home path or a user name. The
+statement may name people at runtime, so the file belongs in the gitignored
+agent space.
 """
 
 import logging
@@ -38,15 +40,18 @@ def load_identity_statement(
         with source.open("r", encoding="utf-8") as handle:
             text = handle.read(max_chars + 1)
     except FileNotFoundError:
-        logger.info("no identity statement at %s", source)
+        logger.info(
+            "no identity statement file %s (IDENTITY_STATEMENT_PATH)", source.name
+        )
         return ""
     except (OSError, UnicodeDecodeError) as exc:
         logger.warning("identity statement unreadable: %s", type(exc).__name__)
         return ""
     if len(text) > max_chars:
         logger.warning(
-            "identity statement at %s exceeds %d characters; ignored",
-            source,
+            "identity statement file %s (IDENTITY_STATEMENT_PATH) exceeds %d "
+            "characters; ignored",
+            source.name,
             max_chars,
         )
         return ""

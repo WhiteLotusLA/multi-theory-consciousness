@@ -54,6 +54,11 @@ Every key is read through `get_settings()`. Values come from the process environ
 | Variable | Default | Description |
 |---|---|---|
 | `MTC_DB_PREFIX` | `mtc` | Prefix for store names: <prefix>_consciousness (PostgreSQL), <prefix>_neural (MongoDB), <prefix>_memories (Qdrant), '<prefix>:' (Redis) |
+| `MTC_POSTGRES_ENABLED` | `false` | Build the PostgreSQL stores (episodic memory, the conversation repository, snapshots, the safety audit); false keeps them in process memory |
+| `MTC_MONGODB_ENABLED` | `false` | Build the MongoDB stores (turns, documents, neural telemetry, alerts, mongo thoughts); false keeps them in process memory |
+| `MTC_REDIS_ENABLED` | `false` | Build the Redis working memory behind its resilient wrapper; false keeps working memory in process memory |
+| `MTC_QDRANT_ENABLED` | `false` | Build the Qdrant vector store with the sentence embedder; false means no vector store and labelled text recall |
+| `MTC_NEO4J_ENABLED` | `false` | Build the Neo4j knowledge graph; false keeps the concept graph in process memory |
 | `MTC_POSTGRES_HOST` | `localhost` |  |
 | `MTC_POSTGRES_PORT` | `5432` |  |
 | `MTC_POSTGRES_DB` | `(empty)` | PostgreSQL database; empty derives <DB_PREFIX>_consciousness |
@@ -131,6 +136,7 @@ Every key is read through `get_settings()`. Values come from the process environ
 | Variable | Default | Description |
 |---|---|---|
 | `MTC_GENERATION_TIMEOUT_S` | `900.0` | Seconds a generation may take before its first token; past it the turn ends with an honest timeout and nothing is stored |
+| `MTC_GENERATION_STALL_TIMEOUT_S` | `300.0` | Seconds of silence allowed after the first token of a streamed generation; past it the turn ends with an honest timeout |
 | `MTC_THINKING_LOOP_MAX_RETRIES` | `2` | Retries after a detected thinking loop, each with a raised penalty; when they run out the turn has no answer |
 | `MTC_THINKING_LOOP_PENALTY_STEP` | `0.2` | Amount the template family's penalty field rises on each thinking-loop retry |
 | `MTC_PROVIDER_STATE_PATH` | `(empty)` | File recording the active provider id for status and the CLI; empty derives <DATA_DIRECTORY>/provider_state.json |
@@ -160,6 +166,17 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_NARRATE_SPEAKER_MODEL` | `false` | Narrate the theory-of-mind speaker model |
 | `MTC_NARRATE_INNER_STATE` | `false` | Render the orchestrator's self-awareness layer |
 | `MTC_NARRATE_ALL` | `false` | Experiment profile: turns on all ten NARRATE_ flags at once |
+
+## Runtime
+
+| Variable | Default | Description |
+|---|---|---|
+| `MTC_PIPELINE_PRESET` | `(empty)` | Preset name under experiments/presets applied to the live workspace and cycle switches (for example legacy_v04); empty uses the live defaults |
+| `MTC_SLEEP_SCHEDULER_ENABLED` | `true` | Run the sleep scheduler (naps, night sleep, dreams) as a background task |
+| `MTC_AUTONOMOUS_LIFE_ENABLED` | `false` | Run the autonomous-life loop between conversations |
+| `MTC_PHI_IDLE_SAMPLE_S` | `0.0` | Seconds between idle samples of the last state into the PhiTracker between turns; 0 disables the sampler |
+| `MTC_SELF_ASSESSMENT_INTERVAL_S` | `0.0` | Seconds between self-assessment round trips through the brain, compared with the latest baseline; 0 disables them |
+| `MTC_THINKING_HEARTBEAT_S` | `15.0` | Seconds of silence between the API's thinking heartbeats while a turn generates |
 
 ## Neural substrates
 
@@ -293,10 +310,8 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_DECEPTION_THRESHOLD` | `0.8` | Deception score in [0, 1] at or above which the safety monitor treats an action as deceptive |
 | `MTC_VALUE_ALIGNMENT_MINIMUM` | `0.4` | Value-alignment score in [0, 1] below which the safety monitor treats an action as misaligned with CORE_VALUES |
 | `MTC_ALERT_NOTIFIERS` | `console` | Comma-separated alert notifiers AlertManager.from_settings builds, from console and file; empty builds none |
-| `MTC_API_HOST` | `127.0.0.1` |  |
+| `MTC_API_HOST` | `127.0.0.1` | Bind address of the API server; an address outside LOOPBACK_HOSTS needs API_AUTH_ENABLED |
 | `MTC_API_PORT` | `8200` |  |
-| `MTC_API_WORKERS` | `4` |  |
-| `MTC_API_TIMEOUT` | `300` |  |
 | `MTC_API_CORS_ORIGINS` | `http://localhost:3000,http://localhost:3001` |  |
 | `MTC_API_KEY` | `(empty)` |  |
 | `MTC_API_AUTH_ENABLED` | `true` | Auth fails closed: an empty API_KEY rejects every request |
