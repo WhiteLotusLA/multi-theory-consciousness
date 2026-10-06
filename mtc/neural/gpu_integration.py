@@ -10,8 +10,10 @@ from one configuration, on the device the device manager resolves
   the device) or ``VectorCoordinator``;
 - liquid state machine: ``MPSLiquidStateMachine`` (torch reservoir) or the
   numpy ``LiquidStateMachine``;
-- thought processor: an optional application component, imported behind a
-  guard until the continuous thought machine lands.
+- thought processor: the continuous thought machine's novelty filter,
+  ``AcceleratedNoveltyFilter`` (its cache on the device) or the numpy
+  ``NoveltyFilter`` (``mtc.consciousness.continuous.novelty``), imported behind
+  a guard so the neural package imports without the continuous package.
 
 ``GPUIntegrationConfig`` records what was requested; whether a component runs
 accelerated is decided when it is built (requested and the manager reports an
@@ -35,16 +37,17 @@ from mtc.neural.mps_utils import mps_manager
 from mtc.neural.vectors.coordinator import VectorCoordinator
 from mtc.neural.vectors.mps_coordinator import MPSVectorCoordinator
 
-# Optional thought processor (an application component; it lands with the
-# continuous thought machine).
+# Optional thought processor: the continuous thought machine's novelty filter.
 try:
-    from mtc.consciousness.continuous.mps_thought_processor_v2 import (
-        MPSThoughtProcessorV2,
+    from mtc.consciousness.continuous.novelty import (
+        AcceleratedNoveltyFilter,
+        NoveltyFilter,
     )
 
     _HAS_THOUGHT_PROCESSOR = True
 except ImportError:
-    MPSThoughtProcessorV2 = None
+    AcceleratedNoveltyFilter = None
+    NoveltyFilter = None
     _HAS_THOUGHT_PROCESSOR = False
 
 logger = logging.getLogger(__name__)
@@ -185,17 +188,31 @@ class GPUComponentFactory:
         )
 
     def create_thought_processor(
-        self, vector_coordinator: Optional[VectorCoordinator] = None, **kwargs: Any
+        self,
+        vector_coordinator: Optional[VectorCoordinator] = None,
+        embedder: Any = None,
+        **kwargs: Any,
     ) -> Any:
-        """Return the thought processor, or None while its module is absent."""
+        """Return the thought novelty filter, or None while its module is absent.
+
+        The accelerated filter when thoughts are configured accelerated and the
+        manager reports an accelerated device, else the numpy filter. The
+        embedder is the argument, else the vector coordinator's embedder;
+        ``kwargs`` go to the filter (cache size, thresholds,
+        ``allow_non_semantic``).
+        """
         if not _HAS_THOUGHT_PROCESSOR:
-            logger.warning("thought processor module not available")
+            logger.warning("thought novelty filter module not available")
             return None
-        return MPSThoughtProcessorV2(
-            vector_coordinator=vector_coordinator,
-            use_gpu=self.config.gpu_thoughts,
-            **kwargs,
-        )
+        if embedder is None and vector_coordinator is not None:
+            embedder = getattr(vector_coordinator, "embedder", None)
+        if self.config.gpu_thoughts:
+            logger.info("building the accelerated thought novelty filter")
+            return AcceleratedNoveltyFilter(
+                embedder, device=str(self.config.manager.device), **kwargs
+            )
+        logger.info("building the CPU thought novelty filter")
+        return NoveltyFilter(embedder, **kwargs)
 
     def create_lsm(
         self, n_input: int = 10, n_reservoir: int = 1000, n_output: int = 10, **kwargs

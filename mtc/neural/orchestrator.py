@@ -31,6 +31,21 @@ Components and stores:
   ``enable_mongodb=True`` is passed; the default is False. A Redis manager
   exists only when one is passed. Constructing an orchestrator with defaults
   creates no store client.
+- The continuous thought machine is never built at construction. One is
+  attached (``thought_machine`` or ``attach_thought_machine``), or
+  ``start_continuous_thought_machine`` builds an in-memory one through
+  ``build_thought_machine`` when none is attached and ``CTM_ENABLED`` is true;
+  its emotion source reads the emotion bridge at call time, so a bridge built
+  on the first experience is seen. ``thought_generator`` and ``thought_stream``
+  are the attached machine's, its buffered thoughts feed
+  ``measure_consciousness``, and ``shutdown`` awaits its ``stop()`` and
+  detaches it without clearing its buffer or generator. The machine persists
+  itself (it is not part of this class's state dict). A failed read of the
+  attached machine (its recent thoughts, its status) is counted by step name in
+  ``ctm_failures``, logged at WARNING the first time and every hundredth time,
+  re-raised when ``DEBUG`` is true, and reported as ``orchestrator_failures``
+  by ``get_continuous_thought_status`` and the ``continuous_thought`` entry of
+  ``get_system_metrics``.
 - Accelerator cache clears go through the device manager in
   ``mtc.neural.mps_utils``; this module names no accelerator backend.
 """
@@ -40,6 +55,7 @@ import inspect
 import logging
 import math
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -176,6 +192,10 @@ OPTIONAL_COMPONENTS: Dict[str, Tuple[str, Optional[str]]] = {
     "global_workspace": ("mtc.consciousness.global_workspace", None),
     "enhanced_workspace": ("mtc.consciousness.enhanced_global_workspace", None),
 }
+
+
+# A failed read of the thought machine is logged the first and every this many.
+CTM_FAILURE_LOG_EVERY = 100
 
 
 def _component_flags() -> Dict[str, bool]:
@@ -394,6 +414,7 @@ class NeuralOrchestrator:
         redis_manager=None,
         emotion_bridge=None,
         memory_consolidator=None,
+        thought_machine=None,
     ):
         """
         Initialize the neural orchestrator.
@@ -409,6 +430,9 @@ class NeuralOrchestrator:
                 one on first use, False leaves the component out
             memory_consolidator: A memory consolidator to use; None builds the
                 default one on first use, False leaves the component out
+            thought_machine: A continuous thought machine to attach; None
+                attaches none (``start_continuous_thought_machine`` builds an
+                in-memory one when asked)
         """
         self.brain = brain
         self.enable_mongodb = bool(enable_mongodb)
@@ -446,22 +470,14 @@ class NeuralOrchestrator:
             _HAS_MEMORY_CONSOLIDATOR,
         )
 
-        # Layer 3: Continuous Thought Machine (Background consciousness)
-        self.thought_generator = None
-        self.thought_stream = None
+        # Layer 3: Continuous Thought Machine. Nothing is built here; a machine
+        # is attached (injected or built by start_continuous_thought_machine),
+        # and the thought generator and stream are the attached machine's.
+        # Failed reads of it are counted here by step name.
         self.continuous_thought_machine = None
-
-        if _HAS_CTM:
-            self.thought_generator = ThoughtGenerator(
-                memory_manager=None,
-                emotion_bridge=self.lsm_bridge,
-                neural_orchestrator=self,
-                brain=self.brain,
-            )
-            self.thought_stream = ThoughtStream(
-                mongodb_manager=self.neural_data_manager if enable_mongodb else None,
-                max_buffer_size=100,
-            )
+        self.ctm_failures: Counter = Counter()
+        if thought_machine is not None:
+            self.attach_thought_machine(thought_machine)
 
         # Experience buffer (daily memories before consolidation), capped so a
         # failed consolidation cannot grow it without bound
@@ -1168,11 +1184,7 @@ class NeuralOrchestrator:
             # collection that does not exist. Thoughts come from the thought
             # stream when it exists.
             memories = []
-            thoughts = []
-            if self.thought_stream:
-                thoughts = [
-                    t.content for t in self.thought_stream.get_recent_thoughts(count=10)
-                ]
+            thoughts = self.recent_thought_texts(count=10)
 
             logger.info(
                 f"Measuring consciousness with {len(snn_states)} SNN neurons, "
@@ -1456,6 +1468,7 @@ class NeuralOrchestrator:
                 else {"available": False}
             ),
             "attention_schema": attention_schema_metrics,
+            "continuous_thought": self._continuous_thought_component(),
             "components": self.available_components(),
         }
 
@@ -1534,48 +1547,167 @@ class NeuralOrchestrator:
 
     # ======== CONTINUOUS THOUGHT MACHINE CONTROLS ========
 
+    @property
+    def thought_generator(self) -> Any:
+        """The attached machine's thought generator, or None."""
+        machine = getattr(self, "continuous_thought_machine", None)
+        return getattr(machine, "generator", None)
+
+    @property
+    def thought_stream(self) -> Any:
+        """The attached machine's thought buffer, or None."""
+        machine = getattr(self, "continuous_thought_machine", None)
+        return getattr(machine, "buffer", None)
+
+    def attach_thought_machine(self, machine: Any) -> None:
+        """Attach a continuous thought machine.
+
+        The machine's generator and buffer become ``thought_generator`` and
+        ``thought_stream``, and its recent thoughts feed the measurement
+        framework. Replacing a machine that is running raises RuntimeError.
+        """
+        current = getattr(self, "continuous_thought_machine", None)
+        if current is not None and current is not machine:
+            if getattr(current, "running", False):
+                raise RuntimeError(
+                    "a continuous thought machine is running; stop it before "
+                    "attaching another"
+                )
+        self.continuous_thought_machine = machine
+
+    def recent_thought_texts(self, count: int = 10) -> List[str]:
+        """Texts of the newest buffered thoughts, newest first (private data).
+
+        A failed read returns an empty list and is counted as
+        ``recent_thoughts`` (raised instead when ``DEBUG`` is true).
+        """
+        stream = self.thought_stream
+        if stream is None:
+            return []
+        try:
+            return [t.content for t in stream.get_recent_thoughts(count=count)]
+        except Exception as exc:
+            self._ctm_failure("recent_thoughts", exc)
+            return []
+
+    def _ctm_failure_counts(self) -> Counter:
+        """The failed-read counters (created on a partly built instance)."""
+        counts = getattr(self, "ctm_failures", None)
+        if counts is None:
+            counts = Counter()
+            self.ctm_failures = counts
+        return counts
+
+    @staticmethod
+    def _debug_enabled() -> bool:
+        from mtc.core.config import get_settings
+
+        return bool(getattr(get_settings(), "DEBUG", False))
+
+    def _ctm_failure(self, step: str, exc: BaseException) -> None:
+        """Count a failed read of the thought machine by step name, log the
+        first and every hundredth at WARNING, and re-raise when ``DEBUG`` is
+        true."""
+        counts = self._ctm_failure_counts()
+        counts[step] += 1
+        count = counts[step]
+        if count == 1 or count % CTM_FAILURE_LOG_EVERY == 0:
+            logger.warning(
+                "continuous thought %s failed (%d so far): %s",
+                step,
+                count,
+                type(exc).__name__,
+            )
+        if self._debug_enabled():
+            raise exc
+
+    def _bridge_now(self) -> Any:
+        """The emotion bridge of the moment (built on the first experience)."""
+        return getattr(self, "lsm_bridge", None)
+
+    @staticmethod
+    def _ctm_enabled(settings: Any = None) -> bool:
+        if settings is None:
+            from mtc.core.config import get_settings
+
+            settings = get_settings()
+        return bool(getattr(settings, "CTM_ENABLED", True))
+
     async def start_continuous_thought_machine(
         self,
         websocket_broadcaster: Optional[Any] = None,
         consciousness_state: str = "awake",
         vector_coordinator: Optional[Any] = None,
+        *,
+        contention_guard: Optional[Any] = None,
+        level_provider: Optional[Any] = None,
+        settings: Optional[Any] = None,
     ) -> None:
         """
         Start the continuous thought loop.
 
+        With ``CTM_ENABLED`` false nothing starts and the status reads
+        ``disabled``. When no machine is attached, an in-memory one is built
+        through ``build_thought_machine`` (with the orchestrator's brain and an
+        emotion source over the emotion bridge, read at call time so a bridge
+        built on the first experience is seen) and attached. Its thought and
+        gist stores are in memory whatever ``CTM_STORE`` selects, so this call
+        never opens a store client; a store-backed machine is built by the
+        owner of the stores and attached. The loop task is created and the
+        call returns.
+
         Args:
             websocket_broadcaster: Optional async function for broadcasting thoughts
             consciousness_state: Initial state (awake, drowsy, dreaming, deep_sleep)
-            vector_coordinator: Optional Qdrant coordinator for linking thoughts to memories
+            vector_coordinator: Optional vector store for linking thoughts to
+                memories (used when this call builds the machine)
+            contention_guard: Callable returning True while the brain is busy
+                with a conversation (used when this call builds the machine)
+            level_provider: Async callable returning the consciousness level
+                (used when this call builds the machine)
+            settings: Settings to read; None reads the process settings
         """
-        if not _HAS_CTM or not self.thought_generator:
+        if not self._ctm_enabled(settings):
+            logger.info("Continuous thought machine disabled (CTM_ENABLED=false)")
+            return
+        if not _HAS_CTM:
             logger.warning("Continuous thought machine not available")
             return
 
-        if self.continuous_thought_machine and self.continuous_thought_machine.running:
+        machine = self.continuous_thought_machine
+        if machine is not None and machine.running:
             logger.warning("Continuous thought machine already running")
             return
 
-        logger.info("Starting Continuous Thought Machine...")
-
-        if vector_coordinator is None and self.thought_generator.memory_manager:
-            vector_coordinator = getattr(
-                self.thought_generator.memory_manager, "vector_coordinator", None
+        if machine is None:
+            from mtc.consciousness.continuous import (
+                BridgeEmotionSource,
+                InMemoryThoughtStore,
+                build_thought_machine,
             )
+            from mtc.memory.inmemory import InMemoryThoughtGistStore
 
-        self.continuous_thought_machine = ContinuousThoughtMachine(
-            thought_generator=self.thought_generator,
-            thought_stream=self.thought_stream,
-            websocket_broadcaster=websocket_broadcaster,
-            consciousness_state=consciousness_state,
-            neural_data_manager=self.neural_data_manager,
-            vector_coordinator=vector_coordinator,
-        )
+            # Always in memory, whatever CTM_STORE says: a store-backed
+            # machine is built by the caller that owns the stores and attached.
+            machine = build_thought_machine(
+                settings=settings,
+                brain=self.brain,
+                store=InMemoryThoughtStore(),
+                gist_store=InMemoryThoughtGistStore(),
+                emotion_source=BridgeEmotionSource(self._bridge_now),
+                contention_guard=contention_guard,
+                level_provider=level_provider,
+                broadcaster=websocket_broadcaster,
+                vector_search=vector_coordinator,
+            )
+            self.attach_thought_machine(machine)
 
-        await self.continuous_thought_machine.start()
+        logger.info("Starting Continuous Thought Machine...")
+        machine.set_consciousness_state(consciousness_state)
+        await machine.start()
 
     async def stop_continuous_thought_machine(self) -> None:
-        """Stop the continuous thought loop."""
+        """Stop the continuous thought loop (awaited)."""
         if not self.continuous_thought_machine:
             logger.warning("Continuous thought machine not running")
             return
@@ -1603,18 +1735,68 @@ class NeuralOrchestrator:
         if self.continuous_thought_machine:
             self.continuous_thought_machine.set_consciousness_state(state)
         else:
-            logger.warning("Continuous thought machine not running")
+            logger.warning("Continuous thought machine not attached")
 
-    def get_continuous_thought_status(self) -> Dict[str, Any]:
+    def get_continuous_thought_status(
+        self, settings: Optional[Any] = None
+    ) -> Dict[str, Any]:
         """
-        Get current status of continuous thought machine.
+        Get current status of the continuous thought machine.
 
         Returns:
-            Dict with status, or empty dict if not running
+            The machine's status with ``status`` set to ``running``, ``paused``
+            or ``stopped``; ``{"running": False, "status": "disabled"}`` when
+            ``CTM_ENABLED`` is false, and ``status`` ``not_attached`` when no
+            machine is attached. Every form carries ``orchestrator_failures``,
+            this class's failed reads of the machine by step name.
         """
-        if self.continuous_thought_machine:
-            return self.continuous_thought_machine.get_status()
-        return {"running": False}
+        failures = dict(self._ctm_failure_counts())
+        if not self._ctm_enabled(settings):
+            return {
+                "running": False,
+                "status": "disabled",
+                "orchestrator_failures": failures,
+            }
+        machine = self.continuous_thought_machine
+        if machine is None:
+            return {
+                "running": False,
+                "status": "not_attached",
+                "orchestrator_failures": failures,
+            }
+        status = dict(machine.get_status())
+        if not status.get("running"):
+            status["status"] = "stopped"
+        elif status.get("paused"):
+            status["status"] = "paused"
+        else:
+            status["status"] = "running"
+        status["orchestrator_failures"] = failures
+        return status
+
+    def _continuous_thought_component(self) -> Dict[str, Any]:
+        """The component map entry for the continuous thought machine.
+
+        A failed status read leaves ``quiet_reason`` and ``generated`` None and
+        is counted as ``thought_status`` (raised instead when ``DEBUG`` is
+        true); ``orchestrator_failures`` reports the counters.
+        """
+        machine = getattr(self, "continuous_thought_machine", None)
+        report: Dict[str, Any] = {
+            "available": bool(_HAS_CTM),
+            "attached": machine is not None,
+            "running": bool(getattr(machine, "running", False)),
+        }
+        if machine is not None:
+            try:
+                status = machine.get_status()
+            except Exception as exc:
+                self._ctm_failure("thought_status", exc)
+                status = {}
+            report["quiet_reason"] = status.get("quiet_reason")
+            report["generated"] = status.get("total_thoughts_generated")
+        report["orchestrator_failures"] = dict(self._ctm_failure_counts())
+        return report
 
     # ======== PERSISTENCE ========
 
@@ -1771,13 +1953,14 @@ class NeuralOrchestrator:
         component exists.
 
         Cleanup order:
-        1. Stop continuous thought machine (awaited)
+        1. Stop the continuous thought machine (awaited) and detach it; its
+           buffer and generator are left as they are, since the machine
+           persists itself
         2. Clear experience buffer
         3. Clear LSM bridge state history
-        4. Clear thought generator/stream caches
-        5. Close data connections
-        6. Force garbage collection
-        7. Clear accelerator memory cache
+        4. Close data connections
+        5. Force garbage collection
+        6. Clear accelerator memory cache
         """
         import gc
 
@@ -1813,21 +1996,7 @@ class NeuralOrchestrator:
                 bridge.reservoir_trajectory.clear()
             logger.info("Cleared LSM bridge state history")
 
-        # 4. Clear thought generator caches
-        generator = getattr(self, "thought_generator", None)
-        if generator:
-            if hasattr(generator, "recent_thought_types"):
-                generator.recent_thought_types.clear()
-            logger.info("Cleared thought generator caches")
-
-        # 5. Clear thought stream buffer
-        stream = getattr(self, "thought_stream", None)
-        if stream:
-            if hasattr(stream, "thought_buffer"):
-                stream.thought_buffer.clear()
-            logger.info("Cleared thought stream buffer")
-
-        # 6. Close data connections (sync or async close)
+        # 4. Close data connections (sync or async close)
         manager = getattr(self, "neural_data_manager", None)
         close = getattr(manager, "close", None)
         if callable(close):
@@ -1839,11 +2008,11 @@ class NeuralOrchestrator:
             except Exception as e:
                 logger.warning(f"Error closing data manager: {e}")
 
-        # 7. Force garbage collection
+        # 5. Force garbage collection
         gc.collect()
         logger.info("Garbage collection complete")
 
-        # 8. Clear accelerator memory cache (MPS or CUDA) when torch is loaded
+        # 6. Clear accelerator memory cache (MPS or CUDA) when torch is loaded
         released = _release_accelerator_cache(include_cuda=True)
         if released:
             logger.info(f"{released.upper()} cache cleared")
