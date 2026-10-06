@@ -33,7 +33,13 @@ Checks, in order, with whether each is required (a required ``failed`` exits
 - ``provider_state`` (advisory): ``PROVIDER_STATE_PATH`` against
   ``LLM_PROVIDER``.
 - ``embedding_model`` (advisory): ``EMBEDDING_MODEL`` in the local model
-  cache, looked up without network; ``fetch_models`` downloads it.
+  cache, looked up without network: a snapshot with its configuration and
+  weights the embedder loads, which is what a fetch and the embedder's own
+  first use both leave. ``fetch_models`` downloads it: the files
+  the sentence embedder loads (one set of weights, the tokenizer and the
+  configuration, about 90 MB for the default model), never the exports of
+  the same weights for other runtimes that the model's repository also
+  holds.
 - ``pyphi`` (advisory): PyPhi through the bridge's lazy loader, with its home
   under the checked Settings' ``DATA_DIRECTORY``
   (``pyphi_bridge.configure_pyphi_home``; the first import in a process
@@ -57,9 +63,10 @@ A secret is reported as ``set`` or ``empty`` and never shown; speaker and
 creator names are never printed, and a persona or speakers file that does not
 load is reported by the exception type, the line and the documented fields
 the message names, never by the message (a parser's message can quote the
-file, which holds names). Files written: ``fetch_models`` downloads into the
-model cache, and the ``pyphi`` check, which imports PyPhi through the bridge
-when it is installed, creates ``<DATA_DIRECTORY>/pyphi`` of the checked
+file, which holds names). Files written: ``fetch_models`` downloads the
+embedder's files into the model cache, and the ``pyphi`` check, which imports
+PyPhi through the bridge when it is installed, creates
+``<DATA_DIRECTORY>/pyphi`` of the checked
 Settings on the first import (a copy of the shipped PyPhi configuration,
 PyPhi's cache and its log), also under ``--no-network``; nothing else is
 written. Heavy modules (the prompt assembler, the provider, the store checks)
@@ -68,6 +75,7 @@ are imported inside the check that needs them.
 
 from __future__ import annotations
 
+import fnmatch
 import importlib.util
 import logging
 import os
@@ -89,6 +97,21 @@ MODELS_PATH = "v1/models"
 MODELS_TIMEOUT_S = 3.0
 OFFLINE_VARIABLES = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")
 EMBEDDING_ORGANISATION = "sentence-transformers"
+# What a fetch leaves on the hub. A model repository holds the same weights
+# several times: exports for other runtimes, in their own directories or with
+# their own suffixes, which the sentence embedder never loads, and often both
+# weight formats of the embedder's own framework, of which the loader takes
+# safetensors when a module directory has it.
+EXPORT_DIRECTORIES = ("onnx", "openvino")
+EXPORT_SUFFIXES = (".onnx", ".h5", ".ot", ".msgpack")
+SAFETENSORS_WEIGHTS = ("model.safetensors", "model-*-of-*.safetensors")
+PICKLED_WEIGHTS = ("pytorch_model.bin", "pytorch_model-*-of-*.bin")
+# The files a cached snapshot is looked up by. Newer versions of the hub
+# library refuse a snapshot that lacks a file the lookup's patterns select,
+# and neither a fetch here nor the embedder's first use downloads the whole
+# repository, so the lookup names the configuration only and the weights are
+# then looked for on disk.
+SNAPSHOT_MARKERS = ("modules.json", "config.json")
 STORE_NAMES = ("postgres", "mongodb", "qdrant", "neo4j", "redis")
 _STORE_ENABLE_FIELDS = {
     "postgres": "POSTGRES_ENABLED",
@@ -605,6 +628,77 @@ def _embedding_repo(model: str) -> str:
     return model if "/" in model else f"{EMBEDDING_ORGANISATION}/{model}"
 
 
+def _named(path: str, patterns: Sequence[str]) -> bool:
+    name = path.rpartition("/")[2]
+    return any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
+
+
+def _embedding_files(paths: Sequence[str]) -> List[str]:
+    """Return the files of a model repository that the sentence embedder loads.
+
+    Left out: every file under an export directory or with an export suffix
+    (the same weights for other runtimes), and a module directory's pickled
+    weights when that directory also holds safetensors weights, which the
+    loader prefers. A directory whose only weights are pickled keeps them.
+    Everything else stays: the tokenizer and configuration files are small
+    and their names vary by model.
+    """
+
+    with_safetensors = {
+        path.rpartition("/")[0] for path in paths if _named(path, SAFETENSORS_WEIGHTS)
+    }
+    kept = []
+    for path in paths:
+        if any(part in EXPORT_DIRECTORIES for part in path.split("/")[:-1]):
+            continue
+        if path.lower().endswith(EXPORT_SUFFIXES):
+            continue
+        if (
+            _named(path, PICKLED_WEIGHTS)
+            and path.rpartition("/")[0] in with_safetensors
+        ):
+            continue
+        kept.append(path)
+    return sorted(kept)
+
+
+def _literal_pattern(path: str) -> str:
+    """Return the pattern that matches exactly ``path`` and nothing else."""
+    return re.sub(r"([*?\[])", r"[\1]", path)
+
+
+def _holds_weights(folder: str) -> bool:
+    """Tell whether a snapshot folder holds weights the embedder loads."""
+    for directory, subdirectories, names in os.walk(folder):
+        subdirectories[:] = [
+            entry for entry in subdirectories if entry not in EXPORT_DIRECTORIES
+        ]
+        for name in names:
+            if not _named(name, SAFETENSORS_WEIGHTS + PICKLED_WEIGHTS):
+                continue
+            # A snapshot entry is a link into the cache's blobs: the blob
+            # has to be there too.
+            if os.path.exists(os.path.join(directory, name)):
+                return True
+    return False
+
+
+def _embedding_cached(hub: Any, repo: str) -> bool:
+    """Tell, without network, whether the model cache holds ``repo``.
+
+    Present means a snapshot with its configuration (``SNAPSHOT_MARKERS``)
+    and at least one weight file the embedder loads. Any miss, an incomplete
+    snapshot included, reads as absent.
+    """
+    try:
+        folder = hub.snapshot_download(
+            repo, local_files_only=True, allow_patterns=list(SNAPSHOT_MARKERS)
+        )
+    except Exception:  # noqa: BLE001 - any miss means it is not cached
+        return False
+    return _holds_weights(str(folder))
+
+
 def _check_embedding_model(
     cfg: Settings, network: bool, fetch_models: bool
 ) -> CheckResult:
@@ -628,14 +722,7 @@ def _check_embedding_model(
 
     repo = _embedding_repo(model)
 
-    def cached() -> bool:
-        try:
-            huggingface_hub.snapshot_download(repo, local_files_only=True)
-        except Exception:  # noqa: BLE001 - any miss means it is not cached
-            return False
-        return True
-
-    if cached():
+    if _embedding_cached(huggingface_hub, repo):
         return CheckResult(name, OK, f"{repo} is in the local model cache", False, data)
     if not fetch_models:
         return CheckResult(
@@ -657,8 +744,17 @@ def _check_embedding_model(
             required=False,
             data=data,
         )
+    # The repository is listed first, so that only the files the embedder
+    # loads are requested: a download without a file filter takes every
+    # export in the repository, about ten times the size for the default
+    # model.
     try:
-        huggingface_hub.snapshot_download(repo)
+        listed = [str(path) for path in huggingface_hub.list_repo_files(repo)]
+        wanted = _embedding_files(listed)
+        if wanted:
+            huggingface_hub.snapshot_download(
+                repo, allow_patterns=[_literal_pattern(path) for path in wanted]
+            )
     except Exception as exc:  # noqa: BLE001 - reported, with the type only
         return CheckResult(
             name,
@@ -667,9 +763,29 @@ def _check_embedding_model(
             required=False,
             data=data,
         )
-    if cached():
+    if not wanted:
+        return CheckResult(
+            name,
+            WARNING,
+            f"the hub lists no file of {repo} that the sentence embedder "
+            "loads; nothing was downloaded",
+            required=False,
+            data=data,
+        )
+    if _embedding_cached(huggingface_hub, repo):
+        left_out = len(listed) - len(wanted)
         data["fetched"] = True
-        return CheckResult(name, OK, f"{repo} was downloaded to the cache", False, data)
+        data["fetched_files"] = len(wanted)
+        data["left_out_files"] = left_out
+        return CheckResult(
+            name,
+            OK,
+            f"{repo} was downloaded to the cache ({len(wanted)} files the "
+            f"sentence embedder loads; {left_out} files of other runtimes "
+            "and duplicate weights were left on the hub)",
+            required=False,
+            data=data,
+        )
     return CheckResult(
         name,
         WARNING,

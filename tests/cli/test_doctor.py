@@ -1,12 +1,14 @@
 """``mtc doctor``: nothing reads as healthy unless it was measured."""
 
+import fnmatch
 import json
 import os
 import re
+import shutil
 import sys
 import types
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import pytest
 
@@ -64,24 +66,143 @@ REQUIRED = {
 }
 
 
-class FakeHub:
-    """A stand-in for the model hub module: a cache that may be filled."""
+# The default embedding model's repository as a full download left it on
+# disk, with sizes in bytes: one safetensors weight set, the same weights
+# exported for other runtimes, the tokenizer and the configuration.
+DEFAULT_REPO_FILES: Dict[str, int] = {
+    ".gitattributes": 1229,
+    "1_Pooling/config.json": 190,
+    "README.md": 10502,
+    "config.json": 612,
+    "config_sentence_transformers.json": 116,
+    "data_config.json": 39265,
+    "model.safetensors": 90868376,
+    "modules.json": 349,
+    "onnx/model.onnx": 90405214,
+    "onnx/model_O1.onnx": 90360328,
+    "onnx/model_O2.onnx": 90326566,
+    "onnx/model_O3.onnx": 90326497,
+    "onnx/model_O4.onnx": 45212349,
+    "onnx/model_qint8_arm64.onnx": 23026053,
+    "onnx/model_qint8_avx512.onnx": 23026053,
+    "onnx/model_qint8_avx512_vnni.onnx": 23026053,
+    "onnx/model_quint8_avx2.onnx": 23046789,
+    "openvino/openvino_model.bin": 90265744,
+    "openvino/openvino_model.xml": 211315,
+    "openvino/openvino_model_qint8_quantized.bin": 22933664,
+    "openvino/openvino_model_qint8_quantized.xml": 368006,
+    "pytorch_model.bin": 90888945,
+    "rust_model.ot": 90887379,
+    "sentence_bert_config.json": 53,
+    "special_tokens_map.json": 112,
+    "tf_model.h5": 91005696,
+    "tokenizer.json": 466247,
+    "tokenizer_config.json": 350,
+    "train_script.py": 13156,
+    "vocab.txt": 231508,
+}
+# What the sentence embedder reads when it loads that model.
+EMBEDDER_FILES = {
+    "modules.json",
+    "config_sentence_transformers.json",
+    "sentence_bert_config.json",
+    "config.json",
+    "1_Pooling/config.json",
+    "model.safetensors",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "special_tokens_map.json",
+    "vocab.txt",
+}
 
-    def __init__(self, cached: bool = False, fail: bool = False) -> None:
+
+def _as_patterns(patterns) -> List[str]:
+    return [patterns] if isinstance(patterns, str) else list(patterns)
+
+
+class FakeHub:
+    """A stand-in for the model hub module: a repository listing and a cache
+    on disk that a download fills with the files its patterns select.
+
+    A cache that no download of this stand-in filled holds what the
+    embedder's own first use leaves, the files it reads and nothing else. A
+    local lookup follows the newer library's rule: it refuses a snapshot that
+    lacks a file its patterns select from the repository's listing.
+    """
+
+    def __init__(self, root: Path, cached: bool = False, fail: bool = False) -> None:
+        self.root = Path(root)
         self.cached = cached
         self.fail = fail
+        self.fail_download = False
+        self.files: Dict[str, int] = dict(DEFAULT_REPO_FILES)
+        self.cache_files: Optional[List[str]] = None
         self.calls: List[tuple] = []
+        self.listed: List[str] = []
+        self.downloaded: List[str] = []
 
-    def snapshot_download(self, repo_id, local_files_only=False, **kwargs):
+    def list_repo_files(self, repo_id, **kwargs):
+        self.listed.append(repo_id)
+        if self.fail:
+            raise ConnectionError("no route")
+        return list(self.files)
+
+    def _selected(self, path, allow_patterns, ignore_patterns) -> bool:
+        # The hub library's rule: with an allow list a file must match one of
+        # its patterns, and a file that matches an ignore pattern is left out.
+        if allow_patterns is not None and not any(
+            fnmatch.fnmatch(path, pattern) for pattern in _as_patterns(allow_patterns)
+        ):
+            return False
+        if ignore_patterns is not None and any(
+            fnmatch.fnmatch(path, pattern) for pattern in _as_patterns(ignore_patterns)
+        ):
+            return False
+        return True
+
+    def _held(self) -> List[str]:
+        if self.cache_files is not None:
+            return list(self.cache_files)
+        return [path for path in self.files if path in EMBEDDER_FILES]
+
+    def _lay_out(self, repo_id) -> str:
+        folder = self.root / repo_id.replace("/", "--")
+        shutil.rmtree(folder, ignore_errors=True)
+        for name in self._held():
+            target = folder / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"")
+        folder.mkdir(parents=True, exist_ok=True)
+        return str(folder)
+
+    def snapshot_download(
+        self,
+        repo_id,
+        local_files_only=False,
+        allow_patterns=None,
+        ignore_patterns=None,
+        **kwargs,
+    ):
         self.calls.append((repo_id, bool(local_files_only)))
         if local_files_only:
             if not self.cached:
                 raise FileNotFoundError("not in the cache")
-            return "/cache/" + repo_id
-        if self.fail:
+            held = set(self._held())
+            for path in self.files:
+                expected = self._selected(path, allow_patterns, ignore_patterns)
+                if expected and path not in held:
+                    raise FileNotFoundError("the cached snapshot is incomplete")
+            return self._lay_out(repo_id)
+        if self.fail or self.fail_download:
             raise ConnectionError("no route")
+        self.downloaded = [
+            path
+            for path in self.files
+            if self._selected(path, allow_patterns, ignore_patterns)
+        ]
+        self.cache_files = list(self.downloaded)
         self.cached = True
-        return "/cache/" + repo_id
+        return self._lay_out(repo_id)
 
 
 @pytest.fixture
@@ -98,7 +219,7 @@ def environment(monkeypatch, tmp_path):
     for variable in doctor.OFFLINE_VARIABLES:
         monkeypatch.delenv(variable, raising=False)
 
-    hub = FakeHub(cached=True)
+    hub = FakeHub(tmp_path / "model_cache", cached=True)
     absent: set = set()
     monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
     monkeypatch.setattr(doctor, "_has_module", lambda name: name not in absent)
@@ -409,10 +530,55 @@ def test_embedding_model_absent_is_warning_with_fetch_hint(environment):
     # Looked up locally only: nothing was downloaded.
     repo = Settings.model_fields["EMBEDDING_MODEL"].default
     assert environment.hub.calls == [(repo, True)]
+    assert environment.hub.listed == []
     # A short model name is looked up under the library's organisation.
     environment.hub.calls.clear()
     doctor.run_doctor(settings_for(environment, EMBEDDING_MODEL="example-model"))
     assert environment.hub.calls == [("sentence-transformers/example-model", True)]
+
+
+def test_cache_filled_by_first_use_or_by_a_fetch_reads_as_present(environment):
+    hub = environment.hub
+    repo = Settings.model_fields["EMBEDDING_MODEL"].default
+    # The embedder's own first use leaves the files it reads, a fraction of
+    # the repository's listing: the model is there, and nothing is fetched.
+    assert set(hub._held()) == EMBEDDER_FILES < set(hub.files)
+    first_use = by_name(doctor.run_doctor(settings_for(environment)))["embedding_model"]
+    assert first_use.status is CheckStatus.OK
+    assert "is in the local model cache" in first_use.detail
+    assert hub.calls == [(repo, True)] and hub.listed == []
+    # What a fetch leaves reads as present on the next run, without network.
+    hub.cached = False
+    fetched = by_name(doctor.run_doctor(settings_for(environment), fetch_models=True))
+    assert fetched["embedding_model"].data["fetched"] is True
+    assert set(hub._held()) < set(hub.files)
+    hub.calls.clear()
+    after = by_name(doctor.run_doctor(settings_for(environment), network=False))
+    assert after["embedding_model"].status is CheckStatus.OK
+    assert "is in the local model cache" in after["embedding_model"].detail
+    assert hub.calls == [(repo, True)]
+
+
+def test_cached_snapshot_without_loadable_weights_is_not_ok(environment):
+    hub = environment.hub
+    without_weights = sorted(EMBEDDER_FILES - {"model.safetensors"})
+    # An interrupted download: the configuration is there, the weights are not.
+    hub.cache_files = without_weights
+    result = by_name(doctor.run_doctor(settings_for(environment)))["embedding_model"]
+    assert result.status is CheckStatus.WARNING
+    assert "not in the local model cache" in result.detail
+    # An export for another runtime is not weights the embedder loads.
+    hub.cache_files = without_weights + ["onnx/model.onnx", "openvino/model.bin"]
+    result = by_name(doctor.run_doctor(settings_for(environment)))["embedding_model"]
+    assert result.status is CheckStatus.WARNING
+    # The older weight format is.
+    hub.cache_files = without_weights + ["pytorch_model.bin"]
+    result = by_name(doctor.run_doctor(settings_for(environment)))["embedding_model"]
+    assert result.status is CheckStatus.OK
+    # Weights without the snapshot's configuration: the library refuses it.
+    hub.cache_files = ["model.safetensors"]
+    result = by_name(doctor.run_doctor(settings_for(environment)))["embedding_model"]
+    assert result.status is CheckStatus.WARNING
 
 
 def test_fetch_models_downloads_through_the_hub(environment):
@@ -437,6 +603,124 @@ def test_fetch_models_downloads_through_the_hub(environment):
     assert "ConnectionError" in failed["embedding_model"].detail
 
 
+def test_fetch_models_downloads_one_weight_set_not_every_export(environment):
+    hub = environment.hub
+    hub.cached = False
+    repo = Settings.model_fields["EMBEDDING_MODEL"].default
+    result = by_name(doctor.run_doctor(settings_for(environment), fetch_models=True))[
+        "embedding_model"
+    ]
+    assert result.status is CheckStatus.OK
+    assert hub.listed == [repo]
+    fetched = set(hub.downloaded)
+    # Everything the sentence embedder reads is fetched ...
+    assert EMBEDDER_FILES <= fetched
+    # ... with one set of weights, and none of the exports for other
+    # runtimes that make the whole repository ten times larger.
+    large = sorted(path for path in fetched if hub.files[path] > 20_000_000)
+    assert large == ["model.safetensors"]
+    for path in fetched:
+        assert not path.startswith(("onnx/", "openvino/")), path
+        assert not path.endswith((".onnx", ".h5", ".ot", ".bin", ".xml")), path
+    assert sum(hub.files[path] for path in fetched) < 100_000_000
+    assert len(hub.downloaded) == len(fetched) == 14
+    # The result says how much was taken and how much was left on the hub.
+    assert result.data["fetched_files"] == 14
+    assert result.data["left_out_files"] == len(hub.files) - 14
+    assert "14 files" in result.detail and "16" in result.detail
+
+
+def test_fetch_models_keeps_the_only_weight_format_a_module_has(environment):
+    hub = environment.hub
+    hub.cached = False
+    hub.files = {
+        "modules.json": 300,
+        "config.json": 600,
+        "tokenizer_config.json": 300,
+        "sentencepiece.bpe.model": 900,
+        "model.safetensors": 5000,
+        "pytorch_model.bin": 5000,
+        "model.msgpack": 5000,
+        "weights.h5": 5000,
+        "rust_model.ot": 5000,
+        "1_Pooling/config.json": 190,
+        "2_Dense/config.json": 100,
+        "2_Dense/pytorch_model.bin": 4000,
+        "0_Transformer/model-00001-of-00002.safetensors": 5000,
+        "0_Transformer/model-00002-of-00002.safetensors": 5000,
+        "0_Transformer/model.safetensors.index.json": 200,
+        "0_Transformer/pytorch_model-00001-of-00002.bin": 5000,
+        "0_Transformer/pytorch_model-00002-of-00002.bin": 5000,
+        "0_Transformer/onnx/model.onnx": 5000,
+        "onnx/model.onnx": 5000,
+        "openvino/openvino_model.bin": 5000,
+        "openvino/openvino_model.xml": 200,
+        "notes [draft].txt": 10,
+    }
+    cfg = settings_for(environment, EMBEDDING_MODEL="example-model")
+    result = by_name(doctor.run_doctor(cfg, fetch_models=True))["embedding_model"]
+    assert result.status is CheckStatus.OK
+    assert hub.listed == ["sentence-transformers/example-model"]
+    # Safetensors wins where a directory has both formats; a directory whose
+    # only weights are the older format keeps them, or the module could not
+    # load; a file name with pattern characters is matched literally.
+    assert sorted(hub.downloaded) == sorted(
+        [
+            "modules.json",
+            "config.json",
+            "tokenizer_config.json",
+            "sentencepiece.bpe.model",
+            "model.safetensors",
+            "1_Pooling/config.json",
+            "2_Dense/config.json",
+            "2_Dense/pytorch_model.bin",
+            "0_Transformer/model-00001-of-00002.safetensors",
+            "0_Transformer/model-00002-of-00002.safetensors",
+            "0_Transformer/model.safetensors.index.json",
+            "notes [draft].txt",
+        ]
+    )
+    # A repository with the older weight format only still gets its weights.
+    hub.cached = False
+    hub.files = {"modules.json": 300, "config.json": 600, "pytorch_model.bin": 5000}
+    again = by_name(doctor.run_doctor(cfg, fetch_models=True))["embedding_model"]
+    assert again.status is CheckStatus.OK
+    assert sorted(hub.downloaded) == [
+        "config.json",
+        "modules.json",
+        "pytorch_model.bin",
+    ]
+    assert again.data["left_out_files"] == 0
+
+
+def test_fetch_models_that_fetches_nothing_is_a_warning(environment):
+    hub = environment.hub
+    hub.cached = False
+    repo = Settings.model_fields["EMBEDDING_MODEL"].default
+    # The hub lists nothing the embedder loads: nothing is requested, and the
+    # check does not pass.
+    hub.files = {"onnx/model.onnx": 5000, "weights.h5": 5000}
+    empty = by_name(doctor.run_doctor(settings_for(environment), fetch_models=True))[
+        "embedding_model"
+    ]
+    assert empty.status is CheckStatus.WARNING
+    assert "nothing was downloaded" in empty.detail
+    assert hub.calls == [(repo, True)]
+    assert hub.downloaded == [] and hub.cached is False
+    assert "fetched" not in empty.data
+    # The listing answers but the download fails: a warning with the type.
+    hub.files = dict(DEFAULT_REPO_FILES)
+    hub.fail_download = True
+    hub.calls.clear()
+    failed = by_name(doctor.run_doctor(settings_for(environment), fetch_models=True))[
+        "embedding_model"
+    ]
+    assert failed.status is CheckStatus.WARNING
+    assert "ConnectionError" in failed.detail
+    assert hub.calls == [(repo, True), (repo, False)]
+    assert "fetched" not in failed.data
+
+
 @pytest.mark.parametrize("variable", ["HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"])
 def test_fetch_refused_in_offline_mode(environment, variable):
     environment.hub.cached = False
@@ -448,6 +732,7 @@ def test_fetch_refused_in_offline_mode(environment, variable):
     assert result.status is CheckStatus.WARNING
     assert "refused" in result.detail and variable in result.detail
     assert environment.hub.calls == [(repo, True)]
+    assert environment.hub.listed == []
     # --no-network refuses the download as well.
     environment.monkeypatch.delenv(variable)
     environment.hub.calls.clear()
@@ -457,6 +742,7 @@ def test_fetch_refused_in_offline_mode(environment, variable):
     assert offline.status is CheckStatus.WARNING
     assert "--no-network" in offline.detail
     assert environment.hub.calls == [(repo, True)]
+    assert environment.hub.listed == []
 
 
 def test_no_network_skips_probes_as_insufficient_data(environment):
