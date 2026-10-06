@@ -4,7 +4,7 @@ system's words, a hop cap, no persistence handle, registered capability text."""
 import dataclasses
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import pytest
 
