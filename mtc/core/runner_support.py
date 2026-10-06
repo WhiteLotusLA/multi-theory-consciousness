@@ -15,7 +15,9 @@ from mtc.consciousness.enhanced_global_workspace import (
     EnhancedGlobalWorkspace,
     TemporalWorkspaceConfig,
 )
+from mtc.consciousness.pad_affect import PADAffectModel
 from mtc.consciousness.phi_tracker import PhiTracker
+from mtc.pipeline.cycle_augmenter import CycleAugmenter, CycleAugmenterConfig
 
 # Warmup profiles of runner.warmup_profile
 WARMUP_PROFILE_V04 = "v04"
@@ -56,6 +58,10 @@ AST_SWITCHES = (
     "prediction_window_seconds",
     "history_size",
 )
+
+# cycle.* switches of the CycleAugmenter around each workspace cycle. The
+# runners pin every one of them off unless the overrides set it.
+CYCLE_SWITCHES = tuple(f.name for f in fields(CycleAugmenterConfig))
 
 # gwt.* keys that belong to TemporalWorkspaceConfig, not to the workspace
 _TEMPORAL_FIELDS = frozenset(f.name for f in fields(TemporalWorkspaceConfig))
@@ -98,6 +104,28 @@ def build_phi_tracker(
     if "warmup_reference" in phi_overrides:
         kwargs["phi_warmup_reference"] = phi_overrides["warmup_reference"]
     return PhiTracker(**kwargs)
+
+
+def build_cycle_augmenter(
+    overrides: Dict[str, Any],
+    workspace: EnhancedGlobalWorkspace,
+    pad_model: Optional[PADAffectModel] = None,
+    *,
+    pinned_off: bool = True,
+) -> CycleAugmenter:
+    """The cycle augmenter a runner wraps around each workspace cycle.
+
+    With ``pinned_off`` (the runners' setting) every ``cycle.*`` switch is off
+    unless the layered overrides set it, so a seeded run's numbers move only
+    when a researcher opts in; ``pinned_off=False`` starts from the live
+    pipeline's defaults. ``pad_model`` is the PAD model the state's coordinate
+    is recorded through when ``cycle.pad_from_state`` is on.
+    """
+    cycle_ov = {
+        k: v for k, v in overrides.get("cycle", {}).items() if k in CYCLE_SWITCHES
+    }
+    config = CycleAugmenterConfig.from_overrides(cycle_ov, pinned_off=pinned_off)
+    return CycleAugmenter(config, workspace, pad_model=pad_model)
 
 
 def build_workspace(

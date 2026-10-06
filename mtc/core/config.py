@@ -133,6 +133,50 @@ class Settings(BaseSettings):
         description="Trust every speaker model starts from unless a token-checked "
         "trust lookup supplies another value; a name never changes it",
     )
+    SPEAKERS_PATH: str = Field(
+        "config/speakers.yaml",
+        description="Speaker registry (name, role, trust, token_env) read by the "
+        "pipeline's speaker trust source; gitignored, a missing file is an "
+        "empty table",
+    )
+    TRUSTED_SPEAKERS: str = Field(
+        "",
+        description="Comma-separated names that may bypass the safety gate once "
+        "they are authenticated by token; a name alone grants nothing",
+    )
+    SPEAKER_TOKENS: str = Field(
+        "",
+        description="Secret name:token pairs, comma-separated, for speakers "
+        "whose entry names no token_env; compared with a constant-time check",
+    )
+    TRUST_ACTIVATION_BONUS: float = Field(
+        0.1,
+        ge=0.0,
+        le=0.5,
+        allow_inf_nan=False,
+        description="Workspace activation bonus an authenticated trusted "
+        "speaker's message receives",
+    )
+    TRUSTED_EMOTION_TRUST: float = Field(
+        0.8,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description="Trust weight the post-turn emotional record uses for an "
+        "authenticated trusted speaker",
+    )
+    DEFAULT_EMOTION_TRUST: float = Field(
+        0.4,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description="Trust weight the post-turn emotional record uses for every "
+        "other speaker",
+    )
+    DEFAULT_SPEAKER: str = Field(
+        "User",
+        description="Display name for a speaker who gives none; never a real name",
+    )
 
     # ========================================================================
     # SYSTEM CONFIGURATION
@@ -650,6 +694,44 @@ class Settings(BaseSettings):
         description="Comma-separated whole words the consolidation pipeline and "
         "the data classifier read as relationship mentions",
     )
+    RAG_TOP_K: int = Field(
+        10,
+        ge=1,
+        le=50,
+        description="Memories the pipeline's retrieval asks the memory manager for",
+    )
+    RAG_MIN_SCORE: float = Field(
+        0.4,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description="Lowest similarity a retrieved memory may have to reach the "
+        "prompt",
+    )
+    EPISODIC_IMPORTANCE: float = Field(
+        7.0,
+        ge=0.0,
+        le=10.0,
+        allow_inf_nan=False,
+        description="Importance the post-turn step gives each stored episodic line",
+    )
+    PROTECTED_NAMES: str = Field(
+        "",
+        description="Comma-separated names whose quotes the summarizer pins "
+        "verbatim; empty by default and never a code literal",
+    )
+    NIGHT_SEAM_MARKER_ENABLED: bool = Field(
+        False,
+        description="Insert a clock note into the history where a night passed "
+        "between turns",
+    )
+    NIGHT_MIN_GAP_HOURS: float = Field(
+        6.0,
+        gt=0.0,
+        allow_inf_nan=False,
+        description="Hours of silence across the night window that count as a "
+        "night seam",
+    )
 
     # Vector Search
     VECTOR_DIMENSIONS: int = 384
@@ -850,6 +932,14 @@ class Settings(BaseSettings):
         if not role:
             raise ValueError("SAFETY_ESCALATION_ROLE must name a role")
         return role
+
+    @field_validator("DEFAULT_SPEAKER")
+    @classmethod
+    def _default_speaker_is_set(cls, value: str) -> str:
+        name = value.strip()
+        if not name:
+            raise ValueError("DEFAULT_SPEAKER must be a non-empty display name")
+        return name
 
     @field_validator("ALERT_NOTIFIERS")
     @classmethod

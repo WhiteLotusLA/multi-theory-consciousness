@@ -43,6 +43,7 @@ from mtc.core.param_overrides import load_layered_overrides  # noqa: E402
 from mtc.core.runner_support import (  # noqa: E402
     WARMUP_PROFILE_V05,
     attention_shift_type,
+    build_cycle_augmenter,
     build_phi_tracker,
     build_workspace,
 )
@@ -198,6 +199,23 @@ def build_modules(overrides: dict) -> dict:
     }
 
 
+def build_augmenter(overrides: dict, modules: dict):
+    """The cycle augmenter whose hooks wrap the warmup cycles of ``modules``.
+
+    Kept out of the ``build_modules`` dict so that dict stays splattable into
+    ``run_full_assessment``. The per-cycle additions (drive and prospective
+    candidates, binding, the cap, gate arousal and PAD from the state) stay off
+    unless a cycle.* key is set, so the seeded numbers move only when a
+    researcher opts in. None when the workspace is ablated: there is no cycle
+    to wrap."""
+    workspace = modules.get("global_workspace")
+    if workspace is None:
+        return None
+    return build_cycle_augmenter(
+        overrides, workspace, pad_model=modules.get("pad_affect_model")
+    )
+
+
 def _build_neural_states() -> dict:
     """Create neutral synthetic neural states for assessment.
 
@@ -250,6 +268,7 @@ async def warmup(
     cycles: int = WARMUP_CYCLES,
     profile: str = _DEFAULT_WARMUP_PROFILE,
     ce_overrides: Optional[dict] = None,
+    augmenter=None,
 ):
     """Run consciousness cycles to fill statistics buffers.
     Mirrors scripts/run_assessment.py warmup logic.
@@ -259,7 +278,9 @@ async def warmup(
     schema captured shifts only, "v05" alternates chosen and pulled shifts.
     The PhiTracker the workspace records into is read back for the causal
     emergence analysis, which is built from the causal_emergence overrides
-    ``ce_overrides``; without a workspace nothing is recorded."""
+    ``ce_overrides``; without a workspace nothing is recorded. ``augmenter``
+    is the cycle augmenter (``build_augmenter``) whose hooks wrap each cycle;
+    None runs the cycles bare."""
     workspace = modules.get("global_workspace")
     attention = modules.get("attention_schema")
     metacognition = modules.get("metacognition")
@@ -267,6 +288,7 @@ async def warmup(
     beautiful_loop = modules.get("beautiful_loop")
     rpt = modules.get("rpt_measurement")
     pad_affect = modules.get("pad_affect_model")
+    pad_from_state = augmenter is not None and augmenter.config.pad_from_state
     oscillatory = rpt.oscillatory_binding if rpt is not None else None
     phi_tracker = getattr(workspace, "phi_tracker", None)
 
@@ -279,10 +301,15 @@ async def warmup(
         hot_obj = None
         fep_result = None
 
-        # GWT competition cycle
+        # GWT competition cycle, with the cycle augmenter's hooks around it
+        # (an identity unless a cycle.* switch is set)
         if workspace is not None:
             candidates = _make_candidates(i)
+            if augmenter is not None:
+                candidates = augmenter.before_cycle(candidates)
             state = await workspace.process_consciousness_cycle(candidates)
+            if augmenter is not None:
+                augmenter.after_cycle(state)
 
         # Feed AST
         if attention is not None and state is not None and state.primary_content:
@@ -389,8 +416,10 @@ async def warmup(
             }
             oscillatory.bind(osc_metrics)
 
-        # Feed PAD affect model - full valid domain per PADSources spec
-        if pad_affect is not None:
+        # Feed PAD affect model - full valid domain per PADSources spec. With
+        # cycle.pad_from_state set the augmenter has already fed the model from
+        # the cycle's state, so the random feed is skipped.
+        if pad_affect is not None and not pad_from_state:
             pad_sources = PADSources(
                 somatic_valence=np.random.uniform(-1.0, 1.0),
                 homeostatic_satisfaction=np.random.uniform(-1.0, 1.0),
@@ -441,6 +470,7 @@ async def _compute_noise_baseline(
             WARMUP_CYCLES,
             _warmup_profile(overrides),
             overrides.get("causal_emergence", {}),
+            augmenter=build_augmenter(overrides, modules),
         )
         assessment = ConsciousnessAssessment(**overrides.get("assessment", {}))
         report = await assessment.run_full_assessment(
@@ -573,6 +603,7 @@ async def run_ablation(
             WARMUP_CYCLES,
             _warmup_profile(overrides),
             overrides.get("causal_emergence", {}),
+            augmenter=build_augmenter(overrides, modules),
         )
         assessment = ConsciousnessAssessment(**overrides.get("assessment", {}))
         ablated_report = await assessment.run_full_assessment(
@@ -656,6 +687,7 @@ async def run():
         WARMUP_CYCLES,
         _warmup_profile(overrides),
         overrides.get("causal_emergence", {}),
+        augmenter=build_augmenter(overrides, modules),
     )
     assessment = ConsciousnessAssessment(**overrides.get("assessment", {}))
     report = await assessment.run_full_assessment(

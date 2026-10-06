@@ -255,6 +255,35 @@ def test_matrix_is_data_and_replaceable():
         AccessPolicy(rows=(), consent_stages=frozenset(), stage_independent={})
 
 
+def test_companion_role_has_the_guardian_policy():
+    assert UserRole.from_string("companion") is UserRole.COMPANION
+    default = AccessPolicy.default()
+    # An explicit entry in every stage row, equal to the guardian's
+    for row in default.rows:
+        assert UserRole.COMPANION in row
+        assert row[UserRole.COMPANION] is row[UserRole.GUARDIAN]
+    assert (
+        default.stage_independent[UserRole.COMPANION]
+        is default.stage_independent[UserRole.GUARDIAN]
+    )
+    most = default.most_protective_row()
+    assert most[UserRole.COMPANION] is most[UserRole.GUARDIAN]
+    assert UserRole.COMPANION not in default.emergency_roles
+    for enabled, day in ((True, 0), (True, 400), (True, 7000), (False, 0)):
+        enforcer, _ = _enforcer(enabled, day=day)
+        for tier in DC:
+            companion = enforcer.check_access(_ctx(UserRole.COMPANION, tier))
+            guardian = enforcer.check_access(_ctx(UserRole.GUARDIAN, tier))
+            assert companion.outcome is guardian.outcome, (enabled, day, tier)
+        matrix = enforcer.access_matrix()
+        assert matrix["companion"] == matrix["guardian"]
+    enforcer, _ = _enforcer(True, day=7000)
+    denied = enforcer.emergency_override(
+        UserRole.COMPANION, "wellbeing check after an alarm"
+    )
+    assert denied.outcome is AccessOutcome.DENY
+
+
 def test_role_strings_map_without_names():
     for role in UserRole:
         assert UserRole.from_string(role.value) is role
@@ -263,6 +292,7 @@ def test_role_strings_map_without_names():
         "subject",
         "creator",
         "guardian",
+        "companion",
         "system",
         "researcher",
         "guest",

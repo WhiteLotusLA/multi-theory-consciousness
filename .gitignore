@@ -96,6 +96,10 @@ config/rsi/canon.json
 # Operator persona (private); templates ship separately
 config/persona.yaml
 
+# Speaker registry (private names and token variable names); the shipped
+# template is config/speakers.example.yaml
+config/speakers.yaml
+
 # Operator CTM persona and seed packs (private); templates ship separately
 config/ctm/persona.yaml
 config/ctm/seeds.d/

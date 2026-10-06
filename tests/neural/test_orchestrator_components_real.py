@@ -134,6 +134,49 @@ def test_default_orchestrator_builds_no_store_client():
     assert result.returncode == 0, result.stderr[-2000:]
 
 
+def test_pipeline_publishes_through_the_public_aliases():
+    from mtc.consciousness.consciousness_integration import ConsciousnessIntegration
+    from mtc.consciousness.enhanced_global_workspace import EnhancedGlobalWorkspace
+    from mtc.core.config import Settings
+    from mtc.core.narration import NarrationFlags
+    from mtc.pipeline.consciousness_orchestrator import ConsciousnessOrchestrator
+    from mtc.pipeline.context_types import RawConversationContext
+    from mtc.pipeline.cycle_augmenter import CycleAugmenter, CycleAugmenterConfig
+    from mtc.pipeline.speaker_trust import SpeakerTrust
+
+    neural = NeuralOrchestrator()
+    assert neural.verification_neural_data() == neural._verification_neural_data()
+    workspace = EnhancedGlobalWorkspace(thalamic_gate_enabled=False)
+    cfg = Settings(DEBUG=False)
+    pipeline = ConsciousnessOrchestrator(
+        workspace,
+        augmenter=CycleAugmenter(CycleAugmenterConfig.all_off(), workspace),
+        narration=NarrationFlags(binding=True),
+        speaker_trust=SpeakerTrust(settings=cfg),
+        settings=cfg,
+        neural_orchestrator=neural,
+    )
+    memories = [{"content": "a stored line", "score": 0.7}]
+    raw = RawConversationContext(
+        message="what did we say?",
+        identity=pipeline.speaker_trust.verify("Alice", None),
+        retrieved_memories=memories,
+    )
+    context = asyncio.run(pipeline.process(raw))
+    assert context.cycle_ok
+    assert pipeline.status()["failures"] == {}
+    # The integration's committed hook reads what the public alias published
+    integration = ConsciousnessIntegration(
+        neural_orchestrator=neural, enable_persistence=False
+    )
+    keys = integration._build_indicator_contract_keys(neural.verification_neural_data())
+    assert keys["memory_access"]["retrieved_memories"] == memories
+    memories.append({"content": "a later line"})
+    assert len(neural._last_retrieved_memories) == 1  # a copy was published
+    # No substrate has produced output, so no neural-state block is claimed
+    assert context.theory_sections.neural_state is None
+
+
 def test_enable_mongodb_defaults_to_false():
     import inspect
 
@@ -245,7 +288,8 @@ def test_process_experience_end_to_end_small(small_defaults):
     assert orchestrator._last_binding_result is not None
     assert orchestrator.state.episodic_memories_count == 1
 
-    blocks = orchestrator._verification_neural_data()
+    blocks = orchestrator.verification_neural_data()
+    assert blocks == orchestrator._verification_neural_data()  # the public alias
     assert blocks["snn"]["is_real"] is True  # the SNN produced a synchrony
     assert blocks["lsm"]["is_real"] is False  # an untrained readout is no coherence
     assert blocks["lsm"]["coherence"] is None

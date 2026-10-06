@@ -58,7 +58,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -505,8 +505,9 @@ class NeuralOrchestrator:
         self.latest_neural_signals: Optional[Dict[str, np.ndarray]] = None
         self.latest_substrate_states: Optional[Dict[str, Dict[str, Any]]] = None
 
-        # Per-turn memory retrieval, published by the conversation pipeline;
-        # honestly empty until a turn retrieves something.
+        # Per-turn memory retrieval, published by the conversation pipeline
+        # through publish_retrieved_memories; honestly empty until a turn
+        # retrieves something.
         self._last_retrieved_memories: List[Any] = []
 
         # Optional frameworks
@@ -973,6 +974,22 @@ class NeuralOrchestrator:
             "cross_coherence": result.cross_coherence,
             "binding_count": getattr(self, "_binds_run", 0),
         }
+
+    def publish_retrieved_memories(self, memories: Optional[Sequence[Any]]) -> None:
+        """Publish a turn's retrieved memories for the measurement layer.
+
+        Stores a copy where the consciousness integration's committed hook
+        reads it (``_last_retrieved_memories``, the indicators'
+        ``memory_access.retrieved_memories``); None publishes an empty turn.
+        The memories are private conversation data.
+        """
+        self._last_retrieved_memories = list(memories or [])
+
+    def verification_neural_data(self) -> Dict[str, Any]:
+        """The substrate blocks of the latest experience, for verification and
+        the prompt's neural-state section (see ``_verification_neural_data``):
+        a block is real only when its substrate produced output."""
+        return self._verification_neural_data()
 
     def _stash_latest_signals(
         self, snn_result: Any, subconscious_state: Any, episodic_memory: Any

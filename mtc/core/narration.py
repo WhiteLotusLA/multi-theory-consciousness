@@ -52,10 +52,14 @@ class NarrationFlags:
     - ``binding`` (``NARRATE_BINDING``): the orchestrator's binding line and
       the prompt's neural-state section.
     - ``self_model`` (``NARRATE_SELF_MODEL``): the ``MetacognitionModule`` and
-      ``BeautifulLoop`` self-model reports.
+      ``BeautifulLoop`` self-model reports, and the attention schema's and
+      metacognition module's first-person reports in the prompt's attention
+      and metacognitive sections (off, a neutral measured summary of this
+      cycle's attention schema and higher-order thoughts takes their place).
     - ``free_energy`` (``NARRATE_FREE_ENERGY``):
       ``ActiveInferenceConfig.narrate_free_energy`` and the orchestrator's
-      surprise line.
+      surprise line; with ``body_drives`` off too, the prompt's active
+      inference section stays empty.
     - ``thought_mood`` (``NARRATE_THOUGHT_MOOD``): the prompt's thought-mood
       stamps.
     - ``speaker_model`` (``NARRATE_SPEAKER_MODEL``):

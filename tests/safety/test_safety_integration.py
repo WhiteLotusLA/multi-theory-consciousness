@@ -2,6 +2,7 @@
 
 import json
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -156,6 +157,40 @@ async def test_default_speaker_role_grants_nothing(rig):
     # a recognized label is kept as given
     kept = await rig.integration.pre_message_check(BENIGN, "Alice", "researcher")
     assert kept["speaker_role"] == "researcher" and kept["role_recognized"] is True
+
+
+@pytest.mark.asyncio
+async def test_authenticated_companion_is_recorded_as_companion(
+    rig, settings, monkeypatch
+):
+    from mtc.pipeline.speaker_trust import SpeakerEntry, SpeakerTrust
+
+    token = secrets.token_hex(16)
+    monkeypatch.setenv("SAFETY_TEST_COMPANION_TOKEN", token)
+    trust = SpeakerTrust(
+        [
+            SpeakerEntry(
+                "Operator", "companion", 0.7, token_env="SAFETY_TEST_COMPANION_TOKEN"
+            )
+        ],
+        settings=settings,
+    )
+    verified = trust.verify("Operator", token)
+    assert trust.safety_role(verified) == "companion"
+    result = await rig.integration.pre_message_check(
+        BENIGN, verified.name, trust.safety_role(verified)
+    )
+    # A recognized role, never the unknown-label fallback
+    assert result["speaker_role"] == "companion"
+    assert result["role_recognized"] is True
+    [read] = await _events(rig, event_type="data_read")
+    assert read["user_role"] == "companion"
+    # The same name without the token is a guest
+    claimed = trust.verify("Operator", None)
+    guest = await rig.integration.pre_message_check(
+        BENIGN, claimed.name, trust.safety_role(claimed)
+    )
+    assert guest["speaker_role"] == "guest" and guest["role_recognized"] is True
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,23 @@
+# Speaker registry template.
+#
+# Copy this file to config/speakers.yaml (gitignored) and fill it in, or let
+# the onboarding wizard write it. The pipeline reads the file through the
+# SPEAKERS_PATH setting.
+#
+# Each entry under `speakers` has four fields:
+#   name:      the name the speaker gives (private at runtime, never logged)
+#   role:      one of creator, companion or guest
+#   trust:     a number from 0.0 to 1.0, granted only after authentication
+#   token_env: the environment variable that holds the speaker's secret token;
+#              leave it out to fall back to the SPEAKER_TOKENS setting
+#
+# A name alone grants nothing. A speaker is authenticated only when the token
+# they present matches the configured one; without that match every speaker,
+# whatever they are called, receives the default trust and no bypass.
+#
+# Example entry (commented out):
+#   - name: Alice
+#     role: creator
+#     trust: 0.9
+#     token_env: MTC_SPEAKER_TOKEN_ALICE
+speakers: []

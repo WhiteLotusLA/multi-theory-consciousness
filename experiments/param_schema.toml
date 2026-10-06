@@ -770,3 +770,49 @@ description = "Row order of the transition matrix the analyzer reads: big_endian
 type = "bool"
 default = true
 description = "Let RPT recurrence strengthen through spike-timing plasticity across measurements (false is v0.4.0)"
+
+# -----------------------------------------------------------------------------
+# Cycle: CycleAugmenter (per-cycle additions around each workspace cycle)
+# The defaults describe the live pipeline. Both runners pin every switch off
+# unless it is set, so the seeded numbers move only when a researcher opts in.
+# -----------------------------------------------------------------------------
+
+[cycle.drive_candidates]
+type = "bool"
+default = true
+description = "Admit urgent homeostatic drives as HOMEOSTATIC workspace candidates each cycle; the runners pin it off unless set (v0.4.0: off)"
+
+[cycle.drive_urgency_threshold]
+type = "float"
+default = 0.5
+min = 0.0
+max = 1.0
+description = "Urgency above which a drive becomes a candidate; inert while drive_candidates is off, which the runners pin unless set (v0.4.0: no drive candidates)"
+
+[cycle.prospective_candidates]
+type = "bool"
+default = true
+description = "Inject the prospective simulation generated after a cycle as an INTERNAL candidate of the next; the runners pin it off unless set (v0.4.0: off)"
+
+[cycle.crossmodal_binding]
+type = "bool"
+default = true
+description = "Run cross-modal binding over the candidates before competition; the runners pin it off unless set (v0.4.0: off)"
+
+[cycle.gate_arousal]
+type = "str"
+default = "protoself"
+choices = ["protoself", "pad", "workspace"]
+description = "Source of the thalamic gate's arousal: protoself feeds the protoself arousal through set_arousal, pad leaves the PAD arousal recorded on the state for the next cycle, workspace leaves the gate to its own derivation; the runners pin workspace unless set (v0.4.0: workspace)"
+
+[cycle.pad_from_state]
+type = "bool"
+default = true
+description = "Compute the PAD coordinate from the cycle's state and record it on the state; the runners pin it off unless set, and the experiment runner then keeps its random PAD feed (v0.4.0: off)"
+
+[cycle.candidate_cap]
+type = "int"
+default = 20
+min = 0
+max = 200
+description = "Pre-attentive cap on candidates by activation plus emotional salience, 0 for no cap; the runners pin 0 unless set (v0.4.0: 0)"

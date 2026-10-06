@@ -87,6 +87,7 @@ from mtc.core.param_overrides import deep_merge, load_overrides, preset_path
 from mtc.core.runner_support import (
     WARMUP_PROFILE_V05,
     attention_shift_type,
+    build_cycle_augmenter,
     build_phi_tracker,
     build_workspace,
 )
@@ -138,16 +139,23 @@ async def warmup(
     active_inference,
     cycles=5,
     profile=_DEFAULT_WARMUP_PROFILE,
+    augmenter=None,
 ):
     """Run several consciousness cycles to populate module history.
 
     ``profile`` is the runner.warmup_profile switch: "v04" feeds the attention
     schema captured shifts only, "v05" alternates chosen and pulled shifts.
+    ``augmenter`` is the cycle augmenter whose hooks wrap each cycle; None
+    (or one with every cycle.* switch off) leaves the cycles as they were.
     """
     print(f" Warming up modules ({cycles} cycles) ...", flush=True)
     for i in range(cycles):
         candidates = _make_candidates()
+        if augmenter is not None:
+            candidates = augmenter.before_cycle(candidates)
         state = await workspace.process_consciousness_cycle(candidates)
+        if augmenter is not None:
+            augmenter.after_cycle(state)
 
         # Feed AST
         if state.primary_content:
@@ -529,6 +537,10 @@ async def main():
         if args.full:
             extra_modules = {"phi_tracker": workspace.phi_tracker}
     profile = overrides.get("runner", {}).get("warmup_profile", _DEFAULT_WARMUP_PROFILE)
+    # Every cycle.* switch stays off unless the overrides set it
+    augmenter = build_cycle_augmenter(
+        overrides, workspace, pad_model=extra_modules.get("pad_affect_model")
+    )
 
     if args.full:
         await warmup(
@@ -538,6 +550,7 @@ async def main():
             active_inference,
             cycles=args.warmup_cycles,
             profile=profile,
+            augmenter=augmenter,
         )
 
     if args.ablation:

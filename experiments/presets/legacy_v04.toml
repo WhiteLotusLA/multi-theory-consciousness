@@ -57,3 +57,11 @@ tpm_row_order = "little_endian"
 
 [rpt]
 stdp_plasticity_enabled = false
+
+[cycle]
+drive_candidates = false
+prospective_candidates = false
+crossmodal_binding = false
+gate_arousal = "workspace"
+pad_from_state = false
+candidate_cap = 0

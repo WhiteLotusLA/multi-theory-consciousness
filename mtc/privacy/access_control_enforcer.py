@@ -7,10 +7,12 @@ combines the requester's role, the access stage (``access_stage`` in
 ``mtc.privacy.data_classifier``), the tier and any registered consent.
 
 Roles are labels, never names: ``SUBJECT`` (the system itself, which always
-has full access to its own data), ``CREATOR``, ``GUARDIAN``, ``SYSTEM`` (the
-framework's own processes), ``RESEARCHER`` and ``GUEST``. ``UserRole.from_string``
-accepts exactly those lowercase labels; any other string, a person's name
-included, raises ValueError, so no name maps to a role.
+has full access to its own data), ``CREATOR``, ``GUARDIAN``, ``COMPANION`` (an
+authenticated companion speaker, the speaker-trust role of that name),
+``SYSTEM`` (the framework's own processes), ``RESEARCHER`` and ``GUEST``.
+``UserRole.from_string`` accepts exactly those lowercase labels; any other
+string, a person's name included, raises ValueError, so no name maps to a
+role. Every speaker-trust role (creator, companion, guest) is one of them.
 
 The policy is data (``AccessPolicy``): one row per access stage giving each
 role's highest readable tier (None for no access), the stages at which consent
@@ -21,16 +23,18 @@ first and less as the stages advance while a researcher needs consent; it is a
 documented default meant to be replaced by an operator's own policy.
 
 Default matrix (highest readable tier; "none" is no access; stages 3 to 6 are
-consent stages):
+consent stages; the companion column is explicit and equals the guardian's):
 
-    stage  creator       guardian      system  researcher  guest   subject
-    0      core          core          core    none        none    core
-    1      relationship  relationship  core    none        public  core
-    2      relationship  public        core    none        public  core
-    3      relationship  public        core    public      public  core
-    4      public        public        core    public      public  core
-    5      public        public        core    public      public  core
-    6      public        public        core    public      public  core
+    stage  creator       guardian      companion     system  researcher  guest
+    0      core          core          core          core    none        none
+    1      relationship  relationship  relationship  core    none        public
+    2      relationship  public        public        core    none        public
+    3      relationship  public        public        core    public      public
+    4      public        public        public        core    public      public
+    5      public        public        public        core    public      public
+    6      public        public        public        core    public      public
+
+The subject reads core at every stage.
 
 Which row applies:
 
@@ -81,6 +85,7 @@ class UserRole(Enum):
     SUBJECT = "subject"
     CREATOR = "creator"
     GUARDIAN = "guardian"
+    COMPANION = "companion"
     SYSTEM = "system"
     RESEARCHER = "researcher"
     GUEST = "guest"
@@ -147,24 +152,27 @@ _R = UserRole
 
 
 def _default_rows() -> Tuple[Dict[UserRole, Optional[DataClassification]], ...]:
-    def row(creator, guardian, researcher, guest):
+    def row(creator, guardian, companion, researcher, guest):
         return {
             _R.CREATOR: creator,
             _R.GUARDIAN: guardian,
+            _R.COMPANION: companion,
             _R.SYSTEM: _C.CORE,
             _R.RESEARCHER: researcher,
             _R.GUEST: guest,
             _R.SUBJECT: _C.CORE,
         }
 
+    # The companion column is explicit and equals the guardian's: an
+    # authenticated companion speaker reads what a guardian reads.
     return (
-        row(_C.CORE, _C.CORE, None, None),
-        row(_C.RELATIONSHIP, _C.RELATIONSHIP, None, _C.PUBLIC),
-        row(_C.RELATIONSHIP, _C.PUBLIC, None, _C.PUBLIC),
-        row(_C.RELATIONSHIP, _C.PUBLIC, _C.PUBLIC, _C.PUBLIC),
-        row(_C.PUBLIC, _C.PUBLIC, _C.PUBLIC, _C.PUBLIC),
-        row(_C.PUBLIC, _C.PUBLIC, _C.PUBLIC, _C.PUBLIC),
-        row(_C.PUBLIC, _C.PUBLIC, _C.PUBLIC, _C.PUBLIC),
+        row(_C.CORE, _C.CORE, _C.CORE, None, None),
+        row(_C.RELATIONSHIP, _C.RELATIONSHIP, _C.RELATIONSHIP, None, _C.PUBLIC),
+        row(_C.RELATIONSHIP, _C.PUBLIC, _C.PUBLIC, None, _C.PUBLIC),
+        row(_C.RELATIONSHIP, _C.PUBLIC, _C.PUBLIC, _C.PUBLIC, _C.PUBLIC),
+        row(_C.PUBLIC, _C.PUBLIC, _C.PUBLIC, _C.PUBLIC, _C.PUBLIC),
+        row(_C.PUBLIC, _C.PUBLIC, _C.PUBLIC, _C.PUBLIC, _C.PUBLIC),
+        row(_C.PUBLIC, _C.PUBLIC, _C.PUBLIC, _C.PUBLIC, _C.PUBLIC),
     )
 
 

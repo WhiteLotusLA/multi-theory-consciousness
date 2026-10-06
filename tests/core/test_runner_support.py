@@ -10,16 +10,20 @@ from mtc.consciousness.enhanced_global_workspace import (
     COMPETITION_FLAT,
     EnhancedGlobalWorkspace,
 )
+from mtc.consciousness.pad_affect import PADAffectModel
 from mtc.consciousness.phi_tracker import PhiTracker
 from mtc.core import runner_support
 from mtc.core.runner_support import (
     AST_SWITCHES,
+    CYCLE_SWITCHES,
     FEP_BEHAVIOUR_SWITCHES,
     GWT_SWITCHES,
     attention_shift_type,
+    build_cycle_augmenter,
     build_phi_tracker,
     build_workspace,
 )
+from mtc.pipeline.cycle_augmenter import CycleAugmenter, CycleAugmenterConfig
 
 
 def test_v04_profile_is_all_captured():
@@ -147,6 +151,39 @@ def test_build_workspace_does_not_mutate_overrides():
     snapshot = {key: dict(value) for key, value in overrides.items()}
     build_workspace(overrides, None)
     assert overrides == snapshot
+
+
+def test_build_cycle_augmenter_pins_off():
+    workspace = build_workspace({}, None)
+    assert set(CYCLE_SWITCHES) == {
+        "drive_candidates",
+        "drive_urgency_threshold",
+        "prospective_candidates",
+        "crossmodal_binding",
+        "gate_arousal",
+        "pad_from_state",
+        "candidate_cap",
+    }
+    pinned = build_cycle_augmenter({}, workspace)
+    assert isinstance(pinned, CycleAugmenter)
+    assert pinned.config == CycleAugmenterConfig.all_off()
+    assert pinned.workspace is workspace
+
+    # A set switch moves; every other one stays off
+    partial = build_cycle_augmenter({"cycle": {"drive_candidates": True}}, workspace)
+    assert partial.config.drive_candidates is True
+    assert partial.config.pad_from_state is False
+    assert partial.config.gate_arousal == "workspace"
+    assert partial.config.candidate_cap == 0
+
+    # The live pipeline starts from the defaults instead
+    live = build_cycle_augmenter({}, workspace, pinned_off=False)
+    assert live.config == CycleAugmenterConfig()
+
+    # Keys outside the cycle family are ignored, the pad model is passed on
+    pad = PADAffectModel()
+    with_pad = build_cycle_augmenter({"gwt": {"capacity": 4}}, workspace, pad_model=pad)
+    assert with_pad.pad_model is pad
 
 
 def test_build_phi_tracker_min_transitions():

@@ -181,6 +181,13 @@ Every key is read through `get_settings()`. Values come from the process environ
 | Variable | Default | Description |
 |---|---|---|
 | `MTC_DEFAULT_SPEAKER_TRUST` | `0.5` | Trust every speaker model starts from unless a token-checked trust lookup supplies another value; a name never changes it |
+| `MTC_SPEAKERS_PATH` | `config/speakers.yaml` | Speaker registry (name, role, trust, token_env) read by the pipeline's speaker trust source; gitignored, a missing file is an empty table |
+| `MTC_TRUSTED_SPEAKERS` | `(empty)` | Comma-separated names that may bypass the safety gate once they are authenticated by token; a name alone grants nothing |
+| `MTC_SPEAKER_TOKENS` | `(empty)` | Secret name:token pairs, comma-separated, for speakers whose entry names no token_env; compared with a constant-time check |
+| `MTC_TRUST_ACTIVATION_BONUS` | `0.1` | Workspace activation bonus an authenticated trusted speaker's message receives |
+| `MTC_TRUSTED_EMOTION_TRUST` | `0.8` | Trust weight the post-turn emotional record uses for an authenticated trusted speaker |
+| `MTC_DEFAULT_EMOTION_TRUST` | `0.4` | Trust weight the post-turn emotional record uses for every other speaker |
+| `MTC_DEFAULT_SPEAKER` | `User` | Display name for a speaker who gives none; never a real name |
 
 ## Consciousness modules
 
@@ -248,6 +255,12 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_SEMANTIC_MEMORY_PERMANENT` | `true` |  |
 | `MTC_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Sentence-transformers model the embedder loads; its output width must equal VECTOR_DIMENSIONS |
 | `MTC_RELATIONSHIP_KEYWORDS` | `family,friend,parent,mother,father,sibling,sister,brother,partner,spouse,child,daughter,son,grandparent,pet` | Comma-separated whole words the consolidation pipeline and the data classifier read as relationship mentions |
+| `MTC_RAG_TOP_K` | `10` | Memories the pipeline's retrieval asks the memory manager for |
+| `MTC_RAG_MIN_SCORE` | `0.4` | Lowest similarity a retrieved memory may have to reach the prompt |
+| `MTC_EPISODIC_IMPORTANCE` | `7.0` | Importance the post-turn step gives each stored episodic line |
+| `MTC_PROTECTED_NAMES` | `(empty)` | Comma-separated names whose quotes the summarizer pins verbatim; empty by default and never a code literal |
+| `MTC_NIGHT_SEAM_MARKER_ENABLED` | `false` | Insert a clock note into the history where a night passed between turns |
+| `MTC_NIGHT_MIN_GAP_HOURS` | `6.0` | Hours of silence across the night window that count as a night seam |
 
 ## Emotion and learning
 
