@@ -4,6 +4,7 @@ This document tracks MTC releases and their relationship to publications.
 
 | Version | Date | Highlights | Notes |
 |---------|------|-----------|-------|
+| v0.5.0 | tagged at the release gate | The complete generic architecture: measurement defects of v0.4.0 fixed behind switches, the conversation runtime, five optional stores with in-memory defaults, the API, the `mtc` command with onboarding, setup and operations tooling. | Scores are not comparable with v0.4.0; the `legacy_v04` preset reproduces v0.4.0. See docs/MIGRATION_FROM_V04.md |
 | v0.4.0 | 2026-04-07 | Butlin 2025 alignment: Agency & Embodiment theory, 30 indicators plus 3 negative checks, Butlin 2025 metadata, PhiTracker, negative-indicator penalty. | Indicator count 25 -> 30, theory count 7 -> 8 |
 | v0.3.0 | 2026-03-27 | AutoConsciousness parameter research loop, real measurements replace three placeholder indicators, tuned GWT and FEP defaults. | Score values shift versus v0.2.x |
 | v0.2.1 | 2026-03-25 | Indicators 24-25 (`temporal_prediction_depth`, `agent_environment_coupling`), ConTraSt theory-level weighting. | Patch release |
@@ -20,7 +21,58 @@ To reproduce the paper's assessment results exactly:
     pip install -e ".[dev]"
     python scripts/run_assessment.py --full --report
 
+To reproduce the published v0.4.0 numbers on v0.5.0, run the experiment runner
+with the legacy preset:
+
+    PYPHI_WELCOME_OFF=yes python3 scripts/run_experiment.py --preset legacy_v04
+
 ## API Changes
+
+### v0.4.0 -> v0.5.0
+
+**Measurement changes.** Every behaviour change that can move an indicator
+score is a constructor switch whose default is the corrected behaviour and
+whose v0.4.0 value is in `experiments/presets/legacy_v04.toml`. The
+assessment reports what it could not measure: each `IndicatorResult` and
+`ConsciousnessReport` carries a `status` (`measured`, `absent`,
+`insufficient_data`), the report carries `coverage` and
+`insufficient_indicators`, an `insufficient_data` indicator is left out of the
+averages, and the overall score is None when nothing was included. The full
+switch list and the measured differences are in
+[docs/MIGRATION_FROM_V04.md](docs/MIGRATION_FROM_V04.md).
+
+**Configuration.** Environment keys are the `Settings` field names with the
+`MTC_` prefix; the v0.4.0 example's `MTC_PG_*` and `MTC_MONGO_*` names became
+`MTC_POSTGRES_*` and `MTC_MONGODB_*`. Store names derive from `DB_PREFIX`.
+`MODEL_TYPE`, `API_WORKERS`, `API_TIMEOUT`, the `ENABLE_*` switches and the
+separate Neo4j host and port keys are gone. `API_PORT` is 8200 and
+authentication is on by default. `.env.example` and `docs/CONFIGURATION.md`
+are generated from `Settings`.
+
+**Entry points.** The `mtc` console script (`mtc.cli.main:main`) with `init`,
+`doctor`, `db`, `assess`, `serve`, `chat`, `ctm` and `privacy-audit`.
+`scripts/run_assessment.py` is a shim over `mtc assess` with unchanged flags.
+`python -m mtc.api.server` serves the API.
+
+**Extras.** `research` replaces `assessment` (kept as an alias); the store
+extras `postgres`, `mongo`, `redis`, `neo4j` and `qdrant` with `databases` as
+their union; `llm`, `anthropic`, `api` and `embeddings`; `iit` (PyPhi, Python
+3.12 or later, never part of `all`).
+
+**New packages.** `mtc.api`, `mtc.brain` and `mtc.brain.providers`,
+`mtc.cli`, `mtc.db`, `mtc.devtools`, `mtc.knowledge`, `mtc.memory`, `mtc.monitoring`,
+`mtc.onboarding`, `mtc.pipeline`, `mtc.privacy`, `mtc.research`,
+`mtc.resources`, `mtc.safety`, `mtc.validation`,
+`mtc.consciousness.continuous`, `mtc.consciousness.learning` and
+`mtc.consciousness.rsi`. Every store client is optional and imported lazily.
+
+**Other interface changes.**
+- `EnhancedGlobalWorkspace()` defaults to `ignition_threshold` 0.3 (it was
+  0.1) and to hierarchical competition with the thalamic gate.
+- `NeuralOrchestrator(enable_mongodb=...)` defaults to False.
+- `SNNConfig.dt` (default 1e-3) sets the SNN's time step in seconds; 1.0
+  reproduces the v0.4.0 network.
+- The device is chosen by `MTC_DEVICE` (`auto`, `cpu`, `mps`, `cuda`) only.
 
 ### v0.2.x -> v0.4.0
 
@@ -33,7 +85,7 @@ To reproduce the paper's assessment results exactly:
 - `mtc.core.param_overrides`: TOML override loader with schema validation (v0.3.0)
 - `mtc.consciousness.phi_tracker`: PhiTracker for IIT state diversity (v0.4.0)
 
-### v0.1.x → v0.2.0
+### v0.1.x -> v0.2.0
 
 **Breaking changes:**
 - `DCMScorer` class removed. Use `BenchmarkRunner` instead.
@@ -47,8 +99,3 @@ To reproduce the paper's assessment results exactly:
 - `mtc.consciousness.pad_affect`: PAD dimensional affect model
 - `mtc.neural.oscillatory_binding`: AKOrN Kuramoto oscillatory binding
 - `mtc.core.circuit_breaker`: Generic async circuit breaker
-
-**New indicators (#23-25):**
-- `oscillatory_binding_coherence` (RPT)
-- `causal_emergence` (IIT)
-- `affect_coherence` (FEP)

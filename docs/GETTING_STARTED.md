@@ -1,153 +1,153 @@
 # Getting Started
 
+MTC installs as a Python package with one command, `mtc`. The setup wizard
+(`mtc init`) writes the configuration; everything else reads it. Start with
+the first path below: it needs no database, no model server and no network
+after the install, and it shows the whole pipeline running.
+
+Read [HONEST_LIMITATIONS.md](HONEST_LIMITATIONS.md) first: MTC is a research
+architecture, not a consciousness detector.
+
 ## Prerequisites
 
-- **Python 3.11+** (3.12 also supported)
-- **pip** (or your preferred package manager)
-- **Git**
+- Python 3.11 or later (3.12 or later for the optional `iit` extra).
+- Git and pip.
+- For the store paths: Docker with Compose v2, or Homebrew (macOS) or your
+  distribution's packages (Linux).
 
-### Databases
+## Path 1: in memory, with the mock provider
 
-- None for v0.4.0. This release contains no database code; a five-store persistence layer (PostgreSQL, MongoDB, Qdrant, Neo4j, Redis) is in development.
-
-You can run assessments and experiment with individual theory modules without any databases.
-
----
-
-## Installation
+No database and no model: every store stays in process memory and the mock
+provider answers with labelled test text. This is the path run on the
+development machine.
 
 ```bash
-# Clone
 git clone https://github.com/WhiteLotusLA/multi-theory-consciousness.git
 cd multi-theory-consciousness
-
-# Create virtual environment
-python3.11 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install core framework
-pip install -e .
-
-# Install with neural substrates (SNN, LSM)
-pip install -e ".[neural]"
-
-# Install with active inference (FEP)
-pip install -e ".[fep]"
-
-# Install everything
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[all]"
+
+mtc init --print-example-answers > answers.yaml
+mtc init --from answers.yaml --yes --no-probe
+mtc doctor
+mtc assess
+python examples/full_pipeline_demo.py
 ```
+
+- `pip install -e ".[all]"` installs the core with every extra except `iit`:
+  the neural substrates, active inference, the store clients, the model
+  clients, the API server, the embedder and the research tools. A bare
+  `pip install -e .` installs the core alone, which imports and configures
+  but cannot build the active inference module: `mtc assess` and the demo
+  need at least the `fep` extra (pymdp), and `mtc doctor` names the extras
+  that are missing.
+- `mtc init --print-example-answers` prints a synthetic answers file (the
+  companion `Tessera`, the creator `Alice`, the `friend` type, every store
+  disabled, the `mock` provider). Edit it, or run `mtc init` without flags
+  for the interactive wizard. The wizard writes `.env` (mode 0600, with a
+  generated API key), the persona, the speakers file and the identity
+  statement, all gitignored. See [ONBOARDING.md](ONBOARDING.md).
+- `mtc doctor` checks the install and says what it could not measure
+  ([FIRST_RUN.md](FIRST_RUN.md) explains a fresh install's warnings).
+- `mtc assess` (the quick mode, its default) assesses freshly built modules
+  without a warmup; most indicators read `insufficient_data` until modules
+  have run, and the report says so. `mtc assess --full` warms the modules up
+  first.
+- The full pipeline demo runs conversation turns through the whole runtime on
+  the mock provider and prints a summary.
+
+## Path 2: the stores with Docker Compose
+
+The Compose file was reviewed against official documentation and not run on
+the development machine; the path run on the development machine is the
+in-memory install with the mock provider (Path 1).
+
+```bash
+pip install -e ".[all]"
+mtc init                                  # enable the stores, service manager docker
+make db-up DB_SERVICES="postgres mongo qdrant"
+mtc db init
+mtc db check
+mtc doctor --fetch-models                 # the embedding model, once
+```
+
+See [SETUP_DOCKER.md](SETUP_DOCKER.md).
+
+## Path 3: the stores as host services (Homebrew or apt)
+
+```bash
+pip install -e ".[all]"
+mtc init                                  # enable the stores, service manager brew
+scripts/db/init_postgres.sh               # the PostgreSQL role and database
+mtc db init
+mtc db check
+scripts/ops/start_stack.sh                # stores, model server and API
+```
+
+See [SETUP_MACOS.md](SETUP_MACOS.md) for the formulas, the Qdrant binary and
+the Linux notes.
+
+## A model
+
+The mock provider is the default the example answers choose. For a real
+model, run a chat-completions server on `LLM_PORT` (mlx_lm on Apple Silicon,
+llama.cpp elsewhere; `scripts/ops/start_llm.sh` launches either) and choose
+the `local` provider in `mtc init`, or choose the `anthropic` provider, which
+sends prompts to an external service. See [LLM_SETUP.md](LLM_SETUP.md).
 
 ## Configuration
 
-```bash
-cp .env.example .env
-# Edit .env only if you want to change a default (optional for basic usage)
-```
+Every setting is a field of `Settings` in `mtc/core/config.py`, read from
+the `MTC_`-prefixed environment or `.env`. [CONFIGURATION.md](CONFIGURATION.md)
+lists every key with its default; `.env.example` is generated from the same
+source. A project with no `.env` works: every setting has a default (and the
+API refuses every request until an `API_KEY` exists, which `mtc init`
+generates).
 
-Every setting is read through the `Settings` class in `mtc/core/config.py`. Environment keys carry the `MTC_` prefix and are named after the `Settings` fields. The full list, with types and defaults, is in [CONFIGURATION.md](CONFIGURATION.md), and `.env.example` is generated from the same source, so the two always agree. A machine with no `.env` file at all works: every setting has a default.
-
----
-
-## First Assessment
-
-Run the built-in assessment to verify installation:
+## The API and chat
 
 ```bash
-# Quick assessment (no databases needed)
-python scripts/run_assessment.py
-
-# Full assessment
-python scripts/run_assessment.py --full
-
-# With detailed report
-python scripts/run_assessment.py --report
+mtc serve                         # the API on 127.0.0.1:8200 by default
+mtc chat                          # an interactive chat through the server
+mtc chat --message "hello"        # one message
+mtc ctm status                    # the continuous thought machine
 ```
 
-Expected output has this shape (values elided):
+`mtc serve` binds loopback and requires the API key; `mtc chat` reads the key
+and the creator's speaker token from the project's settings. See
+[API.md](API.md) and [SECURITY.md](SECURITY.md).
 
-```
-================================================================
-  CONSCIOUSNESS ASSESSMENT REPORT
-================================================================
-  Session:            ...
-  Overall score:      ...
-  Architecture OK:    ...
-  Passing indicators: .../30
-
-  Theory Scores:
-    ...
-
-  Indicators (.../30):
-    [PASS] irreducibility  ... / 0.40
-    [FAIL] ...
-```
-
-The assessment scores 30 indicators across eight theories. The passing count and the overall score depend on how much the modules have been warmed up (`--full` runs several cycles first), so no fixed numbers are given here.
-
-Scores on a fresh system will be lower than a system that has been running and accumulating activity data. This is expected.
-
----
-
-## Using Individual Theories
-
-Each theory module can be used independently:
-
-```python
-from mtc.consciousness.enhanced_global_workspace import EnhancedGlobalWorkspace
-from mtc.consciousness.attention_schema import AttentionSchemaModule
-from mtc.consciousness.metacognition import MetacognitionModule
-from mtc.consciousness.active_inference import ActiveInferenceModule
-
-# Initialize a single module
-gwt = EnhancedGlobalWorkspace()
-await gwt.initialize()
-
-# Create workspace candidates and run competition
-# See examples/single_theory.py for full usage
-```
-
----
-
-## Using Neural Substrates
-
-```python
-from mtc.neural.spiking.production_snn import ProductionSNN
-from mtc.neural.liquid.production_lsm import ProductionLSM
-from mtc.neural.htm.production_htm import ProductionHTM
-
-# Initialize neural layers
-snn = ProductionSNN()
-lsm = ProductionLSM()
-htm = ProductionHTM()
-
-# Process input through the pipeline
-# See examples/neural_substrates.py for full usage
-```
-
----
-
-## Running Tests
+## Tests
 
 ```bash
-# All tests
-pytest tests/ -v
-
-# Consciousness theory tests only
-pytest tests/consciousness/ -v
-
-# Neural substrate tests
-pytest tests/neural/ -v
-
-# With coverage
-pytest tests/ -v --cov=mtc
+pip install -e ".[neural,fep,llm,anthropic,api,databases,dev]"
+PYPHI_WELCOME_OFF=yes timeout 1500 python3 -m pytest tests -q -p no:cacheprovider -m "not slow"
 ```
 
----
+These are the extras the CI tests job installs: the core with `dev` alone
+cannot run the suite, because the workspace builds active inference (the
+`fep` extra) and many tests need the `neural`, `api` and `llm` extras.
+The `all` extra covers them too. The suite needs no network, store
+or model. See [TESTING.md](TESTING.md).
 
-## Next Steps
+## Verification
 
-- Read [HONEST_LIMITATIONS.md](HONEST_LIMITATIONS.md) to understand what this framework can and cannot do
-- Read [CONSCIOUSNESS_THEORIES.md](CONSCIOUSNESS_THEORIES.md) for theory backgrounds
-- Read [ARCHITECTURE.md](ARCHITECTURE.md) for system design details
-- Explore the `examples/` directory for usage patterns
+The fresh-machine verification of this release (a clean clone, a
+non-editable install, the commands of Path 1, `mtc serve` and `mtc chat` on a
+free port) is pending; this note will record the date, the Python version and
+the path it tested when its report is in. Until then: the `mtc` commands of
+Path 1 (`init --print-example-answers`, `init --from ... --yes --no-probe`,
+`doctor` with `--no-network`, `assess`) and the demo were run from a
+temporary project directory on the development machine with the mock
+provider, through the same entry point the console script calls
+(`python3 -m mtc.cli.main`), and each exited 0; the clone and the
+`pip install` were not run there; the commands of Paths 2 and 3 were
+reviewed, not run.
+
+## Next
+
+- [FIRST_RUN.md](FIRST_RUN.md): what a fresh install measures and why.
+- [ARCHITECTURE.md](ARCHITECTURE.md) and [RUNTIME_PIPELINE.md](RUNTIME_PIPELINE.md): how the parts fit.
+- [CONSCIOUSNESS_THEORIES.md](CONSCIOUSNESS_THEORIES.md): the eight theories and the assessment method.
+- [OPERATIONS.md](OPERATIONS.md): running the stack day to day.

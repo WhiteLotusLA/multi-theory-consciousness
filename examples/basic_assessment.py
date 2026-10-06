@@ -1,17 +1,29 @@
 #!/usr/bin/env python3
 """
 Basic Consciousness Assessment
-===============================
+==============================
 
-Demonstrates how to run a consciousness assessment on a freshly
-initialized system using the multi-theory-consciousness framework.
+Runs the assessment once on freshly built modules and prints what it
+measured. The assessment defines 30 positive indicators and 3 negative
+indicators over eight theories (GWT, IIT, AST, HOT, FEP, RPT, BLT and Agency
+and Embodiment).
 
-The assessment measures 30 indicators across 8 theories:
-  GWT, IIT, AST, HOT, FEP, RPT, Beautiful Loop, Agency & Embodiment
+Every indicator reports a status:
 
-Each indicator is scored 0-1 against a threshold.  The overall
-report tells you how many indicators pass and gives per-theory
-scores.
+- ``measured``: the module produced the evidence and the indicator was scored
+  0 to 1 against its threshold;
+- ``absent``: the module was not supplied, so the indicator scores 0.0;
+- ``insufficient_data``: the module was supplied but has not produced the
+  evidence yet (for example a workspace that has run no cycle). Such an
+  indicator is left out of every average and never passes.
+
+The modules here have run no cycle, so most indicators read
+``insufficient_data`` and the report's status says so; run cycles first (see
+``multi_theory_pipeline.py``) or use ``mtc assess --full`` for a warmed-up run.
+Passing indicators would show functional architecture, not experience.
+
+Needs the ``fep`` extra (pymdp) for the active inference module. Opens no
+network connection.
 
 Usage:
     python examples/basic_assessment.py
@@ -21,31 +33,28 @@ import asyncio
 import logging
 
 from mtc.assessment.assessment import ConsciousnessAssessment
-
-# Optional -- wire up real modules for richer scores
-from mtc.consciousness.enhanced_global_workspace import EnhancedGlobalWorkspace
-from mtc.consciousness.attention_schema import AttentionSchemaModule
-from mtc.consciousness.metacognition import MetacognitionModule
 from mtc.consciousness.active_inference import ActiveInferenceModule
+from mtc.consciousness.attention_schema import AttentionSchemaModule
+from mtc.consciousness.enhanced_global_workspace import EnhancedGlobalWorkspace
+from mtc.consciousness.metacognition import MetacognitionModule
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.WARNING)
+
+
+def _score(value):
+    return "none" if value is None else f"{value:.3f}"
 
 
 async def main():
-    # -- 1. Initialize consciousness modules --------------------------
+    # 1. Build the modules the assessment reads.
     workspace = EnhancedGlobalWorkspace(capacity=7, ignition_threshold=0.3)
     attention = AttentionSchemaModule()
     metacognition = MetacognitionModule()
     active_inference = ActiveInferenceModule()
 
-    # -- 2. Create the assessment framework ---------------------------
+    # 2. Assess them. Modules not passed (RPT, PAD, Phi inputs, the beautiful
+    #    loop) report their indicators as absent.
     assessment = ConsciousnessAssessment()
-
-    # -- 3. Run the full assessment -----------------------------------
-    #   On a fresh system most scores will be low because no cycles
-    #   have been run yet.  Running consciousness cycles first (see
-    #   multi_theory_pipeline.py) will raise scores significantly.
     report = await assessment.run_full_assessment(
         global_workspace=workspace,
         attention_schema=attention,
@@ -53,33 +62,40 @@ async def main():
         active_inference=active_inference,
     )
 
-    # -- 4. Print results ---------------------------------------------
+    positive = len(assessment.indicator_configs)
+    negative = len(assessment.negative_indicator_configs)
+
+    # 3. Print what was measured and what was not.
     print("\n" + "=" * 60)
     print("  CONSCIOUSNESS ASSESSMENT REPORT")
     print("=" * 60)
-    print(f"  Session:              {report.session_id}")
-    print(f"  Overall score:        {report.overall_score:.3f}")
-    print(f"  Architecture active:  {report.architecture_functional}")
-    print(f"  Confidence:           {report.confidence:.3f}")
+    print(f"  Indicators defined:   {positive} positive, {negative} negative")
+    print(f"  Status:               {report.status}")
+    print(f"  Coverage:             {report.coverage:.3f}")
+    print(f"  Overall score:        {_score(report.overall_score)}")
     print(f"  Passing indicators:   {report.passing_count}/{report.total_indicators}")
-    print(f"  Processing time:      {report.processing_time_ms:.1f} ms")
+    print(f"  Architecture active:  {report.architecture_functional}")
+    print(f"  Insufficient data:    {len(report.insufficient_indicators)}")
 
-    # Theory-level breakdown
-    print("\n  Theory Scores:")
+    print("\n  Theory scores (theories with an included indicator):")
     for theory, score in sorted(report.theory_scores.items()):
-        bar = "#" * int(score * 20)
-        print(f"    {theory:<30s} {score:.3f}  {bar}")
+        print(f"    {theory:<6s} {score:.3f}")
 
-    # Per-indicator detail
-    print("\n  Indicator Detail:")
+    print("\n  Indicators:")
     for name, result in report.indicator_results.items():
-        status = "PASS" if result.passes_threshold else "FAIL"
-        print(
-            f"    [{status}] {name:<30s}  "
-            f"score={result.score:.3f}  "
-            f"threshold={result.threshold:.2f}"
-        )
+        if result.status == "insufficient_data":
+            shown = "insufficient_data"
+        else:
+            verdict = "pass" if result.passes_threshold else "fail"
+            shown = f"{result.status:<9s} {result.score:.3f} ({verdict})"
+        print(f"    {name:<32s} {shown}  threshold {result.threshold:.2f}")
 
+    print("\n  Negative indicators:")
+    for name, entry in report.negative_indicators.items():
+        print(
+            f"    {name:<32s} {entry['status']:<17s} "
+            f"score {_score(entry['score'])}  penalty {entry['penalty']:.3f}"
+        )
     print("\n" + "=" * 60)
 
 

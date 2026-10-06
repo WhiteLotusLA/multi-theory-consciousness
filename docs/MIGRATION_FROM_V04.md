@@ -83,11 +83,26 @@ runner's attention module and the workspace's own one (through
 | `causal_emergence.tpm_row_order` | `little_endian` | `big_endian` | The analyzer reorders the PhiTracker's big-endian rows before coarse-graining, so the macro partition groups the right source states; `little_endian` reads the rows as given, which matched the v0.4.0 warmup tracker but not the rebuilt one. | causal_emergence. In the runner the normalized score is 0.0 either way; the raw CE reads 0.725 under the default (the same value for every seed and candidate feed, because the recorded module-state transitions do not depend on the random stream) and 0.652 under the legacy order. |
 | `rpt.stdp_plasticity_enabled` | false | true | RPT adds a plasticity component (min(1, 2 x mean weight standard deviation + weight diversity)) when a caller passes the SNN's STDP statistics with `plasticity_active`; phenomenal recurrence stays equal to local, so plasticity is counted once. | local_recurrence and algorithmic_recurrence once an SNN's STDP statistics are supplied. Inert in both runners, which pass synthetic spike counts without them. |
 
+| `cycle.drive_candidates` | false | true | Urgent homeostatic drives become HOMEOSTATIC workspace candidates each cycle. | Workspace competition in the live pipeline. Both runners pin it off unless the key is set, so no runner number moves. |
+| `cycle.drive_urgency_threshold` | (no drive candidates) | 0.5 | Urgency above which a drive becomes a candidate. | Nothing while `cycle.drive_candidates` is off. |
+| `cycle.prospective_candidates` | false | true | The prospective simulation generated after a cycle is injected as an INTERNAL candidate of the next. | Workspace competition in the live pipeline; pinned off in the runners unless set. |
+| `cycle.crossmodal_binding` | false | true | Cross-modal binding runs over the candidates before competition. | Workspace competition in the live pipeline; pinned off in the runners unless set. |
+| `cycle.gate_arousal` | `workspace` | `protoself` | The thalamic gate's arousal comes from the protoself (`pad` leaves the PAD arousal recorded on the state for the next cycle; `workspace` leaves the gate to its own derivation). | Which candidates pass the gate in the live pipeline; the runners pin `workspace` unless set. |
+| `cycle.pad_from_state` | false | true | The PAD coordinate is computed from the cycle's state and recorded on it. | PAD readings in the live pipeline; pinned off in the runners unless set, and the experiment runner then keeps its random PAD feed. |
+| `cycle.candidate_cap` | 0 | 20 | A pre-attentive cap keeps the candidates with the highest activation plus emotional salience (0 means no cap). | Which candidates compete when more than 20 arrive; the runners pin 0 unless set. |
+
 A bare `EnhancedGlobalWorkspace()` now defaults to `ignition_threshold` 0.3
 (it was 0.1, an artifact; every caller already passed 0.3), so that default needs
 no switch.
 
-Later phases append rows to this table.
+The `cycle` rows are the `CycleAugmenterConfig` switches of
+`mtc/pipeline/cycle_augmenter.py`, mirrored by the `cycle` group of
+`experiments/param_schema.toml`. Their defaults describe the live pipeline;
+`mtc.core.runner_support.build_cycle_augmenter` pins every one of them to its
+v0.4.0 value in both runners unless the layered overrides set it, and the
+`legacy_v04` preset sets all seven explicitly. With every switch off the
+augmenter is an identity (the candidates come back unchanged and the state is
+untouched), so the runner numbers below are unaffected.
 
 ## Fixes without a switch
 
@@ -378,3 +393,82 @@ so the competition outcome, and everything downstream of it, changes from run
 to run. Both runners
 keep the pin (`body_metrics_default=False` in `build_workspace`) unless the key
 is set explicitly.
+
+## Changes outside the scores
+
+v0.4.0 contained no database, API or onboarding code, so these changes move no
+assessment number. They change what an install looks like.
+
+**Store names come from `DB_PREFIX`.** With `MTC_DB_PREFIX` at its default
+`mtc`, an empty store name derives from it: PostgreSQL database
+`mtc_consciousness` and role `mtc`, MongoDB database `mtc_neural`, Qdrant
+collection `mtc_memories`, Redis key prefix `mtc:`. The v0.4.0 `Settings`
+defaults were `consciousness_db` and `consciousness` for PostgreSQL and
+`consciousness_memories` for the MongoDB database and the Qdrant collection.
+To keep the old names, set `MTC_POSTGRES_DB`, `MTC_POSTGRES_USER`,
+`MTC_MONGODB_DB` and `MTC_QDRANT_COLLECTION` explicitly; an explicit value is
+never replaced by a derived one.
+
+**Renamed environment keys.** The v0.4.0 `.env.example` used names `Settings`
+never read. They are now the field names with the `MTC_` prefix:
+`MTC_PG_HOST`, `MTC_PG_PORT`, `MTC_PG_USER`, `MTC_PG_PASSWORD` and
+`MTC_PG_DATABASE` became `MTC_POSTGRES_HOST`, `MTC_POSTGRES_PORT`,
+`MTC_POSTGRES_USER`, `MTC_POSTGRES_PASSWORD` and `MTC_POSTGRES_DB`;
+`MTC_MONGO_HOST`, `MTC_MONGO_PORT` and `MTC_MONGO_DATABASE` became
+`MTC_MONGODB_HOST`, `MTC_MONGODB_PORT` and `MTC_MONGODB_DB`; the unprefixed
+`DCM_API_URL`, `DCM_CACHE_DIR` and `DCM_EVALUATOR_MODE` became
+`MTC_DCM_API_URL`, `MTC_DCM_CACHE_DIR` and `MTC_DCM_EVALUATOR_MODE`. The
+Anthropic key is read from `ANTHROPIC_API_KEY` or `MTC_ANTHROPIC_API_KEY`.
+`.env.example` and [CONFIGURATION.md](CONFIGURATION.md) are generated from
+`Settings`, so they cannot drift again.
+
+**Removed keys.** `MODEL_TYPE` (`LLM_MODEL` replaces it); `API_WORKERS` (the
+runtime is in-process state, so the server runs one process); `API_TIMEOUT`
+(the generation bounds `GENERATION_TIMEOUT_S` and
+`GENERATION_STALL_TIMEOUT_S` replace it); `ENABLE_GRAPH_DATABASE` and
+`ENABLE_VECTOR_SEARCH` (the per-store enable keys replace them);
+`ENABLE_CONSCIOUSNESS_METRICS`, `ENABLE_DREAM_PROCESSING`,
+`ENABLE_MULTI_MODAL` and `ENABLE_SAFETY_MONITOR` (nothing read them);
+`NEO4J_HOST`, `NEO4J_PORT` and `NEO4J_BOLT_PORT` (`NEO4J_URI` carries the
+address); and the key of a provider MTC does not support.
+
+**Everything runs in memory by default.** The per-store enable keys
+`POSTGRES_ENABLED`, `MONGODB_ENABLED`, `REDIS_ENABLED`, `QDRANT_ENABLED` and
+`NEO4J_ENABLED` all default false, so a fresh install keeps every store in
+process memory until `mtc init` (or an edit of `.env`) turns one on. See
+[DATABASES.md](DATABASES.md).
+
+**The API.** `API_PORT` moved from 8000 to 8200, the server binds
+`127.0.0.1` by default, and authentication fails closed: `API_AUTH_ENABLED`
+defaults true, and with an empty `API_KEY` every authenticated route answers
+503. Authentication off is refused on any address outside loopback. See
+[API.md](API.md) and [SECURITY.md](SECURITY.md).
+
+**Vectors are 384 dimensions.** The memory layer embeds with
+`EMBEDDING_MODEL` (`sentence-transformers/all-MiniLM-L6-v2`) into a
+384-dimension Qdrant collection. A collection that exists with another width
+(an 8192-dimension collection from an older deployment, for example) is
+refused with `VectorDimensionMismatch` and never recreated in place: set
+`MTC_QDRANT_COLLECTION` to a new name and run the re-embed backfill
+(`python -m mtc.db.reembed`, or `scripts/db/reembed_postgres_to_qdrant.py`),
+which embeds every episodic row that has no point yet.
+
+**The `mtc` command.** One console script replaces the loose scripts as the
+entry point: `mtc init`, `mtc doctor`, `mtc db init`, `mtc db check`,
+`mtc assess`, `mtc serve`, `mtc chat`, `mtc ctm` and `mtc privacy-audit`.
+`scripts/run_assessment.py` still works: it is a shim over `mtc assess`, with
+the same flags and the same results.
+
+**Five defaults changed with their new readers.** `GPU_LAYERS` 35 to -1 (-1
+leaves the model server's own default), `THREADS` 8 to 0 (0 leaves the
+server's own default), `USE_MLOCK` true to false (locking a whole model in
+memory fails without raised memory-lock limits), `CONTEXT_SIZE` 131072 to
+32768 (a 128k context allocates a key-value cache most machines cannot hold)
+and `DCM_CACHE_DIR` `data/dcm` to `data/dcm_cache` (the tracked `data/dcm`
+holds shipped data only; caches go to an ignored directory). Set the old value
+in `.env` to keep it.
+
+**Extras.** The `research` extra replaces `assessment`, which stays as an
+alias, so `pip install ".[assessment]"` keeps working. The `iit` extra (PyPhi)
+needs Python 3.12 or later and is never part of `all`; see
+[THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md) for its licence.

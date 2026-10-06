@@ -1,235 +1,213 @@
 # Architecture
 
-## Overview
+MTC is a research architecture: eight theories of consciousness run as
+interacting modules over three neural substrates, a conversation runtime
+feeds them real input, five optional stores persist what they produce, and an
+assessment measures 30 positive and 3 negative indicators. Every statement
+below names the module behind it.
 
-The Multi-Theory Consciousness (MTC) framework is organized into three layers:
-
-1. **Neural Substrates**: the computational medium (SNN, LSM, HTM)
-2. **Consciousness Modules**: theory implementations that operate on the substrates
-3. **Assessment Layer**: measurement of 30 consciousness indicators across eight theories
+## Layers
 
 ```
-+-----------------------------------------------------------------------+
-|                       ASSESSMENT LAYER                                 |
-| ConsciousnessAssessment | BenchmarkRunner | RPTMeasurement | PhiCalculator |
-+-----------------------------------------------------------------------+
-                                |
-+-----------------------------------------------------------------------+
-|                    CONSCIOUSNESS MODULES                               |
-|  GWT | AST | HOT | FEP | BLT | AE | IIT | RPT | Damasio | Coherence |
-+-----------------------------------------------------------------------+
-                                |
-+-----------------------------------------------------------------------+
-|                      NEURAL SUBSTRATES                                 |
-|  SNN (Spiking) | LSM (Liquid State) | HTM (Hierarchical Temporal)    |
-|                    Neural Orchestrator                                 |
-+-----------------------------------------------------------------------+
++------------------------------------------------------------------------+
+|  Interfaces     mtc CLI (mtc/cli)    HTTP + websocket API (mtc/api)     |
+|                 onboarding wizard (mtc/onboarding)                       |
++------------------------------------------------------------------------+
+|  Runtime        composition root (mtc/pipeline/runtime.py)               |
+|                 conversation pipeline, orchestrator, post-turn hooks     |
+|                 brain + providers (mtc/brain)   speaker trust            |
++------------------------------------------------------------------------+
+|  Consciousness  GWT  AST  HOT  FEP  BLT  Damasio  (mtc/consciousness)    |
+|  modules        PhiTracker  PAD  theory interactions  continuous thought |
++------------------------------------------------------------------------+
+|  Assessment     30 positive + 3 negative indicators (mtc/assessment)     |
+|                 RPT, causal emergence, DCM benchmark                     |
++------------------------------------------------------------------------+
+|  Substrates     SNN  LSM  HTM  oscillatory binding (mtc/neural)          |
+|                 neural orchestrator                                      |
++------------------------------------------------------------------------+
+|  Memory and     memory manager, consolidation, pruner (mtc/memory)       |
+|  knowledge      knowledge graph (mtc/knowledge)   vectors                |
++------------------------------------------------------------------------+
+|  Stores         PostgreSQL  MongoDB  Qdrant  Neo4j  Redis  (optional;    |
+|                 every one has an in-memory implementation)               |
++------------------------------------------------------------------------+
+|  Safety and     safety monitor, trust compass (mtc/safety)               |
+|  privacy        data classifier, privacy auditor (mtc/privacy)           |
+|                 alerts, wellbeing (mtc/monitoring)                       |
++------------------------------------------------------------------------+
 ```
 
----
+## Package tree
 
-## Package Structure
-
-Every Python module under `mtc/` appears below. Agency & Embodiment (AE) has no module of its own: it lives in the assessment's `ConsciousnessTheory` enum and in the indicator configurations in `assessment/assessment.py`. Integrated Information (IIT) is measured by `PhiCalculator` in the same file and by `consciousness/phi_tracker.py`.
+One line per subpackage. A test (`tests/docs/test_architecture_doc.py`)
+fails when a package under `mtc/` is missing from this list.
 
 ```
 mtc/
-├── __init__.py                       # Package exports, version
-│
-├── assessment/                       # Measurement framework
-│   ├── assessment.py                 #   30-indicator assessment, theory enum, PhiCalculator
-│   ├── framework.py                  #   Measurement framework
-│   ├── rpt_measurement.py            #   RPT indicators
-│   ├── causal_emergence.py           #   Effective Information, CE 2.0
-│   ├── dcm_benchmark.py              #   Digital Consciousness Model benchmark (BenchmarkRunner)
-│   └── dcm_evaluator.py              #   LLM-based indicator evaluation for the DCM
-│
-├── consciousness/                    # Theory implementations
-│   ├── enhanced_global_workspace.py  #   GWT (Baars)
-│   ├── global_workspace.py           #   Simplified GWT
-│   ├── attention_schema.py           #   AST (Graziano)
-│   ├── metacognition.py              #   HOT (Rosenthal)
-│   ├── active_inference.py           #   FEP (Friston)
-│   ├── phi_tracker.py                #   PhiTracker: IIT state diversity tracking
-│   ├── pad_affect.py                 #   PAD affect model
-│   ├── consciousness_integration.py  #   Cross-theory integration
-│   ├── consciousness_metrics.py      #   Metric collection
-│   ├── conversation_coherence.py     #   Topic and reference tracking
-│   ├── beautiful_loop/               #   BLT (Laukkonen et al.)
-│   │   ├── __init__.py
-│   │   ├── hyper_model.py            #     Precision controller
-│   │   ├── bayesian_binding.py       #     Inference binding
-│   │   └── epistemic_depth.py        #     Self-reference depth
-│   └── damasio/                      #   Three-Layer Model
-│       ├── __init__.py
-│       ├── protoself.py              #     Body-state representation
-│       ├── core_consciousness.py     #     Self-world binding
-│       └── extended_consciousness.py #     Autobiographic self
-│
-├── core/                             # Configuration and shared utilities
-│   ├── __init__.py
-│   ├── config.py                     #   Pydantic Settings
-│   ├── param_overrides.py            #   TOML parameter override loader
-│   ├── circuit_breaker.py            #   Generic async circuit breaker
-│   └── env_example.py                #   Generates .env.example from the Settings fields
-│
-├── devtools/                         # Developer tooling
-│   ├── __init__.py
-│   └── privacy_audit.py              #   Privacy audit scanner (denylist and allowlist)
-│
-└── neural/                           # Computational substrates
-    ├── __init__.py
-    ├── orchestrator.py               #   Coordinates all substrates
-    ├── base_interfaces.py            #   Protocol definitions
-    ├── memory_pool.py                #   Memory management
-    ├── gpu_integration.py            #   GPU acceleration
-    ├── mps_utils.py                  #   Metal Performance Shaders utilities
-    ├── oscillatory_binding.py        #   AKOrN Kuramoto oscillatory binding
-    ├── spiking/                      #   Spiking Neural Networks
-    │   ├── __init__.py
-    │   ├── snn_core.py               #     Core SNN implementation
-    │   ├── snn_core_optimized.py     #     Optimized variant
-    │   └── production_snn.py         #     Production-ready SNN
-    ├── liquid/                       #   Liquid State Machines
-    │   ├── __init__.py
-    │   ├── lsm_core.py               #     Core LSM implementation
-    │   └── production_lsm.py         #     Production-ready LSM
-    ├── htm/                          #   Hierarchical Temporal Memory
-    │   ├── __init__.py
-    │   ├── htm_core.py               #     Core HTM implementation
-    │   └── production_htm.py         #     Production-ready HTM
-    ├── protocols/                    #   Inter-substrate communication
-    │   ├── __init__.py
-    │   ├── message_format.py
-    │   ├── routing.py
-    │   ├── synchronization.py
-    │   └── serialization.py
-    └── vectors/                      #   Vector embedding coordination
-        ├── __init__.py
-        └── coordinator.py
+|-- api/                     HTTP and websocket API over the runtime
+|-- assessment/              30 + 3 indicator assessment, RPT, causal emergence, DCM
+|-- brain/                   brain protocol, LLM brain, prompt assembler, families
+|   `-- providers/           local chat-completions, Anthropic, mock, registry
+|-- cli/                     the mtc console script: init, doctor, db, assess, serve, chat, ctm, privacy-audit
+|-- consciousness/           theory modules, PhiTracker, PAD, interactions, persistence hub
+|   |-- beautiful_loop/      BLT: hyper-model, Bayesian binding, epistemic depth
+|   |-- continuous/          continuous thought machine, seeds, novelty, stores
+|   |-- damasio/             protoself, core and extended consciousness
+|   |-- learning/            experiential learning system
+|   `-- rsi/                 identity drift tools (canon schema, sampler, detector)
+|-- core/                    Settings, logging, paths, device switch, persona, registry, checks
+|-- db/                      migrations rendered from the registry, bootstrap, verify, re-embed
+|-- devtools/                privacy audit
+|-- knowledge/               knowledge graph manager, models, concept extraction
+|-- memory/                  store protocols, in-memory and store-backed stores, manager
+|-- monitoring/              alert manager, wellbeing monitor, backup status
+|-- neural/                  neural orchestrator, GPU utilities, oscillatory binding
+|   |-- htm/                 ProductionHTM, memory consolidator
+|   |-- liquid/              LSM and the emotion bridge
+|   |-- protocols/           inter-substrate messages, routing, synchronization
+|   |-- spiking/             ProductionSNN and the emotion encoder
+|   `-- vectors/             vector coordinator (Qdrant), MongoDB integration
+|-- onboarding/              onboarding schema, wizard, seed_db, companion templates
+|-- pipeline/                speaker trust, conversation pipeline, orchestrator, runtime
+|-- privacy/                 data classifier, access control, privacy auditor
+|-- research/                statistics helper, behavioral battery, longitudinal study
+|-- resources/               generated copies of the shipped defaults (package data)
+|-- safety/                  safety monitor, trust compass, safety integration
+`-- validation/              acceptance gates, shadow signal log
 ```
 
----
+## Theories and indicators
 
-## Consciousness Cycle
+| Theory | Module | Indicators |
+|---|---|---|
+| GWT | `consciousness/enhanced_global_workspace.py` | 5 |
+| AST | `consciousness/attention_schema.py` | 2 |
+| HOT | `consciousness/metacognition.py` | 4 |
+| FEP | `consciousness/active_inference.py` | 6 |
+| IIT | `consciousness/phi_tracker.py`, `PhiCalculator` in `assessment/assessment.py`, `assessment/causal_emergence.py` | 3 |
+| RPT | `assessment/rpt_measurement.py`, `neural/oscillatory_binding.py` | 5 |
+| AE | the `ConsciousnessTheory` enum and indicator configs in `assessment/assessment.py` | 2 |
+| BLT | `consciousness/beautiful_loop/` | 3 |
 
-A single consciousness processing cycle:
+That is 30 positive indicators; three negative indicators (`purely_reactive`,
+`fixed_repertoire`, `no_metacognitive_access`) subtract from the overall
+score. Damasio's three-layer model (`consciousness/damasio/`) has no indicator
+of its own. See [CONSCIOUSNESS_THEORIES.md](CONSCIOUSNESS_THEORIES.md) and
+[BUTLIN_2025_MAPPING.md](BUTLIN_2025_MAPPING.md).
 
-```
-Input Signal
-     |
-     v
-[1] Neural Substrates process input
-     |-- SNN: spike-based temporal dynamics
-     |-- LSM: reservoir state evolution
-     |-- HTM: sequence and pattern matching
-     |
-     v
-[2] Attention Schema (AST) models attention
-     |-- What is the system attending to?
-     |-- Voluntary vs. captured attention?
-     |
-     v
-[3] Active Inference (FEP) predicts and plans
-     |-- Generate predictions about observations
-     |-- Compute prediction errors
-     |-- Update beliefs or select actions
-     |
-     v
-[4] Global Workspace (GWT) competition
-     |-- Candidates enter workspace
-     |-- Competition based on salience
-     |-- Winners undergo ignition
-     |-- Broadcast to all modules
-     |
-     v
-[5] Metacognition (HOT) reflects
-     |-- Generate higher-order thoughts about broadcast
-     |-- Self-evaluate confidence and uncertainty
-     |
-     v
-[6] Beautiful Loop (BLT) enriches
-     |-- HyperModel adjusts precision weights
-     |-- BayesianBinding unifies percepts
-     |-- EpistemicDepth measures self-reference
-     |
-     v
-[7] Damasio layers ground experience
-     |-- Protoself: body-state representation
-     |-- Core: bind self to workspace content
-     |-- Extended: temporal and narrative context
-     |
-     v
-[8] Integrated state produced
-     |-- ConsciousnessState with all module outputs
-     |-- Available for assessment measurement
-```
+## Substrates
 
----
+| Substrate | Module | Default size |
+|---|---|---|
+| Spiking network | `neural/spiking/production_snn.py`, `ProductionSNN` (snntorch) | 5,196 LIF neurons in layers of 1000, 2048, 2048 and 100 |
+| Liquid state machine | `neural/liquid/production_lsm.py`, `ProductionLSM` (reservoirpy) | 5,000 reservoir neurons |
+| Hierarchical temporal memory | `neural/htm/production_htm.py`, `ProductionHTM` (NumPy) | 4,096 columns of 32 cells |
 
-## Neural Substrates
+The neural orchestrator (`neural/orchestrator.py`) coordinates them, keeps the
+latest substrate signals and runs the continuous thought machine. The device
+is chosen once by `MTC_DEVICE` (`auto`, `cpu`, `mps` or `cuda`) through
+`core/device.py`. The substrates need the `neural` extra.
 
-### Spiking Neural Network (SNN)
+## Stores
 
-- **Library:** snntorch
-- **Architecture:** 5,196 LIF neurons (1000->2048->2048->100)
-- **Learning:** STDP (Spike-Timing-Dependent Plasticity)
-- **Role:** Biological plausibility, temporal spike dynamics
+Every store is optional and off by default; each has an in-memory
+implementation behind the same protocol (`memory/protocols.py`), and the
+runtime builds a store-backed one only when its enable key is true. Store
+clients are imported lazily through `mtc.memory.clients.require_client`.
 
-### Liquid State Machine (LSM)
+| Store | Enable key | Holds |
+|---|---|---|
+| PostgreSQL | `POSTGRES_ENABLED` | episodic, semantic and core memory; conversations, messages and emotional history; snapshots and events; the safety audit |
+| MongoDB | `MONGODB_ENABLED` | conversation turns and sessions, thought streams and gists, neural telemetry, learning records, speaker models, goals, dreams, alerts, the privacy audit log |
+| Qdrant | `QDRANT_ENABLED` | 384-dimension memory vectors |
+| Neo4j | `NEO4J_ENABLED` | the concept graph (an in-memory graph otherwise) |
+| Redis | `REDIS_ENABLED` | working memory, emotional state, session context, short caches |
 
-- **Library:** reservoirpy
-- **Architecture:** 5,000 reservoir neurons, RLS readout
-- **Properties:** Edge-of-chaos dynamics, fading memory
-- **Role:** High-dimensional temporal mapping, intuition analog
+Every schema artifact is registered in `core/schema_registry.py`
+(`SCHEMA_ARTIFACTS`); the migrations, the bootstrap and the verifier read that
+registry. See [DATABASES.md](DATABASES.md).
 
-### Hierarchical Temporal Memory (HTM)
+## A turn and a cycle
 
-- **Architecture:** 4,096 columns x 32 cells = 131,072 cells
-- **Implementation:** pure Python (NumPy); no compiled or GPU-accelerated HTM ships in this repository
-- **Learning:** Hebbian, sequence memory
-- **Role:** Pattern recognition, temporal sequence learning
+A conversation turn (`pipeline/conversation_pipeline.py`) verifies the
+speaker by token, runs the safety gate, stores the message, gathers memories,
+thoughts and core memory, runs one consciousness cycle through the
+orchestrator (`pipeline/consciousness_orchestrator.py`), calls the brain with
+the five theory sections, stores the reply with a provenance snapshot and runs
+thirteen post-turn hooks (`pipeline/post_turn.py`). A failure of the brain
+ends the turn with an error code and stores no reply.
 
-### Neural Orchestrator
+One cycle builds workspace candidates, lets the cycle augmenter add drive,
+prospective and cross-modal candidates, runs the workspace's competition,
+ignition and broadcast with the neural signals, records the PhiTracker, runs
+RPT and causal emergence on a cadence, records the PAD coordinate and returns
+a modulated context in four layers. See
+[RUNTIME_PIPELINE.md](RUNTIME_PIPELINE.md).
 
-Coordinates all three substrates:
-- **Synchronization**: phase-locked processing across substrates
-- **Message routing**: typed messages between components
-- **State aggregation**: unified neural state for consciousness modules
+## Continuous thought
 
----
+The continuous thought machine (`consciousness/continuous/machine.py`)
+generates background thoughts from seed packs, measures their novelty with an
+embedder, lets only novel thoughts surface, stores them in memory or MongoDB,
+and writes gists. It yields the brain to a conversation through the
+single-flight gate. See [CONTINUOUS_THOUGHT.md](CONTINUOUS_THOUGHT.md).
 
-## Assessment Framework
+## Memory and consolidation
 
-The assessment measures 30 indicators (plus 3 negative checks) across eight theories, derived from Butlin et al. (2023, 2025):
+`memory/enhanced_memory_manager.py` stores episodic memories, recalls them
+through vectors when Qdrant and an embedder are present (full-text search
+otherwise, labelled as such), seeds core memory blocks from the persona, and
+links memories to concepts. The consolidation pipeline
+(`memory/memory_consolidation_pipeline.py`) clusters episodes into core
+memories and thought gists; the pruner (`memory/memory_pruner.py`) decays
+retention with true half-lives and never prunes core memories. The sleep
+scheduler (`consciousness/sleep_scheduler.py`) runs consolidation and pruning
+in the night window between `SLEEP_HOUR` and `WAKE_HOUR` in `TIMEZONE`.
 
-1. Each indicator maps to a specific consciousness theory
-2. Scored 0.0-1.0 via theory-specific scoring functions
-3. Compared against calibrated thresholds
-4. Weighted and aggregated to overall score
-5. Negative indicators penalize the overall score when detected
-6. "Architecture functional" declared when sufficient indicators pass
+## Safety and privacy
 
-### Ablation Studies
+Speaker trust (`pipeline/speaker_trust.py`) is the one trust source: a speaker
+is trusted only when it presents its token; a name grants nothing. The safety
+monitor and integration (`safety/`) gate untrusted messages before the cycle
+and log replies after it; the data classifier and privacy auditor
+(`privacy/`) classify and audit access; the alert manager and wellbeing
+monitor (`monitoring/`) report with console and file notifiers only. See
+[SECURITY.md](SECURITY.md).
 
-The framework supports ablation testing: selectively disabling individual modules to measure their contribution to overall scores. This reveals which theories contribute most to the system's architectural features.
+## API, onboarding and the CLI
 
-### DCM Scoring
+The API (`api/`) serves one runtime in one process on loopback with
+fail-closed key authentication ([API.md](API.md)). The `mtc` console script
+(`cli/`) runs the onboarding wizard (`onboarding/`), the doctor, the store
+bootstrap and verification (`db/`), the assessment, the server, a chat client
+and the continuous thought controls ([ONBOARDING.md](ONBOARDING.md)).
 
-The Digital Consciousness Model (DCM) provides a 13-perspective probabilistic assessment with credence scores, offering a complementary view to the indicator-based approach. It is implemented in `assessment/dcm_benchmark.py` (`BenchmarkRunner`) with LLM-based indicator evaluation in `assessment/dcm_evaluator.py`.
+## Assessment and research tools
 
----
+`assessment/assessment.py` is the indicator assessment; `mtc assess` (the
+assessment runner) and `scripts/run_experiment.py` (the experiment runner,
+used for the parameter research loop and the v0.4.0 legacy preset) drive it
+with synthetic warmups. `assessment/dcm_benchmark.py` runs the Digital
+Consciousness Model benchmark (Bayesian inference over 13 stances, the
+`research` extra). `research/` holds a statistics helper, a behavioral battery
+and a longitudinal study manager; `validation/` holds acceptance gates and the
+shadow signal log.
 
-## Persistence and Optional Integrations
+## Where state persists
 
-**v0.4.0 contains no database code.** The framework runs assessments and processes consciousness cycles entirely in memory. The table below describes the five-store persistence layer that is in development; none of it is present in this repository yet.
+| Path or store | What | Holds conversation text |
+|---|---|---|
+| `STATE_DIR` (`agent_space/consciousness_state`) | the persistence hub's module state files | some module state holds conversation fragments (topic words, recent content) |
+| `AGENT_SPACE_DIR` (`agent_space`) | the identity statement and the agent's working files | no conversation text by default |
+| `RESULTS_DIR` (`results`) and `ASSESSMENT_OUTPUT_DIR` (`results/consciousness_assessments`) | assessment and experiment results | no |
+| `TRANSITION_HISTORY_DIR` (`results/model_transitions`) | model-transition baselines and probe answers | the system's own probe answers |
+| `LOG_DIRECTORY` (`./logs`) | `mtc.log` and three JSON-lines specialty files (`safety_audit.jsonl`, `consciousness_metrics.jsonl`, `emotional_history.jsonl`) | the main log carries step names and counts; the specialty files hold private emotional and safety records |
+| `SHADOW_LOG_DIR` (`./logs/shadow_signals`) | the shadow signal log (one JSON-lines file per shadow signal) | records may hold conversation-derived text |
+| `DATA_DIRECTORY` (`./data`) | the provider state file, the PyPhi home, the DCM cache | no |
+| `BACKUP_LOCATION` (`backups`) | backups written by `scripts/ops/backup.sh` | yes: backups hold conversation text, names, thoughts and beliefs |
+| the stores above | memories, conversations, thoughts, concepts | yes |
 
-| Store | Planned purpose | Status |
-|-------|-----------------|--------|
-| PostgreSQL | Episodic and semantic memory, conversation history | In development |
-| MongoDB | Neural state snapshots, thought streams | In development |
-| Qdrant | Vector embeddings for semantic search | In development |
-| Neo4j | Knowledge graph (concepts, relations) | In development |
-| Redis | Working memory cache (7+/-2 items) | In development |
-
-The orchestrator (`mtc/neural/orchestrator.py`) guards imports of several optional integrations (an emotion bridge, a memory consolidator, a MongoDB data manager, a Redis manager, a continuous-thought loop and extra measurement frameworks). These modules are not yet present in this repository, so the orchestrator runs in its reduced configuration.
+All of these paths are relative to `PROJECT_ROOT` and gitignored. The `.env`
+file holds secrets; `config/persona.yaml` and `config/speakers.yaml` hold real
+names. See [DATABASES.md](DATABASES.md) for backups.

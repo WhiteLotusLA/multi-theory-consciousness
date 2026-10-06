@@ -44,6 +44,9 @@ audit.
 
 - **Locally:** `make privacy-audit` audits every tracked file;
   `python3 scripts/privacy_audit.py --paths a.py b.md` audits named files.
+- **Through the CLI:** `mtc privacy-audit` runs the same audit with the
+  repository's lists under `config/privacy` (it exits 2, naming the missing
+  list, outside a checkout) and takes the same modes.
 - **Pre-commit:** `make hooks` installs a hook that runs `--staged`, which
   audits the staged blobs rather than the working copy.
 - **CI:** the `privacy-audit` job writes the private list from the repository
@@ -53,6 +56,39 @@ audit.
   added, file by file, so a hit added and later removed still fails. The job
   fails when the secret is missing, except on fork pull requests, which get no
   secrets and run the public checks with a warning.
+
+## Runtime mode
+
+`python3 scripts/privacy_audit.py --runtime DIR [DIR ...]` audits
+directories that need not be inside the repository, such as a project's log
+and results directories after a run. Only the artifact rule is off there:
+runtime logs legitimately hold `.jsonl` and `.log` files (rotated ones
+included), which the artifact rule exists to keep out of the tracked tree,
+not out of a log directory, so they are scanned as text instead of flagged.
+Every token, pattern and encoding check still applies. Paths print as
+`<directory name>/<relative path>`, allowlist rules apply to that path, a
+path that is not a directory is an error (never a clean result), and the
+audit prints how many files it scanned and how many it skipped (files it
+does not read as text, such as `.npz`, `.pkl` or `.db`, counted by suffix)
+before its verdict: a skipped file was not audited. The mode cannot
+be combined with `--paths`, `--staged` or `--patch-from`
+(`run_runtime_audit` in `mtc/devtools/privacy_audit.py`).
+
+The CI install smoke (`.github/workflows/ci.yml`, job `install-smoke`) sets
+up a fresh project with `mtc init` from the example answers, runs the
+examples (the demo and the continuous-thought example write their state under
+`runtime/`) and an assessment into `results/`, then runs the runtime mode over
+`runtime` and `results`, so a run that writes a name, a secret-shaped string
+or a dash into its own state or results fails CI.
+
+## The wizard's outputs are gitignored
+
+Everything `mtc init` writes (`.env`, `config/persona.yaml`,
+`config/speakers.yaml`, the identity statement under `agent_space/`,
+`config/ctm/persona.yaml` and the seed packs under `config/ctm/seeds.d/`) is
+gitignored, and a test checks every path the wizard writes with
+`git check-ignore`. Those files hold the real names an operator chose and
+must never be committed; the audit's denylists do not know those names.
 
 ## Reading a hit
 

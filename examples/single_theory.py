@@ -3,13 +3,20 @@
 Single Theory Example: Global Workspace Theory (GWT)
 =====================================================
 
-Demonstrates how to use ONE consciousness theory module in
-isolation.  This example uses the Enhanced Global Workspace,
-which implements Baars' Global Workspace Theory (1988):
+Uses one of the framework's eight theory modules on its own: the enhanced
+global workspace (``mtc/consciousness/enhanced_global_workspace.py``), the
+framework's implementation of Global Workspace Theory.
 
-  1. Workspace candidates compete for conscious access.
-  2. Winners that cross the ignition threshold are amplified.
-  3. Ignited content is broadcast to all cognitive modules.
+1. Candidates pass the thalamic gate and compete for a limited workspace
+   (capacity 7, hierarchical competition by default).
+2. Winners whose salience crosses the ignition threshold are amplified.
+3. Ignited content is broadcast to the registered modules.
+
+The state's ``is_conscious`` field is the workspace's name for "content
+ignited this cycle"; it is a flag of the data structure, not a claim about
+experience.
+
+Needs only the core install. Opens no network connection.
 
 Usage:
     python examples/single_theory.py
@@ -24,19 +31,18 @@ from mtc.consciousness.enhanced_global_workspace import (
     WorkspaceCandidateSource,
 )
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.WARNING)
 
 
 async def main():
-    # -- 1. Create a Global Workspace ---------------------------------
+    # 1. A workspace with the default capacity and ignition threshold.
     workspace = EnhancedGlobalWorkspace(
-        capacity=7,  # 7 +/- 2 items (Miller's law)
-        ignition_threshold=0.3,  # Salience needed to ignite
-        amplification_factor=2.0,  # Post-ignition boost
+        capacity=7,  # items the workspace holds at once
+        ignition_threshold=0.3,  # salience needed to ignite
+        amplification_factor=2.0,  # post-ignition boost
     )
 
-    # -- 2. Build candidates competing for conscious access -----------
+    # 2. Candidates competing for the workspace.
     candidates = [
         WorkspaceCandidate(
             content="visual scene of a sunset",
@@ -50,7 +56,7 @@ async def main():
         WorkspaceCandidate(
             content="recalled memory of a conversation",
             content_type="memory",
-            summary="Yesterday's interesting discussion",
+            summary="An earlier discussion",
             source=WorkspaceCandidateSource.MEMORY,
             activation_level=0.5,
             emotional_salience=0.4,
@@ -76,18 +82,19 @@ async def main():
         ),
     ]
 
-    # -- 3. Run a consciousness cycle ---------------------------------
+    # 3. One workspace cycle.
     state = await workspace.process_consciousness_cycle(candidates)
 
-    # -- 4. Inspect results -------------------------------------------
+    # 4. What the cycle produced.
     print("\n" + "=" * 60)
-    print("  GLOBAL WORKSPACE: CONSCIOUSNESS CYCLE RESULT")
+    print("  GLOBAL WORKSPACE: ONE CYCLE")
     print("=" * 60)
-    print(f"  Conscious?           {state.is_conscious}")
-    print(f"  Ignition events:     {state.ignition_events}")
-    print(f"  Integration level:   {state.integration_level:.3f}")
-    print(f"  Broadcast coverage:  {state.broadcast_coverage:.1%}")
-    print(f"  Attention focus:     {state.attention_focus}")
+    print(f"  Candidates offered:   {len(candidates)}")
+    print(f"  Ignited this cycle:   {state.is_conscious} (the is_conscious field)")
+    print(f"  Ignition events:      {state.ignition_events}")
+    print(f"  Integration level:    {state.integration_level:.3f}")
+    print(f"  Broadcast coverage:   {state.broadcast_coverage:.1%}")
+    print(f"  Attention focus:      {state.attention_focus}")
 
     if state.primary_content:
         pc = state.primary_content
@@ -97,14 +104,13 @@ async def main():
         print(f"    Salience:  {pc.salience:.3f}")
         print(f"    Rank:      {pc.competition_rank}")
 
-    print(f"\n  All workspace contents ({len(state.workspace_contents)}):")
+    print(f"\n  Workspace contents ({len(state.workspace_contents)}):")
     for wc in state.workspace_contents:
         print(f"    - {wc.candidate.summary} (salience={wc.salience:.3f})")
 
-    print("\n  Attention distribution:")
+    print("\n  Attention weight by source:")
     for source, weight in state.attention_distribution.items():
-        bar = "#" * int(weight * 30)
-        print(f"    {source:<12s} {weight:.3f}  {bar}")
+        print(f"    {source:<12s} {weight:.3f}")
 
     print("\n" + "=" * 60)
 

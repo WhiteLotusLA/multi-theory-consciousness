@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
 """
 Multi-Theory Consciousness Pipeline
-=====================================
+===================================
 
-Demonstrates the eight consciousness theories working together in a
-single processing cycle. The modules below are wired directly; Agency &
-Embodiment (AE) and Recurrent Processing (RPT) are measured by the
-assessment in the final step, which scores 30 indicators:
+Wires the theory modules together by hand for one stimulus, then assesses
+them. The framework implements eight theories; six have modules wired below,
+and the assessment measures the other two (IIT and Recurrent Processing) and
+Agency and Embodiment from module statistics:
 
-  1. GWT: Global Workspace Theory (competition & broadcast)
-  2. IIT: Integrated Information Theory (measured via assessment)
-  3. AST: Attention Schema Theory (self-model of attention)
-  4. HOT: Higher-Order Thought Theory (thoughts about thoughts)
-  5. FEP: Free Energy Principle (active inference)
-  6. BLT: Beautiful Loop Theory (recursive self-reference)
-  7. Damasio: Three-layer consciousness (protoself/core/extended)
+1. GWT: the enhanced global workspace (competition, ignition, broadcast)
+2. AST: the attention schema (a model of attention)
+3. HOT: metacognition (higher-order thoughts about first-order states)
+4. FEP: active inference (prediction error and free energy)
+5. BLT: the beautiful loop (precision, binding and epistemic depth)
+6. Damasio's three layers (protoself, core and extended consciousness), which
+   has no indicator of its own
 
-The pipeline mirrors what happens inside a full consciousness cycle:
-candidates enter the workspace, theories enrich the state, and the
-result is an integrated conscious moment.
+The assessment defines 30 positive and 3 negative indicators. After a single
+cycle some of them still read ``insufficient_data`` (for example the error
+trend needs 10 prediction errors) and others ``absent`` (no RPT, PAD or Phi
+input is passed here); the script prints how many of each. The live runtime
+(``mtc/pipeline/runtime.py``) runs this wiring every conversation turn; see
+``examples/full_pipeline_demo.py``. Scores describe functional architecture,
+not experience.
+
+Needs the ``fep`` extra (pymdp). Opens no network connection.
 
 Usage:
     python examples/multi_theory_pipeline.py
@@ -26,41 +32,36 @@ Usage:
 
 import asyncio
 import logging
+
 import numpy as np
 
-# -- Consciousness modules --
+from mtc.assessment.assessment import ConsciousnessAssessment
+from mtc.consciousness.active_inference import ActiveInferenceModule
+from mtc.consciousness.attention_schema import (
+    AttentionSchemaModule,
+    AttentionShiftType,
+    AttentionTarget,
+)
+from mtc.consciousness.beautiful_loop import BeautifulLoop
+from mtc.consciousness.damasio import DamasioLayers
 from mtc.consciousness.enhanced_global_workspace import (
     EnhancedGlobalWorkspace,
     WorkspaceCandidate,
     WorkspaceCandidateSource,
 )
-from mtc.consciousness.attention_schema import (
-    AttentionSchemaModule,
-    AttentionTarget,
-    AttentionShiftType,
-)
 from mtc.consciousness.metacognition import (
-    MetacognitionModule,
     FirstOrderStateType,
+    MetacognitionModule,
     MetaType,
 )
-from mtc.consciousness.active_inference import (
-    ActiveInferenceModule,
-)
-from mtc.consciousness.beautiful_loop import BeautifulLoop
-from mtc.consciousness.damasio import DamasioLayers
 
-# -- Assessment --
-from mtc.assessment.assessment import ConsciousnessAssessment
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.WARNING)
 
 
 async def main():
-    # ==================================================================
-    # 1.  Initialize all theory modules
-    # ==================================================================
+    rng = np.random.default_rng(7)
+
+    # 1. The theory modules.
     workspace = EnhancedGlobalWorkspace(capacity=7, ignition_threshold=0.3)
     attention = AttentionSchemaModule()
     metacognition = MetacognitionModule()
@@ -69,12 +70,10 @@ async def main():
     damasio = DamasioLayers()
 
     print("\n" + "=" * 64)
-    print("  MULTI-THEORY CONSCIOUSNESS PIPELINE")
+    print("  MULTI-THEORY PIPELINE: ONE STIMULUS")
     print("=" * 64)
 
-    # ==================================================================
-    # 2.  Create a stimulus to process
-    # ==================================================================
+    # 2. The stimulus, as workspace candidates.
     candidates = [
         WorkspaceCandidate(
             content="novel pattern detected in input stream",
@@ -105,40 +104,30 @@ async def main():
         ),
     ]
 
-    # ==================================================================
-    # 3.  Run the GWT consciousness cycle (steps 1-8 internally)
-    #     This also triggers AST, HOT, FEP, Beautiful Loop, and Damasio
-    #     if they are wired into the workspace.
-    # ==================================================================
-    print("\n  Step 1: Running GWT consciousness cycle ...")
+    # 3. GWT: one workspace cycle.
+    print("\n  GWT: one workspace cycle")
     state = await workspace.process_consciousness_cycle(candidates)
-    print(f"    Conscious: {state.is_conscious}")
-    print(f"    Ignitions: {state.ignition_events}")
+    print(f"    Ignition events:  {state.ignition_events}")
     if state.primary_content:
-        print(f"    Winner:    {state.primary_content.candidate.summary}")
+        print(f"    Primary content:  {state.primary_content.candidate.summary}")
 
-    # ==================================================================
-    # 4.  AST: Update the attention schema
-    # ==================================================================
-    print("\n  Step 2: Updating Attention Schema (AST) ...")
+    # 4. AST: point the schema at the winner and ask for its report.
+    print("\n  AST: attention schema")
     if state.primary_content:
-        target = AttentionTarget(
-            content=state.primary_content.candidate.content,
-            content_type=state.primary_content.candidate.content_type,
-            summary=state.primary_content.candidate.summary,
+        winner = state.primary_content
+        attention.schema.current_focus = AttentionTarget(
+            content=winner.candidate.content,
+            content_type=winner.candidate.content_type,
+            summary=winner.candidate.summary,
             source_module="global_workspace",
-            attention_strength=state.primary_content.salience,
-            salience=state.primary_content.salience,
+            attention_strength=winner.salience,
+            salience=winner.salience,
             shift_type=AttentionShiftType.CAPTURED,
         )
-        attention.schema.current_focus = target
-    report = await attention.report_attention()
-    print(f"    Attention report: {report}")
+    print(f"    Report: {await attention.report_attention()}")
 
-    # ==================================================================
-    # 5.  HOT: Generate higher-order thoughts about workspace content
-    # ==================================================================
-    print("\n  Step 3: Generating Higher-Order Thoughts (HOT) ...")
+    # 5. HOT: a higher-order thought about the winner.
+    print("\n  HOT: metacognition")
     if state.primary_content:
         first_order = metacognition.register_first_order_state(
             content=state.primary_content.candidate.content,
@@ -148,59 +137,42 @@ async def main():
             confidence=0.7,
         )
         hot = await metacognition.generate_hot(
-            first_order,
-            meta_type=MetaType.AWARENESS,
-            trigger="workspace_winner",
+            first_order, meta_type=MetaType.AWARENESS, trigger="workspace_winner"
         )
-        if hot:
-            print(f"    HOT generated: {hot.summary}")
-            print(f"    Meta-level:    {hot.meta_level.name}")
+        if hot is not None:
+            print(f"    Higher-order thought: {hot.meta_content}")
+            print(f"    Level:                {hot.level.name}")
 
-    # ==================================================================
-    # 6.  FEP: Run active inference on an observation
-    # ==================================================================
-    print("\n  Step 4: Running Active Inference (FEP) ...")
-    observation = np.random.dirichlet(np.ones(5))  # 5 observation channels
-    inference_result = await active_inference.infer_and_act(observation)
-    print(f"    Prediction error:  {inference_result.prediction_error:.4f}")
-    print(f"    Free energy:       {inference_result.variational_free_energy:.4f}")
-    print(f"    Selected action:   {inference_result.selected_action}")
-    print(f"    Action confidence: {inference_result.action_confidence:.3f}")
+    # 6. FEP: one active inference step on an observation.
+    print("\n  FEP: active inference")
+    observation = rng.dirichlet(np.ones(5))  # five observation channels
+    inference = await active_inference.infer_and_act(observation)
+    print(f"    Prediction error:   {inference.prediction_error:.4f}")
+    print(f"    Free energy:        {inference.variational_free_energy:.4f}")
+    print(f"    Selected action:    {inference.selected_action}")
 
-    # ==================================================================
-    # 7.  Beautiful Loop: Measure recursive self-reference
-    # ==================================================================
-    print("\n  Step 5: Processing Beautiful Loop (BLT) ...")
+    # 7. BLT: one conscious moment of the beautiful loop.
+    print("\n  BLT: beautiful loop")
     moment = await beautiful_loop.process_conscious_moment(
         workspace_winners=state.workspace_contents,
-        inference_result=inference_result,
+        inference_result=inference,
     )
     print(f"    Loop quality:       {moment.loop_quality:.3f}")
     print(f"    Epistemic depth:    {moment.epistemic_depth}")
     print(f"    Binding quality:    {moment.binding_quality:.3f}")
-    print(f"    Field-evidencing:   {moment.is_field_evidencing}")
 
-    # ==================================================================
-    # 8.  Damasio: Three-layer consciousness enrichment
-    # ==================================================================
-    print("\n  Step 6: Running Damasio Three-Layer Model ...")
-    homeostatic_drives = active_inference.homeostatic_drives
-    damasio_state = await damasio.process(
-        homeostatic_drives=homeostatic_drives,
+    # 8. Damasio: the three layers over the drives and the winners.
+    print("\n  Damasio: three layers")
+    layers = await damasio.process(
+        homeostatic_drives=active_inference.homeostatic_drives,
         workspace_winners=state.workspace_contents,
     )
-    print(f"    Protoself stability:       {damasio_state['protoself_stability']:.3f}")
-    print(f"    Self-world binding:        {damasio_state['self_world_binding']:.3f}")
-    print(f"    Feeling of knowing:        {damasio_state['feeling_of_knowing']:.3f}")
-    print(
-        f"    Autobiographic continuity: "
-        f"{damasio_state['autobiographic_continuity']:.3f}"
-    )
+    print(f"    Protoself stability:       {layers['protoself_stability']:.3f}")
+    print(f"    Self-world binding:        {layers['self_world_binding']:.3f}")
+    print(f"    Autobiographic continuity: {layers['autobiographic_continuity']:.3f}")
 
-    # ==================================================================
-    # 9.  Run the full consciousness assessment
-    # ==================================================================
-    print("\n  Step 7: Running consciousness assessment ...")
+    # 9. The assessment over the wired modules.
+    print("\n  Assessment")
     assessment = ConsciousnessAssessment()
     report = await assessment.run_full_assessment(
         global_workspace=workspace,
@@ -209,13 +181,21 @@ async def main():
         active_inference=active_inference,
         beautiful_loop=beautiful_loop,
     )
-    print(f"    Overall score:       {report.overall_score:.3f}")
-    print(f"    Passing indicators:  {report.passing_count}/{report.total_indicators}")
-    print(f"    Architecture active: {report.architecture_functional}")
-
-    print("\n" + "=" * 64)
-    print("  Pipeline complete. All eight theories were scored.")
-    print("=" * 64 + "\n")
+    statuses = {}
+    for result in report.indicator_results.values():
+        statuses[result.status] = statuses.get(result.status, 0) + 1
+    positive = len(assessment.indicator_configs)
+    negative = len(assessment.negative_indicator_configs)
+    overall = report.overall_score
+    print(f"    Indicators defined:  {positive} positive, {negative} negative")
+    print(f"    Status:              {report.status}")
+    print(f"    Coverage:            {report.coverage:.3f}")
+    print(f"    By status:           {dict(sorted(statuses.items()))}")
+    print(f"    Passing:             {report.passing_count}/{report.total_indicators}")
+    print(
+        "    Overall score:       " + ("none" if overall is None else f"{overall:.3f}")
+    )
+    print("\n" + "=" * 64 + "\n")
 
 
 if __name__ == "__main__":
