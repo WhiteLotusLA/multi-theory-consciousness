@@ -14,6 +14,14 @@ Pattern checks need no list. Allowlist rules suppress known-legitimate hits.
 Hits on private extra tokens report a placeholder (``private#N``, the 1-based
 position in the private list) instead of the token, so the audit output never
 prints the names the private list exists to guard.
+
+``run_runtime_audit`` audits directories outside the repository (a log or a
+results directory). It differs from ``run_audit`` in one rule only: the
+artifact rule is off, because a runtime directory legitimately holds files
+the tracked tree must not (line-delimited JSON, logs), and those files are
+scanned as text instead of being flagged. Tokens, patterns, the encoding
+check and the allowlist apply unchanged; paths are reported as
+``<directory name>/<relative path>``.
 """
 
 from __future__ import annotations
@@ -23,7 +31,7 @@ import fnmatch
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 KINDS = (
     "token",
@@ -98,6 +106,9 @@ TEXT_SUFFIXES = {
     ".cypher",
     ".in",
 }
+# Runtime mode only: file kinds a log or results directory holds as text. A
+# rotated file (``name.log.1``) counts by its inner suffix.
+RUNTIME_TEXT_SUFFIXES = (".jsonl", ".log")
 
 
 @dataclass(frozen=True)
@@ -352,16 +363,115 @@ def run_audit(
         suffix = path.suffix.lower()
         if path.is_dir() or (suffix and suffix not in TEXT_SUFFIXES):
             continue
-        text, problem = _read_text(path)
-        if problem is not None:
-            hits.append(Hit(str(rel), 0, "encoding", problem))
-        scanned = _scan_text(str(rel), text, tokens, suffix == ".py")
-        if suffix == ".py":
-            whole = {(h.line, h.match) for h in scanned if h.kind == "token"}
-            scanned.extend(
-                h
-                for h in _scan_assembled_literals(str(rel), text, tokens)
-                if (h.line, h.match) not in whole
+        hits.extend(_scan_file(path, str(rel), tokens))
+    return [h for h in hits if not any(r.covers(h.path, h) for r in allowlist)]
+
+
+def _scan_file(
+    path: Path, rel_str: str, tokens: Sequence[Tuple[str, re.Pattern]]
+) -> List[Hit]:
+    """Every hit in one text file: the encoding check, tokens and patterns."""
+    hits: List[Hit] = []
+    suffix = path.suffix.lower()
+    text, problem = _read_text(path)
+    if problem is not None:
+        hits.append(Hit(rel_str, 0, "encoding", problem))
+    scanned = _scan_text(rel_str, text, tokens, suffix == ".py")
+    if suffix == ".py":
+        whole = {(h.line, h.match) for h in scanned if h.kind == "token"}
+        scanned.extend(
+            h
+            for h in _scan_assembled_literals(rel_str, text, tokens)
+            if (h.line, h.match) not in whole
+        )
+    hits.extend(scanned)
+    return hits
+
+
+def _runtime_scannable(path: Path) -> bool:
+    """Whether runtime mode reads a file as text.
+
+    The same rule as the tracked tree (no suffix, or a text suffix), plus the
+    runtime text kinds, which the tracked tree treats as artifacts.
+    """
+    suffixes = [suffix.lower() for suffix in path.suffixes]
+    if not suffixes or suffixes[-1] in TEXT_SUFFIXES:
+        return True
+    return any(suffix in RUNTIME_TEXT_SUFFIXES for suffix in suffixes)
+
+
+def _runtime_entries(dirs: Iterable[Path]) -> List[Tuple[Path, str]]:
+    """``(file, reported path)`` for every file runtime mode scans."""
+    entries: List[Tuple[Path, str]] = []
+    for directory in dirs:
+        base = Path(directory)
+        if not base.is_dir():
+            raise NotADirectoryError(f"not a directory: {base.name}")
+        for path in sorted(f for f in base.rglob("*") if f.is_file()):
+            if not _runtime_scannable(path):
+                continue
+            relative = PurePosixPath(base.name) / PurePosixPath(
+                path.relative_to(base).as_posix()
             )
-        hits.extend(scanned)
+            entries.append((path, str(relative)))
+    return entries
+
+
+def runtime_files(dirs: Iterable[Path]) -> List[Path]:
+    """The files ``run_runtime_audit`` scans under ``dirs``."""
+    return [path for path, _rel in _runtime_entries(dirs)]
+
+
+def runtime_skipped(dirs: Iterable[Path]) -> List[Path]:
+    """The files under ``dirs`` that runtime mode does not read as text.
+
+    They are reported by count, so a directory of binaries never reads as
+    audited; a path that is not a directory raises ``NotADirectoryError``.
+    """
+    skipped: List[Path] = []
+    for directory in dirs:
+        base = Path(directory)
+        if not base.is_dir():
+            raise NotADirectoryError(f"not a directory: {base.name}")
+        skipped.extend(
+            sorted(
+                f for f in base.rglob("*") if f.is_file() and not _runtime_scannable(f)
+            )
+        )
+    return skipped
+
+
+def runtime_summary(dirs: Iterable[Path]) -> str:
+    """One line: how many files runtime mode scans and how many it skips."""
+    dirs = list(dirs)
+    scanned = len(runtime_files(dirs))
+    skipped = runtime_skipped(dirs)
+    by_suffix: Dict[str, int] = {}
+    for path in skipped:
+        suffix = path.suffix.lower()
+        by_suffix[suffix] = by_suffix.get(suffix, 0) + 1
+    line = (
+        f"privacy audit: runtime mode scanned {scanned} file(s); skipped "
+        f"{len(skipped)} file(s) not read as text"
+    )
+    if by_suffix:
+        line += " (" + ", ".join(f"{k} {v}" for k, v in sorted(by_suffix.items())) + ")"
+    return line
+
+
+def run_runtime_audit(
+    dirs: Iterable[Path],
+    denylist: Sequence[str],
+    allowlist: Sequence[AllowRule],
+    extra_denylist: Optional[Sequence[str]] = None,
+) -> List[Hit]:
+    """Audit runtime directories (see the module docstring).
+
+    Only the artifact rule is off. A path that is not a directory raises
+    ``NotADirectoryError``: a directory that was not scanned is never clean.
+    """
+    tokens = _compile_tokens(denylist, extra_denylist)
+    hits: List[Hit] = []
+    for path, rel_str in _runtime_entries(dirs):
+        hits.extend(_scan_file(path, rel_str, tokens))
     return [h for h in hits if not any(r.covers(h.path, h) for r in allowlist)]

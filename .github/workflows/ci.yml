@@ -53,7 +53,12 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
+      # Generated artifacts: each has a generator with a --check mode, and
+      # none is edited by hand.
       - run: python scripts/gen_env_example.py --check
+      - run: python scripts/gen_schemas.py --check
+      - run: PYPHI_WELCOME_OFF=yes python -m mtc.db.migrations --check
+      - run: python scripts/sync_resources.py --check
 
   lint:
     runs-on: ubuntu-latest
@@ -63,8 +68,12 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install black flake8
-      - run: black --check --line-length 88 mtc tests scripts
-      - run: flake8 mtc tests scripts
+      - run: black --check --line-length 88 mtc tests scripts examples
+      - run: flake8 mtc tests scripts examples
+      - name: Shell scripts parse and pass shellcheck
+        run: |
+          for script in $(git ls-files 'scripts/*.sh'); do bash -n "$script" || exit 1; done
+          shellcheck $(git ls-files 'scripts/*.sh')
 
   tests:
     runs-on: ubuntu-latest
@@ -77,5 +86,65 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[neural,fep,dev]"
+      - run: pip install -e ".[neural,fep,llm,anthropic,api,databases,dev]"
+      # Hermetic: no store, model server or back end is contacted.
       - run: PYPHI_WELCOME_OFF=yes python -m pytest tests -q -m "not slow and not db and not live" --timeout=900
+
+  # A stranger's path: a non-editable install with every extra, a project set
+  # up from the example answers, the examples and the quick assessment with
+  # the mock provider and in-memory stores, then an audit of what was written.
+  install-smoke:
+    runs-on: ubuntu-latest
+    env:
+      MTC_DEVICE: cpu
+      PYPHI_WELCOME_OFF: "yes"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the package (not editable) with every extra
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu ".[all]"
+      - name: The installed copy is the one in use
+        run: |
+          cd "$RUNNER_TEMP"
+          python -c "import mtc, sys; print(mtc.__version__); sys.exit(0 if 'site-packages' in mtc.__file__ else 1)"
+      - name: Set up a project from the example answers
+        run: |
+          mkdir -p "$RUNNER_TEMP/proj"
+          cd "$RUNNER_TEMP/proj"
+          mtc --version
+          mtc init --print-example-answers > answers.yaml
+          mtc init --from answers.yaml --yes --no-probe
+          mtc doctor --json
+      - name: Run the examples
+        run: |
+          cd "$RUNNER_TEMP/proj"
+          python "$GITHUB_WORKSPACE/examples/full_pipeline_demo.py" --state-dir runtime/demo
+          python "$GITHUB_WORKSPACE/examples/continuous_thought.py" --state-dir runtime/ctm
+          python "$GITHUB_WORKSPACE/examples/basic_assessment.py"
+          python "$GITHUB_WORKSPACE/examples/multi_theory_pipeline.py"
+          python "$GITHUB_WORKSPACE/examples/neural_substrates.py"
+          python "$GITHUB_WORKSPACE/examples/single_theory.py"
+      - name: Run the quick assessment
+        run: |
+          cd "$RUNNER_TEMP/proj"
+          mtc assess --quick --json --json-path results/smoke.json
+      - name: Audit the runtime logs and results
+        run: |
+          cd "$RUNNER_TEMP/proj"
+          python "$GITHUB_WORKSPACE/scripts/privacy_audit.py" --runtime runtime results
+
+  # Every installed distribution has a licence the table allows. The iit
+  # extra (PyPhi, GPL version 3 or later) is installed and audited on its own.
+  license-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --extra-index-url https://download.pytorch.org/whl/cpu ".[all]"
+      - run: python scripts/license_audit.py --extras all
+      - run: pip install ".[iit]"
+      - run: python scripts/license_audit.py --extras iit

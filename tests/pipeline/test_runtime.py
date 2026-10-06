@@ -1,12 +1,13 @@
 """The runtime composition root: in-memory by default, enable keys select
 backends, presets, narration, the trust lookup, the flight sides, degraded
-brains, background tasks and the lifecycle."""
+brains, background tasks, the PyPhi home and the lifecycle."""
 
 import json
 import os
 import secrets
 import subprocess
 import sys
+import types
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List
@@ -17,6 +18,7 @@ from mtc.brain.brain import LLMBrain
 from mtc.brain.protocol import ConfigurationError
 from mtc.brain.providers.mock_provider import MockProvider
 from mtc.brain.providers.registry import ProviderRegistry
+from mtc.consciousness import pyphi_bridge
 from mtc.consciousness.emotion_extractor import InMemoryEmotionAverages
 from mtc.core import config as config_module
 from mtc.core.config import Settings
@@ -89,6 +91,13 @@ def _release_logging():
     """build_runtime configures the mtc logger; give it back to the suite."""
     yield
     reset_logging()
+
+
+@pytest.fixture(autouse=True)
+def _restore_pyphi_home_record(monkeypatch):
+    """build_runtime records its Settings in the PyPhi bridge for the first
+    import; each test starts with no record and leaves none behind."""
+    monkeypatch.setattr(pyphi_bridge, "_home_settings", None)
 
 
 @pytest.fixture
@@ -436,6 +445,53 @@ async def test_runtime_reads_only_the_settings_it_was_built_with(
     assert status["ctm"]["status"] in ("running", "stopped", "paused")
     await runtime.stop()
     assert process_settings_reads == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_puts_the_pyphi_home_under_its_own_data_directory(
+    tmp_path, token, monkeypatch
+):
+    """build_runtime records its own Settings in the PyPhi bridge: nothing is
+    imported or created while it builds, and PyPhi's first import (its config
+    copy, cache and log) lands in the runtime's <DATA_DIRECTORY>/pyphi, never
+    under the process Settings' directories or the working directory."""
+    # The bridge as before PyPhi's first import, with a stand-in import that
+    # records the directory it ran in and writes a cache there, as PyPhi does.
+    monkeypatch.delitem(sys.modules, "pyphi", raising=False)
+    monkeypatch.setattr(pyphi_bridge, "_pyphi_checked", False)
+    monkeypatch.setattr(pyphi_bridge, "_pyphi_module", None)
+    monkeypatch.setattr(pyphi_bridge, "_home_in_use", None)
+    imported_in: List[Path] = []
+    fake = types.ModuleType("pyphi")
+
+    def fake_import():
+        imported_in.append(Path.cwd().resolve())
+        (Path.cwd() / "__pyphi_cache__").mkdir()
+        return fake
+
+    monkeypatch.setattr(pyphi_bridge, "_import_pyphi", fake_import)
+    process_root = tmp_path / "process"
+    process = Settings(
+        _env_file=None, PROJECT_ROOT=str(process_root), DATA_DIRECTORY="data"
+    )
+    monkeypatch.setattr(config_module, "_settings", process)
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+
+    runtime = await _build(tmp_path)
+    home = tmp_path / "data" / "pyphi"
+    assert imported_in == []
+    assert not home.exists()
+
+    assert pyphi_bridge.pyphi_available() is True
+    assert imported_in == [home.resolve()]
+    assert (home / "pyphi_config.yml").is_file()
+    assert (home / "__pyphi_cache__").is_dir()
+    assert Path.cwd().resolve() == work.resolve()
+    assert sorted(work.iterdir()) == []
+    assert not process_root.exists()
+    await runtime.stop()
 
 
 @pytest.mark.asyncio

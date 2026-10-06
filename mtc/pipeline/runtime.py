@@ -25,11 +25,15 @@ Settings say:
   when the ``embeddings`` extra imports (it loads its model on first use), an
   injected embedder needs ``allow_non_semantic`` when it is not semantic.
 - The workspace through ``runner_support.build_workspace`` with the overrides
-  of ``PIPELINE_PRESET`` (validated against the schema) or the ``overrides``
-  argument, the live pipeline's Damasio defaults (a wall-clock circadian model
-  in ``TIMEZONE`` with ``WAKE_HOUR`` and ``SLEEP_HOUR``, ``agent_name`` from
+  of ``PIPELINE_PRESET`` (validated against the schema; the preset directory
+  and the schema resolve through ``mtc.core.resources.resolve_shipped``, the
+  project copy under ``PROJECT_ROOT`` first, then the packaged copy) or the
+  ``overrides`` argument, the live pipeline's Damasio defaults (a wall-clock
+  circadian model in ``TIMEZONE`` with ``WAKE_HOUR`` and ``SLEEP_HOUR``, ``agent_name`` from
   ``SYSTEM_NAME``) unless the overrides set them, a ``PhiTracker`` from
-  ``build_phi_tracker``, one ``PADAffectModel``, one prospective simulator and
+  ``build_phi_tracker`` (before it, ``pyphi_bridge.configure_pyphi_home``
+  records these Settings, so PyPhi's first import puts its home under their
+  ``DATA_DIRECTORY``), one ``PADAffectModel``, one prospective simulator and
   one cross-modal binder shared by the cycle augmenter and the orchestrator;
   the augmenter's switches come from the overrides with the schema defaults,
   not pinned.
@@ -68,7 +72,9 @@ Config keys read here: the five store enable keys, ``CTM_ENABLED``,
 ``AUTONOMOUS_LIFE_ENABLED``, ``PHI_IDLE_SAMPLE_S``,
 ``SELF_ASSESSMENT_INTERVAL_S``, ``STATE_DIR``, ``RESULTS_DIR``, ``TIMEZONE``,
 ``WAKE_HOUR``, ``SLEEP_HOUR``, ``SYSTEM_NAME``, ``MONGODB_DB`` and ``DEBUG``;
-every other key is read by the component that owns it. Persisted state lives
+every other key is read by the component that owns it (the safety integration
+is handed ``mtc.monitoring.backup_status.backup_report``, which reads
+``BACKUP_LOCATION`` when the backup status is asked for). Persisted state lives
 in the hub's files and the stores. Conversations, thoughts, memories and
 speaker names are private at runtime and never logged here.
 """
@@ -80,6 +86,7 @@ import importlib.util
 import inspect
 import logging
 from dataclasses import dataclass, field, fields
+from functools import partial
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
@@ -87,6 +94,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tup
 import mtc
 from mtc.brain.brain import LLMBrain
 from mtc.brain.protocol import ConfigurationError, NoAnswerError, strip_reasoning_blocks
+from mtc.consciousness import pyphi_bridge
 from mtc.consciousness.attention_observer import AttentionGrabObserver
 from mtc.consciousness.consciousness_integration import ConsciousnessIntegration
 from mtc.consciousness.conversation_coherence import ConversationCoherence
@@ -120,6 +128,7 @@ from mtc.core.narration import NarrationFlags
 from mtc.core.param_overrides import load_overrides, preset_path
 from mtc.core.paths import resolve_path
 from mtc.core.profiler import StageProfiler
+from mtc.core.resources import resolve_shipped
 from mtc.core.runner_support import build_phi_tracker, build_workspace
 from mtc.memory.enhanced_memory_manager import EnhancedMemoryManager
 from mtc.memory.factory import MemoryStack, build_memory_manager
@@ -142,6 +151,7 @@ from mtc.memory.inmemory import (
 from mtc.memory.memory_consolidation_pipeline import MemoryConsolidationPipeline
 from mtc.memory.memory_pruner import MemoryPruner
 from mtc.monitoring.alert_manager import AlertManager
+from mtc.monitoring.backup_status import backup_report
 from mtc.monitoring.wellbeing_monitor import ResilientSampler, WellbeingMonitor
 from mtc.pipeline.consciousness_helpers import ConsciousnessLevelCache
 from mtc.pipeline.consciousness_orchestrator import (
@@ -225,6 +235,9 @@ SESSION_PRUNE_S = 3600.0
 SELF_ASSESSMENT_MAX_TOKENS = 900
 SELF_ASSESSMENT_TEMPERATURE = 0.3
 THOUGHT_PASS_LIMIT = 500
+# The source checkout's experiments directory. The preset loader resolves the
+# presets and the schema through resolve_shipped, so an install without the
+# checkout reads the packaged copies.
 EXPERIMENTS_DIR = Path(mtc.__file__).resolve().parents[1] / "experiments"
 STORE_NAMES: Tuple[str, ...] = ("postgres", "mongodb", "redis", "qdrant", "neo4j")
 
@@ -711,9 +724,10 @@ def load_pipeline_overrides(settings: Settings) -> Dict[str, Any]:
     name = (settings.PIPELINE_PRESET or "").strip()
     if not name:
         return {}
-    schema = EXPERIMENTS_DIR / "param_schema.toml"
     try:
-        path = preset_path(str(EXPERIMENTS_DIR / "presets"), name)
+        schema, _ = resolve_shipped("experiments/param_schema.toml", settings=settings)
+        presets, _ = resolve_shipped("experiments/presets", settings=settings)
+        path = preset_path(str(presets), name)
         return load_overrides(path, str(schema))
     except (FileNotFoundError, ValueError) as exc:
         raise ConfigurationError(
@@ -1028,6 +1042,9 @@ async def build_runtime(
         **damasio_defaults,
         **dict(layered.get("damasio", {}) or {}),
     }
+    # PyPhi loads on its first use (an exact Phi, an assessment); its home
+    # then lands under this runtime's DATA_DIRECTORY, not the process one.
+    pyphi_bridge.configure_pyphi_home(cfg)
     phi_tracker = build_phi_tracker(dict(layered.get("phi", {}) or {}), 128)
     workspace = build_workspace(workspace_overrides, phi_tracker)
     runtime.phi_tracker = phi_tracker
@@ -1100,6 +1117,8 @@ async def build_runtime(
         wellbeing=wellbeing,
         alerts=alerts,
         safety_monitor=monitor,
+        # The newest backup under BACKUP_LOCATION, judged on demand.
+        backup_status=partial(backup_report, cfg),
         settings=cfg,
         clock=now,
     )

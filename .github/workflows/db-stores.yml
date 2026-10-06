@@ -1,0 +1,71 @@
+name: Store tests
+
+# The store tests run against throwaway databases in service containers. They
+# are optional: the hermetic suite in ci.yml is the gate on every push. This
+# workflow runs on request and once a week.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  db:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          # A CI-only container: local connections are trusted, so no
+          # credential is written in this file.
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_USER: mtc
+        ports:
+          - 5432:5432
+      mongo:
+        image: mongo:8
+        ports:
+          - 27017:27017
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+      qdrant:
+        image: qdrant/qdrant:v1.19.2
+        ports:
+          - 6333:6333
+    env:
+      MTC_DEVICE: cpu
+      PYPHI_WELCOME_OFF: "yes"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[neural,fep,llm,api,databases,dev]"
+      - name: Install the PostgreSQL 17 client tools (the backup round trip uses them)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+      - name: Wait for the stores
+        run: |
+          for port in 5432 27017 6379 6333; do
+            attempt=0
+            until (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; do
+              attempt=$((attempt + 1))
+              if [ "${attempt}" -ge 60 ]; then
+                echo "port ${port} did not open in time"
+                exit 1
+              fi
+              sleep 2
+            done
+          done
+      # Only names that start with the throwaway prefix are created or dropped.
+      # Neo4j is not here: its fixtures skip on the community edition, which
+      # holds a single graph.
+      - name: Run the store tests
+        run: MTC_TEST_STORES=1 python -m pytest tests -q -m db -rs --timeout=900

@@ -6,6 +6,7 @@ Usage:
   python scripts/privacy_audit.py --staged        # staged content (the index)
   python scripts/privacy_audit.py --patch-from origin/main   # lines added since ref
   python scripts/privacy_audit.py --paths a.py b.md
+  python scripts/privacy_audit.py --runtime logs results   # runtime directories
 
 Exit code 1 on any hit. The private extra denylist is read from
 $PRIVACY_DENYLIST_EXTRA or config/privacy/denylist.local.txt when present.
@@ -14,6 +15,14 @@ $PRIVACY_DENYLIST_EXTRA or config/privacy/denylist.local.txt when present.
 was fixed on disk but not re-staged still blocks the commit. --patch-from
 audits every line added by the commits in REF..HEAD, file by file, so path
 allowlist rules apply; line numbers then count added lines within that file.
+
+--runtime audits directories that need not be inside the repository (a log or
+a results directory after a run). Only the artifact rule is off there: .jsonl
+and .log files are scanned as text instead of being flagged, and every token,
+pattern and encoding check still applies. Paths print as
+<directory name>/<relative path>, a path that is not a directory is an
+error, never a clean result, and the files it does not read as text are
+counted as skipped next to the scanned count.
 """
 
 import argparse
@@ -46,6 +55,9 @@ _audit = _load_audit_module()
 load_allowlist = _audit.load_allowlist
 load_denylist = _audit.load_denylist
 run_audit = _audit.run_audit
+run_runtime_audit = _audit.run_runtime_audit
+runtime_files = _audit.runtime_files
+runtime_summary = _audit.runtime_summary
 
 DENYLIST = ROOT / "config" / "privacy" / "denylist.txt"
 ALLOWLIST = ROOT / "config" / "privacy" / "allowlist.txt"
@@ -129,7 +141,7 @@ def added_lines_by_file(ref: str) -> dict:
     return added
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -137,7 +149,8 @@ def main() -> int:
     mode.add_argument("--staged", action="store_true")
     mode.add_argument("--patch-from", metavar="REF")
     mode.add_argument("--paths", nargs="+")
-    args = parser.parse_args()
+    mode.add_argument("--runtime", nargs="+", metavar="DIR")
+    args = parser.parse_args(argv)
 
     denylist = load_denylist(DENYLIST)
     allowlist = load_allowlist(ALLOWLIST)
@@ -146,7 +159,14 @@ def main() -> int:
     def audit(files, root):
         return run_audit(files, denylist, allowlist, extra_denylist=extra, root=root)
 
-    if args.patch_from:
+    if args.runtime:
+        directories = [Path(item).expanduser().resolve() for item in args.runtime]
+        missing = [str(item) for item in directories if not item.is_dir()]
+        if missing:
+            raise SystemExit(f"privacy audit: not a directory: {', '.join(missing)}")
+        hits = run_runtime_audit(directories, denylist, allowlist, extra_denylist=extra)
+        print(runtime_summary(directories))
+    elif args.patch_from:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp = Path(tmp_dir)
             files = [

@@ -2,11 +2,15 @@
 
 from pathlib import Path
 
+import pytest
+
 from mtc.devtools.privacy_audit import (
     AllowRule,
     load_allowlist,
     load_denylist,
     run_audit,
+    run_runtime_audit,
+    runtime_files,
 )
 
 # Synthetic tokens: no real name appears in this file, whole or in pieces.
@@ -216,3 +220,143 @@ def test_dash_and_emoji_keep_their_own_kinds_in_python(tmp_path):
     f = write(tmp_path, "m.py", f"a = 1  # {EM_DASH}\nb = 2  # \U0001f600\n")
     kinds = [(h.kind, h.line) for h in run_audit([f], denylist=[], allowlist=[])]
     assert kinds == [("dash", 1), ("emoji", 2)]
+
+
+def _runtime_tree(tmp_path: Path) -> Path:
+    """A log directory outside any repository, with clean and planted files."""
+    logs = tmp_path / "elsewhere" / "logs"
+    write(logs, "mtc.log", "INFO runtime ready\n")
+    write(logs, "specialty/safety.jsonl", '{"event": "ok"}\n')
+    return logs
+
+
+def test_runtime_mode_scans_directories_outside_the_repo(tmp_path):
+    logs = _runtime_tree(tmp_path)
+    results = tmp_path / "other" / "results"
+    write(results, "run/report.json", '{"overall": 0.5}\n')
+    assert run_runtime_audit([logs, results], [PLANTED], []) == []
+    assert sorted(p.name for p in runtime_files([logs, results])) == [
+        "mtc.log",
+        "report.json",
+        "safety.jsonl",
+    ]
+    # A planted token in each directory is found, in a log, a rotated log and
+    # a JSON result alike.
+    write(logs, "mtc.log", f"INFO talking with {PLANTED}\n")
+    write(logs, "mtc.log.1", f"INFO earlier, {PLANTED}\n")
+    write(results, "run/report.json", f'{{"speaker": "{PLANTED}"}}\n')
+    hits = run_runtime_audit([logs, results], [PLANTED], [])
+    assert sorted((h.path, h.kind) for h in hits) == [
+        ("logs/mtc.log", "token"),
+        ("logs/mtc.log.1", "token"),
+        ("results/run/report.json", "token"),
+    ]
+    # The private extra list applies, reported by position and never by value.
+    write(logs, "mtc.log", f"INFO the dog {PET}\n")
+    private = run_runtime_audit([logs], [], [], extra_denylist=[PET])
+    assert [(h.kind, h.match) for h in private] == [("token", "private#1")]
+    # A directory that cannot be scanned is an error, never a clean result.
+    with pytest.raises(NotADirectoryError):
+        run_runtime_audit([tmp_path / "missing"], [PLANTED], [])
+    with pytest.raises(NotADirectoryError):
+        run_runtime_audit([logs / "mtc.log"], [PLANTED], [])
+
+
+def test_runtime_mode_disables_only_the_artifact_rule(tmp_path):
+    logs = _runtime_tree(tmp_path)
+    record = logs / "specialty" / "safety.jsonl"
+    # The tracked-tree audit flags the file as an artifact and never reads it.
+    tracked = run_audit([record], denylist=[PLANTED], allowlist=[], root=tmp_path)
+    assert [h.kind for h in tracked] == ["artifact"]
+    # Runtime mode scans it and, clean, reports nothing.
+    assert run_runtime_audit([logs], [PLANTED], []) == []
+    # Planted material in it is still a hit: a token, an address and a dash.
+    address = "@".join(["someone", "example.com"])
+    record.write_text(
+        f'{{"speaker": "{PLANTED}"}}\n'
+        f'{{"contact": "{address}"}}\n'
+        f'{{"text": "a dash {EM_DASH} here"}}\n',
+        encoding="utf-8",
+    )
+    hits = run_runtime_audit([logs], [PLANTED], [])
+    assert [(h.path, h.line, h.kind) for h in hits] == [
+        ("logs/specialty/safety.jsonl", 1, "token"),
+        ("logs/specialty/safety.jsonl", 2, "email"),
+        ("logs/specialty/safety.jsonl", 3, "dash"),
+    ]
+    assert all(h.kind != "artifact" for h in hits)
+    # Every other pattern fires too, and so does the encoding check.
+    write(
+        logs,
+        "mtc.log",
+        "call 555-123-4567\n"
+        "path /Users/somebody/x\n"
+        "host 10.0.0.12\n"
+        "key sk-abcdefghijklmnopqrstuvwxyz0123\n",
+    )
+    (logs / "broken.log").write_bytes(b"caf\xe9 " + PLANTED.encode("ascii") + b"\n")
+    kinds = sorted({h.kind for h in run_runtime_audit([logs], [PLANTED], [])})
+    assert kinds == [
+        "dash",
+        "email",
+        "encoding",
+        "homepath",
+        "ipv4",
+        "phone",
+        "secret",
+        "token",
+    ]
+    # Python in a runtime directory keeps its stricter checks.
+    write(logs, "probe.py", 'x = "Planted" + "name"\n')
+    assembled = [
+        h for h in run_runtime_audit([logs], [PLANTED], []) if h.path == "logs/probe.py"
+    ]
+    assert [h.kind for h in assembled] == ["assembled-token"]
+    # A file kind neither mode reads as text stays unread.
+    (logs / "weights.bin").write_bytes(PLANTED.encode("ascii"))
+    assert all(
+        h.path != "logs/weights.bin" for h in run_runtime_audit([logs], [PLANTED], [])
+    )
+    assert logs / "weights.bin" not in runtime_files([logs])
+
+
+def test_runtime_mode_reports_dir_relative_paths(tmp_path):
+    logs = _runtime_tree(tmp_path)
+    write(logs, "specialty/safety.jsonl", f'{{"speaker": "{PLANTED}"}}\n')
+    hits = run_runtime_audit([logs], [PLANTED], [])
+    assert [str(h) for h in hits] == [f"logs/specialty/safety.jsonl:1:token:{PLANTED}"]
+    # Nothing of the directory's location is printed: only its own name.
+    assert str(tmp_path) not in str(hits[0])
+    assert "elsewhere" not in hits[0].path
+    # Allowlist rules match the reported path.
+    covering = AllowRule("logs/specialty/**", "token", PLANTED)
+    assert run_runtime_audit([logs], [PLANTED], [covering]) == []
+    elsewhere = AllowRule("results/**", "token", PLANTED)
+    assert len(run_runtime_audit([logs], [PLANTED], [elsewhere])) == 1
+
+
+def test_runtime_mode_counts_what_it_skips(tmp_path, capsys):
+    """Runtime mode reads only text kinds; every other file is skipped, and
+    the count of skipped files is reported next to the scanned count, so a
+    directory of binaries never reads as audited."""
+    import importlib.util
+
+    from mtc.devtools.privacy_audit import runtime_skipped
+
+    logs = _runtime_tree(tmp_path)
+    (logs / "state.npz").write_bytes(PLANTED.encode("ascii"))
+    (logs / "cache.pkl").write_bytes(PLANTED.encode("ascii"))
+    (logs / "deep").mkdir()
+    (logs / "deep" / "store.db").write_bytes(b"\x00\x01")
+    skipped = runtime_skipped([logs])
+    assert sorted(p.name for p in skipped) == ["cache.pkl", "state.npz", "store.db"]
+    assert not set(skipped) & set(runtime_files([logs]))
+
+    script = Path(__file__).resolve().parents[2] / "scripts" / "privacy_audit.py"
+    spec = importlib.util.spec_from_file_location("privacy_audit_wrapper", script)
+    wrapper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(wrapper)
+    assert wrapper.main(["--runtime", str(logs)]) == 0
+    out = capsys.readouterr().out
+    assert "runtime mode scanned 2 file(s)" in out
+    assert "skipped 3 file(s) not read as text (.db 1, .npz 1, .pkl 1)" in out
