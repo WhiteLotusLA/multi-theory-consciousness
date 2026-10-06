@@ -15,8 +15,10 @@ systems consolidation model (Born and Wilhelm, 2012):
   clustered by text similarity with temporal burst detection, scored and
   checked for protection, and each unprotected cluster becomes a
   ``ThoughtGist`` summarised by the brain (``run_thought_consolidation``).
-  Gists go to the ``ThoughtGistStore`` and are embedded in the vector store
-  with payload type ``gist``.
+  A cluster whose thoughts carry no numeric emotion score gets
+  ``dominant_emotion`` None and no emotional arc, and its prompt says no
+  emotion was measured. Gists go to the ``ThoughtGistStore`` and are embedded
+  in the vector store with payload type ``gist``.
 - Retention: the forgetting curve for memories and gists (true half-lives
   ``memory_half_life_days`` and ``gist_half_life_days``), the gist lifecycle
   classes, conflict resolution and connection strengthening.
@@ -857,7 +859,11 @@ class MemoryConsolidationPipeline:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _emotional_arc(contexts: Sequence[Any]) -> Tuple[str, Dict[str, Any]]:
+    def _emotional_arc(
+        contexts: Sequence[Any],
+    ) -> Tuple[Optional[str], Dict[str, Any]]:
+        """The dominant emotion and its arc, or ``(None, {})`` when no context
+        carries a numeric score: no mood is assumed for unmeasured thoughts."""
         sums: Dict[str, float] = {}
         for ctx in contexts:
             if isinstance(ctx, Mapping):
@@ -865,7 +871,7 @@ class MemoryConsolidationPipeline:
                     if isinstance(value, (int, float)) and not isinstance(value, bool):
                         sums[emotion] = sums.get(emotion, 0.0) + float(value)
         if not sums:
-            return "neutral", {}
+            return None, {}
         dominant = max(sums, key=sums.get)
         dicts = [c for c in contexts if isinstance(c, Mapping)]
         start = [float(c.get(dominant, 0.0) or 0.0) for c in dicts[:3]]
@@ -920,12 +926,21 @@ class MemoryConsolidationPipeline:
         bursts = list(cluster.get("burst_windows") or [])
         dominant, arc = self._emotional_arc(cluster.get("emotional_contexts") or [])
         name = self._system_name()
+        if dominant is None:
+            tone = (
+                "No emotion was measured for these thoughts; add none. Preserve "
+                "the temporal shape."
+            )
+        else:
+            tone = (
+                f"Dominant emotion: {dominant}. Preserve the emotional tone and "
+                "the temporal shape."
+            )
         prompt = (
             f"Summarise this recurring pattern in the thinking of {name} in one or "
             f"two sentences. The thought recurred {count} times. "
             f'Content: "{sample}". Temporal pattern: {len(bursts)} burst(s). '
-            f"Dominant emotion: {dominant}. Preserve the emotional tone and the "
-            "temporal shape."
+            f"{tone}"
         )
         system_prompt = (
             f"Summarise thought patterns of {name}, an AI research system, in the "

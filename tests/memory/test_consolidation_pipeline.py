@@ -206,11 +206,40 @@ async def test_gist_from_brain_answer_stored_and_embedded(settings, clock):
     gist = stored[0]
     assert gist.summary == "Unit returned to tides with steady curiosity."
     assert gist.source_count == 6 and gist.dominant_emotion == "curiosity"
+    assert "Dominant emotion: curiosity." in brain.calls[0]["prompt"]
     assert gist.created_at == NOW
     hits = vectors.search_similar(gist.summary, top_k=1, min_score=-1.0)
     assert hits[0][2]["type"] == "gist"
     assert hits[0][2]["gist_id"] == gist.gist_id
     assert hits[0][2]["source_count"] == 6
+
+
+@pytest.mark.asyncio
+async def test_gist_without_emotional_data_has_no_mood(settings, clock):
+    brain = FakeBrain(replies=["Unit returned to tides."])
+    gists = InMemoryThoughtGistStore()
+    vectors = InMemoryVectorStore(HashEmbedder(dim=16), allow_non_semantic=True)
+    pipeline = _pipeline(
+        settings, clock, brain=brain, gist_store=gists, vector_store=vectors
+    )
+    thoughts = [
+        _thought(i, "I keep wondering about tides", minutes=i, emotional_context={})
+        for i in range(6)
+    ]
+    report = await pipeline.run_thought_consolidation(thoughts)
+    assert report.gists_created == 1 and report.gists_stored == 1
+    (gist,) = await gists.active_gists(min_retention=0.0)
+    assert gist.dominant_emotion is None
+    assert gist.emotional_arc == {}
+    prompt = brain.calls[0]["prompt"]
+    for word in ("Dominant emotion", "neutral", "None"):
+        assert word not in prompt, word
+    assert "No emotion was measured" in prompt
+    hits = vectors.search_similar(gist.summary, top_k=1, min_score=-1.0)
+    assert hits[0][2]["dominant_emotion"] is None
+    # Non-numeric scores are no measurement either.
+    arc = MemoryConsolidationPipeline._emotional_arc([{}, {"calm": "high"}, None])
+    assert arc == (None, {})
 
 
 @pytest.mark.asyncio

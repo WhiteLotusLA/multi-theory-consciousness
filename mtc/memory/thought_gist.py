@@ -40,14 +40,18 @@ def _read_utc(value: Optional[datetime]) -> Optional[datetime]:
 
 @dataclass
 class ThoughtGist:
-    """A compressed gist of clustered thoughts from the consolidation cycle."""
+    """A compressed gist of clustered thoughts from the consolidation cycle.
+
+    ``dominant_emotion`` is the most prominent measured emotion of the source
+    thoughts, or None when none of them carried one; no mood stands in for it.
+    """
 
     gist_id: str
     created_at: datetime
     summary: str
     source_count: int
     source_thought_ids: List[str]
-    dominant_emotion: str
+    dominant_emotion: Optional[str] = None
 
     # Temporal pattern data
     emotional_arc: Dict[str, Any] = field(default_factory=dict)
@@ -103,7 +107,7 @@ class ThoughtGist:
 
         ``gist_id``, ``created_at``, ``summary`` and ``source_count`` are
         required (a missing one raises KeyError); every other field falls back
-        to the dataclass default.
+        to the dataclass default (a missing ``dominant_emotion`` reads None).
         """
         return cls(
             gist_id=doc["gist_id"],
@@ -111,7 +115,7 @@ class ThoughtGist:
             summary=doc["summary"],
             source_count=doc["source_count"],
             source_thought_ids=list(doc.get("source_thought_ids", [])),
-            dominant_emotion=doc.get("dominant_emotion", "neutral"),
+            dominant_emotion=doc.get("dominant_emotion"),
             emotional_arc=copy.deepcopy(doc.get("emotional_arc", {})),
             time_span=copy.deepcopy(doc.get("time_span", {})),
             burst_windows=copy.deepcopy(doc.get("burst_windows", [])),

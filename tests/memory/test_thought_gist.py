@@ -73,7 +73,7 @@ def test_from_document_tolerates_missing_optional_fields():
     }
     gist = ThoughtGist.from_document(minimal)
     assert gist.source_thought_ids == []
-    assert gist.dominant_emotion == "neutral"
+    assert gist.dominant_emotion is None  # no mood is invented for a missing key
     assert gist.retention_strength == 1.0
     assert gist.is_protected is False
     assert gist.protection_reason is None
@@ -83,6 +83,23 @@ def test_from_document_tolerates_missing_optional_fields():
         del broken[required]
         with pytest.raises(KeyError):
             ThoughtGist.from_document(broken)
+
+
+def test_unmeasured_dominant_emotion_is_none_and_round_trips():
+    bare = ThoughtGist(
+        gist_id="g3",
+        created_at=T0,
+        summary="s",
+        source_count=2,
+        source_thought_ids=["t1", "t2"],
+    )
+    assert bare.dominant_emotion is None
+    gist = _gist(dominant_emotion=None, emotional_arc={})
+    doc = gist.to_document()
+    assert doc["dominant_emotion"] is None
+    restored = ThoughtGist.from_document(doc)
+    assert restored.dominant_emotion is None
+    assert restored == gist
 
 
 def test_to_document_is_a_copy():
