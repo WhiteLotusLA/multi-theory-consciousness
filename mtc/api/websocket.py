@@ -16,7 +16,9 @@ Client to server:
 Server to client:
 
 - ``status`` on connect (system name, version, whether the client presented
-  the configured API key, the brain's availability, the frame limit);
+  the configured API key, the brain's availability and whether a real
+  exchange verified it, ``brain_verified`` as on ``/health``, the frame
+  limit);
 - ``thinking`` as soon as a turn starts and after every
   ``THINKING_HEARTBEAT_S`` of silence, with ``elapsed_s``;
 - ``stream_chunk`` with spoken text only: reasoning blocks are filtered out
@@ -26,18 +28,27 @@ Server to client:
 - ``response`` with ``TurnResult.to_payload()`` and the ``request_id``; the
   response text is authoritative, the streamed chunks are a preview;
 - ``consciousness_state`` after each turn and every
-  ``METRICS_UPDATE_INTERVAL`` seconds to subscribers;
+  ``METRICS_UPDATE_INTERVAL`` seconds to every subscriber, keyed or not (the
+  payload of ``GET /api/consciousness/state``; it can quote the text of the
+  workspace winner, which may be a thought or a recalled memory);
 - ``spontaneous_thought`` for thoughts the continuous thought machine
-  expressed, sent only to clients that presented the configured API key;
+  expressed (id, content, type, timestamp, intensity, salience with its
+  ``salience_basis``, and ``form``: ``template``, ``model`` or ``injected``),
+  sent only to clients that presented the configured API key (the only frame
+  withheld from a connection without the key);
 - ``error`` with ``code``, ``message`` and the ``request_id`` when known;
 - ``pong``.
 
 Auth and trust: the handshake needs the ``X-API-Key`` header (a key in the
-query string is ignored). A refused handshake is accepted and then closed at
-once with 1008 and one neutral reason, so the client sees the close code
-under a real server as under the test client (a close before the accept
-reaches it as an HTTP 403); a server whose runtime is not built yet closes the
-same way with 1013. The API key authenticates the client application only. Who is
+query string is ignored). With ``API_AUTH_ENABLED`` false no key is needed,
+and a handshake whose ``Origin`` header is not in ``API_CORS_ORIGINS`` is
+refused instead (a handshake without an Origin header is served); no
+connection then counts as a keyed client, so no ``spontaneous_thought`` frame
+is sent. A refused handshake is accepted and then closed at once with 1008
+and one neutral reason, so the client sees the close code under a real
+server as under the test client (a close before the accept reaches it as an
+HTTP 403); a server whose runtime is not built yet closes the same way with
+1013. The API key authenticates the client application only. Who is
 speaking is decided by the speaker trust source from the ``speaker_token`` of
 each ``message`` frame, which is handed on unchanged, never logged, stored or
 echoed; a connection's key never makes its speaker trusted. A frame over the
@@ -45,8 +56,11 @@ limit closes the socket with 1009.
 
 Turns from every connection go through the pipeline, whose turn lock
 serializes them; a connection keeps answering pings while its turn runs. The
-first-token and stall bounds of ``mtc.api.progress`` apply to every turn and
-a bound that fires is reported as ``generation_timeout``. Duplicate request
+first-token and stall bounds of ``mtc.api.progress`` apply to every turn
+until the pipeline reports the reply stored (``on_generated``), and a bound
+that fires is reported as ``generation_timeout``; the post-turn work after
+that is bounded by the pipeline itself. A client that disconnects does not
+cancel its turn: the turn completes and its reply is stored. Duplicate request
 ids are counted by the application's ``RequestObserver`` and still processed.
 
 Config keys read: ``THINKING_HEARTBEAT_S``, ``GENERATION_TIMEOUT_S`` and
@@ -81,6 +95,7 @@ from mtc.api.schemas import (
     SERVER_FRAME_TYPES,
     ClientFrame,
     WSMessageData,
+    brain_verified,
     jsonable,
     state_payload,
     validation_details,
@@ -278,7 +293,11 @@ class ConnectionManager:
         """Send an expressed thought to the clients that presented the key.
 
         ``message`` is the continuous thought machine's broadcast record
-        (``thought`` plus ``stream_state``). Returns the clients reached.
+        (``thought`` plus ``stream_state``). The frame carries the salience
+        with ``salience_basis`` (what the number rests on, for example a
+        design constant) and ``form`` (``template``, ``model`` or
+        ``injected``); a key the record lacks is None. Returns the clients
+        reached.
         """
         thought = dict(message.get("thought") or {})
         data = {
@@ -288,6 +307,8 @@ class ConnectionManager:
             "timestamp": thought.get("timestamp"),
             "intensity": thought.get("intensity"),
             "salience": thought.get("salience"),
+            "salience_basis": thought.get("salience_basis"),
+            "form": thought.get("form"),
         }
         reached = 0
         for connection in self.connections():
@@ -421,6 +442,7 @@ async def _run_turn(
                 token,
                 stream_callback=mark.wrap(sink),
                 request_id=request_id,
+                on_generated=mark.finish,
             ),
             on_heartbeat=beat,
             settings=settings,
@@ -558,6 +580,7 @@ async def handle_ws(websocket: WebSocket, runtime: Any) -> None:
             "version": __version__,
             "client_authenticated": authenticated,
             "brain_available": getattr(brain, "available", None),
+            "brain_verified": brain_verified(brain),
             "max_frame_bytes": MAX_FRAME_BYTES,
             "heartbeat_s": float(settings.THINKING_HEARTBEAT_S),
         },

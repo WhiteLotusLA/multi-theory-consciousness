@@ -1,8 +1,7 @@
 """The full pipeline demo runs offline, end to end, and meets its exit
 criterion: a subprocess under a socket guard that fails any connection, the
 summary parsed and every clause asserted, then a privacy audit over the log
-directory it wrote, at the default log level, that finds nothing beyond the
-frozen assessment framework's known hits, which the summary names.
+directory it wrote, at the default log level, that finds nothing at all.
 
 The log directory sits outside the repository, where ``scripts/privacy_audit.py
 --paths`` cannot follow (it relativizes every path to the repository root), so
@@ -13,6 +12,7 @@ would read and no allowlist: stricter than the script, never looser."""
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -26,9 +26,19 @@ ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = ROOT / "examples" / "full_pipeline_demo.py"
 DENYLIST = ROOT / "config" / "privacy" / "denylist.txt"
 LOCAL_EXTRA = ROOT / "config" / "privacy" / "denylist.local.txt"
-# The one frozen module (closed until Phase 9) whose log text may carry an
-# absolute module path; the demo reports those hits by name.
-FROZEN_LOGGER = "mtc.assessment.framework"
+STORE_KEYS = (
+    "MTC_POSTGRES_ENABLED",
+    "MTC_MONGODB_ENABLED",
+    "MTC_REDIS_ENABLED",
+    "MTC_QDRANT_ENABLED",
+    "MTC_NEO4J_ENABLED",
+)
+
+
+def _unused_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
 
 
 def _extra_denylist() -> List[str]:
@@ -88,8 +98,15 @@ def test_demo_runs_offline_and_meets_exit_criterion(tmp_path):
     state = tmp_path / "state"
     env = {k: v for k, v in os.environ.items() if not k.startswith("MTC_")}
     env.update(
-        {"PYTHONPATH": str(ROOT), "PYPHI_WELCOME_OFF": "yes", "MTC_DEVICE": "cpu"}
+        {
+            "PYTHONPATH": str(ROOT),
+            "PYPHI_WELCOME_OFF": "yes",
+            "MTC_DEVICE": "cpu",
+            "MTC_LLM_PROVIDER": "mock",
+            "MTC_API_PORT": str(_unused_port()),
+        }
     )
+    env.update({key: "false" for key in STORE_KEYS})
     completed = subprocess.run(
         [sys.executable, str(runner), str(EXAMPLE), "--state-dir", str(state)],
         cwd=tmp_path,
@@ -124,26 +141,18 @@ def test_demo_runs_offline_and_meets_exit_criterion(tmp_path):
     # nothing landed in the repository; everything sits under the state dir
     assert (state / "state" / "manifest.json").is_file()
     assert not (tmp_path / "data").exists()
-    # The audit over the log directory: no hit the demo cannot explain, and
-    # every hit the frozen assessment framework causes is reported by name in
-    # the summary, never filtered out of the log.
+    # The audit over the log directory finds nothing: no allowance, every hit
+    # would fail the run.
     log_audit = summary["log_audit"]
     assert log_audit["files"] >= 1
+    assert log_audit["hits"] == 0
     assert log_audit["unexplained_hits"] == []
-    known = log_audit["known_frozen_module_log_hits"]
+    assert "known_frozen_module_log_hits" not in log_audit
+    assert not [line for line in lines if "known" in line and "log audit" in line]
     scratch = tmp_path / "audit_copies"
     scratch.mkdir()
     hits = audit_log_directory(state / "logs", scratch)
-    found = {(Path(hit.path).name[: -len(".txt")], hit.line) for hit in hits}
-    assert found == {(entry["file"], entry["line"]) for entry in known}, [
-        f"{Path(hit.path).name}:{hit.line}:{hit.kind}" for hit in hits
-    ]
-    for entry in known:
-        assert entry["logger"] == FROZEN_LOGGER
-        lines = (state / "logs" / entry["file"]).read_text(encoding="utf-8")
-        record = json.loads(lines.splitlines()[entry["line"] - 1])
-        assert record["logger"] == FROZEN_LOGGER
-        assert record["line"] == entry["source_line"]
+    assert hits == [], [f"{Path(hit.path).name}:{hit.line}:{hit.kind}" for hit in hits]
 
 
 def test_audit_helper_detects_a_planted_hit(tmp_path):
@@ -160,3 +169,62 @@ def test_audit_helper_detects_a_planted_hit(tmp_path):
     hits = audit_log_directory(log_dir, scratch)
     assert hits, "the audit helper must see a planted denylist token"
     assert all(hit.kind == "token" for hit in hits)
+
+
+def _demo():
+    import runpy
+
+    return runpy.run_path(str(EXAMPLE), run_name="full_pipeline_demo")
+
+
+def test_demo_audit_has_no_allowance(tmp_path):
+    """A hit on a record of any logger, the assessment framework included,
+    is unexplained: the demo's audit keeps no list of known hits."""
+    demo = _demo()
+    assert "KNOWN_FROZEN_LOG_SOURCES" not in demo
+    planted = load_denylist(DENYLIST)[0]
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    record = {
+        "logger": "mtc.assessment.framework",
+        "line": 147,
+        "message": f"a record that names {planted}",
+    }
+    (log_dir / "mtc.log").write_text(json.dumps(record) + "\n", encoding="utf-8")
+    report = demo["audit_logs"](log_dir)
+    assert report["files"] == 1
+    assert report["hits"] == len(report["unexplained_hits"]) >= 1
+    assert set(report) == {"files", "hits", "unexplained_hits"}
+
+
+def test_unexplained_none_check_covers_the_measured_fields():
+    """A measured state field that reads None (the integration level, the
+    broadcast coverage, the binding quality, the protoself stability, the
+    feeling of knowing, the autobiographic continuity) counts as unexplained
+    unless the turn names it in absent_signals."""
+    from types import SimpleNamespace
+
+    demo = _demo()
+    measured = (
+        "integration_level",
+        "broadcast_coverage",
+        "binding_quality",
+        "protoself_stability",
+        "feeling_of_knowing",
+        "autobiographic_continuity",
+    )
+    state = SimpleNamespace(**{name: None for name in demo["OPTIONAL_FIELDS"]})
+    absent = {name: "no_input" for name in demo["OPTIONAL_FIELDS"]}
+
+    def runtime(named):
+        return SimpleNamespace(
+            orchestrator=SimpleNamespace(_last_state=state),
+            pipeline=SimpleNamespace(
+                status=lambda: {"last_turn": {"absent_signals": named}}
+            ),
+        )
+
+    assert demo["_unexplained"](runtime(absent)) == []
+    for name in measured:
+        named = {key: value for key, value in absent.items() if key != name}
+        assert demo["_unexplained"](runtime(named)) == [name], name

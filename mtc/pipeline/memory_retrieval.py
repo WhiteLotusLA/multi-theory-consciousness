@@ -11,11 +11,14 @@
   a line of the history window (the memory only echoes the conversation).
 - ``rehydrate_recent_history`` refills a new session from the conversation
   repository: the participant's messages of the last ``hours`` hours, oldest
-  first, with each row's stored ``role`` (never a role guessed from a name)
-  and only messages addressed to the system (``to_speaker`` empty or
-  ``SYSTEM_NAME``). The participant argument must be the key the session is
-  stored under (``SpeakerTrust.session_key``), so an unauthenticated name
-  never reads an authenticated speaker's history.
+  first, with each row's stored ``role`` (never a role guessed from a name):
+  the messages addressed to the system (``to_speaker`` empty or
+  ``SYSTEM_NAME``) and, given ``reply_addressee`` (the speaker's stored
+  name), the replies and tool rows addressed to the speaker, merged by row
+  and cut to the newest ``limit``. A message addressed to a third party is
+  never read. The participant argument must be the key the session is stored
+  under (``SpeakerTrust.session_key``), so an unauthenticated name never
+  reads an authenticated speaker's history.
 - ``latest_turn_at`` returns the newest message time addressed to the system
   (aware UTC) or None.
 - ``extract_and_store_concepts`` picks up to ``max_concepts`` content words of
@@ -205,16 +208,28 @@ async def rehydrate_recent_history(
     limit: int = REHYDRATION_LIMIT,
     *,
     settings: Any = None,
+    reply_addressee: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """History entries for a new session, oldest first, from the stored rows.
 
     Each entry has ``role`` (the stored role), ``speaker``, ``content``,
-    ``timestamp`` and ``conversation_id``. A repository failure propagates.
+    ``timestamp`` and ``conversation_id``. Without ``reply_addressee`` one
+    read returns the messages addressed to the system. With it a second read
+    returns the rows addressed to that name (the system's replies and a
+    plugin's tool rows); the two are merged, a row read twice is kept once
+    (by its id, else by its conversation, time, speaker, role and content),
+    sorted by time and id, and the newest ``limit`` are kept. A repository
+    failure propagates.
     """
     if repository is None:
         return []
     system = str(_cfg(settings).SYSTEM_NAME)
     rows = await repository.recent_messages(participant, hours, limit, addressee=system)
+    if reply_addressee is not None and str(reply_addressee) != system:
+        replies = await repository.recent_messages(
+            participant, hours, limit, addressee=str(reply_addressee)
+        )
+        rows = _merge_rows(rows, replies, limit)
     return [
         {
             "role": row["role"],
@@ -225,6 +240,39 @@ async def rehydrate_recent_history(
         }
         for row in rows
     ]
+
+
+def _row_key(row: Mapping[str, Any]) -> Any:
+    row_id = row.get("id")
+    if row_id is not None:
+        return ("id", row_id)
+    return (
+        "row",
+        row.get("conversation_id"),
+        row.get("timestamp"),
+        row.get("speaker"),
+        row.get("role"),
+        row.get("content"),
+    )
+
+
+def _sort_key(row: Mapping[str, Any]) -> Any:
+    row_id = row.get("id")
+    return (row["timestamp"], row_id is None, row_id if row_id is not None else 0)
+
+
+def _merge_rows(
+    first: Sequence[Mapping[str, Any]],
+    second: Sequence[Mapping[str, Any]],
+    limit: int,
+) -> List[Mapping[str, Any]]:
+    """Both reads as one list: each row once, oldest first, newest ``limit``."""
+    merged: Dict[Any, Mapping[str, Any]] = {}
+    for row in list(first) + list(second):
+        merged.setdefault(_row_key(row), row)
+    ordered = sorted(merged.values(), key=_sort_key)
+    count = max(0, int(limit))
+    return ordered[-count:] if count else []
 
 
 async def latest_turn_at(

@@ -14,6 +14,11 @@ client without news.
 - The stall bound (``GENERATION_STALL_TIMEOUT_S``) applies once the first
   chunk has arrived: the generation is cut when no chunk has arrived for that
   long. A long reply that keeps streaming is never cut.
+- Neither bound applies once the operation called ``mark.finish()``: the
+  conversation pipeline calls it (as its ``on_generated`` callback) after the
+  reply is stored and before the post-turn work, which the pipeline bounds
+  itself. From then on the runner only waits, with heartbeats, so a slow
+  post-turn step never turns a stored reply into a timeout.
 - A heartbeat callback runs after every ``THINKING_HEARTBEAT_S`` of silence
   (no chunk and no earlier heartbeat in that time) with the seconds elapsed
   since the start. A failing heartbeat is logged at DEBUG and never aborts
@@ -54,20 +59,32 @@ StreamSink = Callable[[str], Any]
 
 
 class FirstTokenMark:
-    """When the first and the latest streamed chunk arrived, on the loop clock.
+    """When the first and the latest streamed chunk arrived, on the loop clock,
+    and when generation finished.
 
-    ``first_at`` and ``last_at`` are None until the first real chunk.
+    ``first_at`` and ``last_at`` are None until the first real chunk;
+    ``finished_at`` is None until ``finish`` is called.
     """
 
     def __init__(self) -> None:
         self.first_at: Optional[float] = None
         self.last_at: Optional[float] = None
+        self.finished_at: Optional[float] = None
         self.chunks = 0
         self._first = asyncio.Event()
 
     @property
     def is_set(self) -> bool:
         return self.first_at is not None
+
+    @property
+    def is_finished(self) -> bool:
+        return self.finished_at is not None
+
+    def finish(self) -> None:
+        """Record, once, that generation is over (the reply is stored)."""
+        if self.finished_at is None:
+            self.finished_at = asyncio.get_running_loop().time()
 
     def mark(self) -> None:
         """Record one real chunk now."""
@@ -214,15 +231,22 @@ async def run_with_heartbeat(
             if task.done():
                 return task.result()
             now = loop.time()
-            if mark.last_at is None:
+            deadline: Optional[float]
+            if mark.finished_at is not None:
+                # Generation is over and the reply is stored: what remains
+                # (the post-turn work) is bounded by the operation itself.
+                deadline = None
+                bound: Bound = "stall"
+                limit = stall_bound
+            elif mark.last_at is None:
                 deadline = start + first_bound
-                bound: Bound = "first_token"
+                bound = "first_token"
                 limit = first_bound
             else:
                 deadline = mark.last_at + stall_bound
                 bound = "stall"
                 limit = stall_bound
-            if now >= deadline:
+            if deadline is not None and now >= deadline:
                 await _cancel(task)
                 first_token_s = (
                     mark.first_at - start if mark.first_at is not None else None
@@ -244,9 +268,10 @@ async def run_with_heartbeat(
             # the first chunk; any later chunk only moves both later, and they
             # are recomputed on waking.
             waiters = {task} if first_waiter.done() else {task, first_waiter}
+            wake = next_beat if deadline is None else min(deadline, next_beat)
             await asyncio.wait(
                 waiters,
-                timeout=max(0.0, min(deadline, next_beat) - now),
+                timeout=max(0.0, wake - now),
                 return_when=asyncio.FIRST_COMPLETED,
             )
     finally:

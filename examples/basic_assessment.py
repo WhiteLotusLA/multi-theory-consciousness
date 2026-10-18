@@ -22,7 +22,8 @@ The modules here have run no cycle, so most indicators read
 ``multi_theory_pipeline.py``) or use ``mtc assess --full`` for a warmed-up run.
 Passing indicators would show functional architecture, not experience.
 
-Needs the ``fep`` extra (pymdp) for the active inference module. Opens no
+Needs the ``fep`` extra (pymdp) for the active inference module; without it
+the example prints one line that names the extra and exits 2. Opens no
 network connection.
 
 Usage:
@@ -31,8 +32,10 @@ Usage:
 
 import asyncio
 import logging
+import sys
 
 from mtc.assessment.assessment import ConsciousnessAssessment
+from mtc.cli.missing_extra import explain_missing_extra
 from mtc.consciousness.active_inference import ActiveInferenceModule
 from mtc.consciousness.attention_schema import AttentionSchemaModule
 from mtc.consciousness.enhanced_global_workspace import EnhancedGlobalWorkspace
@@ -45,7 +48,7 @@ def _score(value):
     return "none" if value is None else f"{value:.3f}"
 
 
-async def main():
+async def run():
     # 1. Build the modules the assessment reads.
     workspace = EnhancedGlobalWorkspace(capacity=7, ignition_threshold=0.3)
     attention = AttentionSchemaModule()
@@ -62,10 +65,16 @@ async def main():
         active_inference=active_inference,
     )
 
-    positive = len(assessment.indicator_configs)
-    negative = len(assessment.negative_indicator_configs)
-
     # 3. Print what was measured and what was not.
+    print_report(
+        report,
+        positive=len(assessment.indicator_configs),
+        negative=len(assessment.negative_indicator_configs),
+    )
+
+
+def print_report(report, *, positive, negative):
+    """Print the report's status, scores and per-indicator outcomes."""
     print("\n" + "=" * 60)
     print("  CONSCIOUSNESS ASSESSMENT REPORT")
     print("=" * 60)
@@ -77,9 +86,12 @@ async def main():
     print(f"  Architecture active:  {report.architecture_functional}")
     print(f"  Insufficient data:    {len(report.insufficient_indicators)}")
 
-    print("\n  Theory scores (theories with an included indicator):")
+    print(
+        "\n  Theory scores (absent indicators count as 0.0; theories with no "
+        "measured indicator are not listed):"
+    )
     for theory, score in sorted(report.theory_scores.items()):
-        print(f"    {theory:<6s} {score:.3f}")
+        print(f"    {theory:<6s} {_score(score)}")
 
     print("\n  Indicators:")
     for name, result in report.indicator_results.items():
@@ -99,5 +111,20 @@ async def main():
     print("\n" + "=" * 60)
 
 
+def main() -> int:
+    """Run the example; on an install without the ``fep`` extra print the one
+    line that names it to stderr and return 2 (any other ImportError is
+    raised)."""
+    try:
+        asyncio.run(run())
+    except ImportError as exc:
+        line = explain_missing_extra(exc)
+        if line is None:
+            raise
+        print(line, file=sys.stderr)
+        return 2
+    return 0
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(main())

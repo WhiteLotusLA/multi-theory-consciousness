@@ -7,11 +7,13 @@ Settings say:
 
 - The brain: ``LLMBrain.from_settings`` (or the injected one), initialized with
   a degraded provider allowed, and one ``LLMFlight``. Every turn-time user (the
-  summarizer, the trust compass, the pipeline's main call) goes through the
-  foreground side of the flight; every background user (the thought enhancer,
-  dreams, the autonomous-life loop, memory consolidation, self-assessment) gets
-  a ``GatedBrain`` on the background side; the thought machine's contention
-  guard is ``flight.contended`` over the CTM config's window.
+  summarizer, the trust compass when ``TRUST_COMPASS_DEEP_MODE`` is true, the
+  pipeline's main call) goes through the foreground side of the flight (with
+  the key false the compass has no brain and reflects by keyword only); every
+  background user (the thought enhancer, dreams, the autonomous-life loop,
+  memory consolidation, self-assessment) gets a ``GatedBrain`` on the
+  background side; the thought machine's contention guard is
+  ``flight.contended`` over the CTM config's window.
 - The stores: each store-backed implementation is built only when its enable
   key is true (``POSTGRES_ENABLED``, ``MONGODB_ENABLED``, ``REDIS_ENABLED``,
   ``QDRANT_ENABLED``, ``NEO4J_ENABLED``), each in its own try, and reported as
@@ -21,22 +23,25 @@ Settings say:
   reported and replaced by it), so concept capture, concept recall and the
   knowledge routes always have a graph. ``CTM_STORE=mongo``
   without ``MONGODB_ENABLED`` is a configuration error naming both keys. The
-  memory stack comes from Phase 5's factory; the sentence embedder is built
-  when the ``embeddings`` extra imports (it loads its model on first use), an
-  injected embedder needs ``allow_non_semantic`` when it is not semantic.
+  memory stack comes from the memory factory (``build_memory_manager``); the
+  sentence embedder is built when the ``embeddings`` extra imports (it loads
+  its model on first use), an injected embedder needs ``allow_non_semantic``
+  when it is not semantic.
 - The workspace through ``runner_support.build_workspace`` with the overrides
   of ``PIPELINE_PRESET`` (validated against the schema; the preset directory
   and the schema resolve through ``mtc.core.resources.resolve_shipped``, the
   project copy under ``PROJECT_ROOT`` first, then the packaged copy) or the
   ``overrides`` argument, the live pipeline's Damasio defaults (a wall-clock
-  circadian model in ``TIMEZONE`` with ``WAKE_HOUR`` and ``SLEEP_HOUR``, ``agent_name`` from
-  ``SYSTEM_NAME``) unless the overrides set them, a ``PhiTracker`` from
-  ``build_phi_tracker`` (before it, ``pyphi_bridge.configure_pyphi_home``
-  records these Settings, so PyPhi's first import puts its home under their
-  ``DATA_DIRECTORY``), one ``PADAffectModel``, one prospective simulator and
-  one cross-modal binder shared by the cycle augmenter and the orchestrator;
-  the augmenter's switches come from the overrides with the schema defaults,
-  not pinned.
+  circadian model in ``TIMEZONE`` with ``WAKE_HOUR`` and ``SLEEP_HOUR``,
+  ``agent_name`` from ``SYSTEM_NAME``) and its workspace default
+  (``gwt.refractory_clock = elapsed``: the refractory period reads the real
+  time between cycles on the runtime's clock) unless the overrides set them, a
+  ``PhiTracker`` from ``build_phi_tracker`` (before it,
+  ``pyphi_bridge.configure_pyphi_home`` records these Settings, so PyPhi's
+  first import puts its home under their ``DATA_DIRECTORY``), one
+  ``PADAffectModel``, one prospective simulator and one cross-modal binder
+  shared by the cycle augmenter and the orchestrator; the augmenter's switches
+  come from the overrides with the schema defaults, not pinned.
 - The narration flags are read once (``NarrationFlags.from_settings``) and
   applied with ``apply_narration``; speaker trust is the only trust source and
   its ``trust_lookup`` reaches theory of mind and the trust compass.
@@ -46,7 +51,9 @@ Settings say:
   verifier with its state assembler, the snapshot service, identity continuity,
   the developmental machinery only when ``developmental_enabled()``, the sleep
   scheduler (the memory manager's consolidation plus the gist retention refresh
-  as its consolidator, the pruner, the machine as its thought stream) and the
+  as its consolidator, the pruner, the machine as its thought stream; with
+  ``SLEEP_PRUNE_DRY_RUN`` false, the default, night sleep deletes the memories
+  the pruner scores as weak, with it true it only reports them) and the
   autonomous-life loop when enabled.
 - The hub: one ``ConsciousnessStateManager`` under ``STATE_DIR`` that registers
   every component implementing the persistence contract under ``HUB_NAMES``,
@@ -69,6 +76,7 @@ order. ``build_runtime`` calls ``setup_logging`` first.
 
 Config keys read here: the five store enable keys, ``CTM_ENABLED``,
 ``CTM_STORE``, ``PIPELINE_PRESET``, ``SLEEP_SCHEDULER_ENABLED``,
+``SLEEP_PRUNE_DRY_RUN``, ``TRUST_COMPASS_DEEP_MODE``,
 ``AUTONOMOUS_LIFE_ENABLED``, ``PHI_IDLE_SAMPLE_S``,
 ``SELF_ASSESSMENT_INTERVAL_S``, ``STATE_DIR``, ``RESULTS_DIR``, ``TIMEZONE``,
 ``WAKE_HOUR``, ``SLEEP_HOUR``, ``SYSTEM_NAME``, ``MONGODB_DB`` and ``DEBUG``;
@@ -115,7 +123,7 @@ from mtc.consciousness.pad_affect import PADAffectModel
 from mtc.consciousness.perceptual_reality_monitor import PerceptualRealityMonitor
 from mtc.consciousness.prospective_memory import ProspectiveSimulator
 from mtc.consciousness.self_assessment import ConsciousnessSelfAssessment
-from mtc.consciousness.sleep_scheduler import SleepScheduler
+from mtc.consciousness.sleep_scheduler import SleepScheduler, SleepSchedulerConfig
 from mtc.consciousness.snapshot_service import BACKUP_SUBDIR, SnapshotService
 from mtc.consciousness.state_persistence import ConsciousnessStateManager
 from mtc.consciousness.theory_of_mind import TheoryOfMind
@@ -592,48 +600,86 @@ class Runtime:
         return restored
 
     async def _close_client(self, name: str, client: Any) -> None:
+        """Close one store client with the first closer it has; a failure is
+        raised to ``stop``, which records it and goes on."""
         for method in ("close", "disconnect", "shutdown"):
             closer = getattr(client, method, None)
             if callable(closer):
-                try:
-                    await _maybe_await(closer())
-                except Exception as exc:  # noqa: BLE001 - shutdown keeps going
-                    logger.warning(
-                        "store client %s did not close cleanly: %s",
-                        name,
-                        type(exc).__name__,
-                    )
+                await _maybe_await(closer())
                 return
 
     async def stop(self) -> Dict[str, Any]:
-        """Stop the tasks, end conversations, save, then shut the parts down."""
+        """Stop the tasks, end conversations, save, then shut the parts down.
+
+        Every step runs in its own try, in the order above: a step that
+        raises is logged at WARNING with its name and the error type and
+        recorded in ``report['errors']`` (step name to error type), and the
+        later steps still run; ``last_stop_order`` lists the steps that
+        succeeded. The runtime ends stopped whatever failed; under ``DEBUG``
+        the first error is raised after every step has run.
+        """
         order: List[str] = []
-        report: Dict[str, Any] = {}
+        report: Dict[str, Any] = {"errors": {}}
+        first_error: List[BaseException] = []
+
+        async def step(name: str, action: Callable[[], Any]) -> bool:
+            try:
+                await _maybe_await(action())
+            except Exception as exc:  # noqa: BLE001 - recorded, stop goes on
+                report["errors"][name] = type(exc).__name__
+                logger.warning(
+                    "runtime stop step %s failed: %s", name, type(exc).__name__
+                )
+                if not first_error:
+                    first_error.append(exc)
+                return False
+            return True
+
+        tasks_ok = True
         for task in reversed(self.background):
-            await task.stop()
-        order.append("background_tasks")
+            tasks_ok = await step(f"background_tasks:{task.name}", task.stop) and (
+                tasks_ok
+            )
+        if tasks_ok:
+            order.append("background_tasks")
         if self.pipeline is not None:
-            report["conversations_ended"] = await self.pipeline.end_all()
-            order.append("conversations")
+            pipeline = self.pipeline
+
+            async def end_conversations() -> None:
+                report["conversations_ended"] = await pipeline.end_all()
+
+            if await step("conversations", end_conversations):
+                order.append("conversations")
         if self.hub is not None:
-            self.register_late_components()
-            report["saved"] = self.hub.save_all()
-            order.append("hub_save")
+            hub = self.hub
+
+            def save_hub() -> None:
+                self.register_late_components()
+                report["saved"] = hub.save_all()
+
+            if await step("hub_save", save_hub):
+                order.append("hub_save")
         if self.neural is not None:
-            await self.neural.shutdown()
-            order.append("neural")
+            if await step("neural", self.neural.shutdown):
+                order.append("neural")
         if self.memory is not None:
-            await self.memory.close()
-            order.append("memory")
+            if await step("memory", self.memory.close):
+                order.append("memory")
+        clients_ok = True
         for name, client in self.store_clients:
-            await self._close_client(name, client)
-        order.append("store_clients")
+            clients_ok = await step(
+                f"store_client:{name}", partial(self._close_client, name, client)
+            ) and (clients_ok)
+        if clients_ok:
+            order.append("store_clients")
         if self.brain is not None and callable(getattr(self.brain, "shutdown", None)):
-            await self.brain.shutdown()
-            order.append("brain")
+            if await step("brain", self.brain.shutdown):
+                order.append("brain")
         self.last_stop_order = order
         self.stopped = True
         logger.info("runtime stopped")
+        if first_error and bool(self.settings.DEBUG):
+            raise first_error[0]
         return report
 
     # ------------------------------------------------------------------
@@ -692,6 +738,56 @@ class Runtime:
 # ----------------------------------------------------------------------
 # Building
 # ----------------------------------------------------------------------
+
+
+# The parts that leave Postgres for process memory when their build fails.
+CONVERSATION_PARTS: Tuple[str, ...] = ("conversations", "snapshots", "safety_audit")
+
+
+def _conversation_stores(
+    pool: Any, now: Optional[Clock], report: Dict[str, Any]
+) -> Tuple[Any, Any, Any]:
+    """The conversation repository, the snapshot store and the safety audit
+    store: on the Postgres pool when there is one, else in memory.
+
+    With a pool, ``report['in_memory_parts']`` is ``[]`` when all three were
+    built on it; when building them raised, the error is logged at ERROR by
+    type and set on the report, all three run in memory and
+    ``in_memory_parts`` names them (the memory stack still uses Postgres, so
+    the report's backend is unchanged). Without a pool the report gains no
+    key: everything is in memory by configuration.
+    """
+    repository: Any = None
+    snapshot_store: Any = None
+    safety_audit_store: Any = None
+    if pool is not None:
+        from mtc.memory import conversation_store, postgres_stores
+        from mtc.safety import stores as safety_stores
+
+        try:
+            repository = conversation_store.PostgresConversationRepository(
+                pool, clock=now
+            )
+            snapshot_store = postgres_stores.PostgresSnapshotStore(pool)
+            safety_audit_store = safety_stores.PostgresSafetyAuditStore(pool)
+        except Exception as exc:  # noqa: BLE001 - reported, the parts go to memory
+            logger.error(
+                "conversation stores could not be built on Postgres (%s); "
+                "they run in memory",
+                type(exc).__name__,
+            )
+            report["error"] = _describe(exc)
+            repository = snapshot_store = safety_audit_store = None
+            report["in_memory_parts"] = list(CONVERSATION_PARTS)
+        else:
+            report["in_memory_parts"] = []
+    if repository is None:
+        repository = InMemoryConversationRepository(clock=now)
+    if snapshot_store is None:
+        snapshot_store = InMemorySnapshotStore()
+    if safety_audit_store is None:
+        safety_audit_store = InMemorySafetyAuditStore(clock=now)
+    return repository, snapshot_store, safety_audit_store
 
 
 def _store_report(enabled: bool, backend: str, **extra: Any) -> Dict[str, Any]:
@@ -765,6 +861,19 @@ def _recall_adapter(manager: Any) -> Callable[[str, int], Awaitable[List[str]]]:
         ]
 
     return recall
+
+
+def _measured_level(orchestrator: Any) -> Optional[float]:
+    """The baseline's overall score for the thought machine, only when an
+    assessment measured it: None before the first report, for a baseline
+    without an overall and for one whose status is ``insufficient_data``
+    whatever number it holds (the machine then runs unmodulated)."""
+    baseline = getattr(orchestrator, "baseline", None)
+    if baseline is None or not bool(getattr(baseline, "measured", False)):
+        return None
+    if str(getattr(baseline, "status", "") or "") == "insufficient_data":
+        return None
+    return baseline.overall_score
 
 
 async def build_runtime(
@@ -878,27 +987,9 @@ async def build_runtime(
     if stack.pool is not None:
         runtime.store_clients.append(("postgres_pool", stack.pool))
 
-    repository: Any = None
-    snapshot_store: Any = None
-    safety_audit_store: Any = None
-    if stack.pool is not None:
-        from mtc.memory.conversation_store import PostgresConversationRepository
-        from mtc.memory.postgres_stores import PostgresSnapshotStore
-        from mtc.safety.stores import PostgresSafetyAuditStore
-
-        try:
-            repository = PostgresConversationRepository(stack.pool, clock=now)
-            snapshot_store = PostgresSnapshotStore(stack.pool)
-            safety_audit_store = PostgresSafetyAuditStore(stack.pool)
-        except Exception as exc:  # noqa: BLE001 - reported
-            postgres_report["error"] = _describe(exc)
-            repository = snapshot_store = safety_audit_store = None
-    if repository is None:
-        repository = InMemoryConversationRepository(clock=now)
-    if snapshot_store is None:
-        snapshot_store = InMemorySnapshotStore()
-    if safety_audit_store is None:
-        safety_audit_store = InMemorySafetyAuditStore(clock=now)
+    repository, snapshot_store, safety_audit_store = _conversation_stores(
+        stack.pool, now, postgres_report
+    )
     runtime.repository = repository
 
     mongo_report = runtime.stores["mongodb"]
@@ -1042,11 +1133,20 @@ async def build_runtime(
         **damasio_defaults,
         **dict(layered.get("damasio", {}) or {}),
     }
+    # The live workspace runs in real time: its refractory period reads the
+    # elapsed clock unless the operator's overrides choose one.
+    workspace_overrides["gwt"] = {
+        "refractory_clock": "elapsed",
+        **dict(layered.get("gwt", {}) or {}),
+    }
     # PyPhi loads on its first use (an exact Phi, an assessment); its home
     # then lands under this runtime's DATA_DIRECTORY, not the process one.
     pyphi_bridge.configure_pyphi_home(cfg)
     phi_tracker = build_phi_tracker(dict(layered.get("phi", {}) or {}), 128)
     workspace = build_workspace(workspace_overrides, phi_tracker)
+    # Seconds on the runtime's clock, so a persisted cycle end compares with
+    # the same clock after a restart and tests can drive it.
+    workspace.set_clock(lambda: now().timestamp())
     runtime.phi_tracker = phi_tracker
     runtime.workspace = workspace
 
@@ -1103,7 +1203,11 @@ async def build_runtime(
     compass = TrustCompass(
         brain=None, trust_lookup=trust.trust_lookup, settings=cfg, clock=now
     )
-    compass.set_brain(foreground_brain)
+    if bool(cfg.TRUST_COMPASS_DEEP_MODE):
+        # Deep reflections go through the foreground side of the flight; the
+        # monitor asks for one only on evidence, so a neutral message costs
+        # no model call.
+        compass.set_brain(foreground_brain)
     runtime.compass = compass
     monitor = SafetyMonitor(
         audit_store=safety_audit_store,
@@ -1124,7 +1228,13 @@ async def build_runtime(
     )
 
     # -- cognition modules ------------------------------------------------
-    runtime.learning = LearningSystem(store=learning_store, settings=cfg, clock=now)
+    # The goal system first: a learning pass that changed beliefs proposes
+    # goals to it.
+    runtime.goals = IntrinsicGoalSystem(store=goal_store, clock=now)
+    await runtime.goals.initialize()
+    runtime.learning = LearningSystem(
+        store=learning_store, settings=cfg, clock=now, goals=runtime.goals
+    )
     await runtime.learning.initialize()
     runtime.theory_of_mind = TheoryOfMind(
         store=speaker_store,
@@ -1133,8 +1243,6 @@ async def build_runtime(
         clock=now,
     )
     await runtime.theory_of_mind.initialize()
-    runtime.goals = IntrinsicGoalSystem(store=goal_store, clock=now)
-    await runtime.goals.initialize()
     runtime.observer = AttentionGrabObserver(store=grab_store, settings=cfg, clock=now)
     runtime.emotion_extractor = EmotionExtractor(
         averages=emotion_averages, drives=_drive_reader(workspace)
@@ -1182,8 +1290,7 @@ async def build_runtime(
             CTMConfig.load(None, None, settings=cfg).contention_window_s
         )
         runtime.level_cache = ConsciousnessLevelCache(
-            lambda: getattr(runtime.orchestrator, "baseline", None)
-            and runtime.orchestrator.baseline.overall_score,
+            lambda: _measured_level(runtime.orchestrator),
             settings=cfg,
         )
         machine = build_thought_machine(
@@ -1269,6 +1376,9 @@ async def build_runtime(
             themes=_ThemeSource(machine.buffer) if machine is not None else None,
             affect=pad_model,
             goals=runtime.goals,
+            # False (the default) deletes what the pruner scores as weak at
+            # night; true reports it and deletes nothing.
+            config=SleepSchedulerConfig(prune_dry_run=bool(cfg.SLEEP_PRUNE_DRY_RUN)),
             clock=now,
             settings=cfg,
         )

@@ -1,4 +1,4 @@
-"""Phase 6 additions to the brain protocol; Phase 4's contract is unchanged."""
+"""The conversational additions to the brain protocol; the base contract stands."""
 
 import inspect
 
@@ -20,7 +20,7 @@ from mtc.brain.protocol import (
 def test_fake_brain_still_satisfies_brain_protocol():
     brain = FakeBrain()
     assert isinstance(brain, BrainProtocol)
-    # FakeBrain is the Phase 4 test double: it only thinks.
+    # FakeBrain is the base protocol's test double: it only thinks.
     assert not isinstance(brain, ConversationalBrain)
 
 
@@ -53,6 +53,7 @@ def test_conversational_brain_members():
         "active_inference_context",
         "global_workspace_context",
         "max_tokens",
+        "last_turn_at",
     ):
         assert params[keyword].kind is inspect.Parameter.KEYWORD_ONLY, keyword
         assert params[keyword].default is None, keyword

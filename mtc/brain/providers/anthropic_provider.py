@@ -71,10 +71,7 @@ STOP_REASON_MAP: Dict[str, str] = {
     "refusal": "refusal",
 }
 
-_IMAGE_REFUSAL = (
-    "image input is not part of this release (VISION_ENABLED stays false); "
-    "send text only"
-)
+_IMAGE_REFUSAL = "image input is not part of this release; send text only"
 
 
 def _now() -> datetime:

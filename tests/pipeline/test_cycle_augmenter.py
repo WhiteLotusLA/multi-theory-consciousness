@@ -315,6 +315,179 @@ def test_pad_sources_measured_named():
     assert augmenter.pad_model is not None
 
 
+def test_unclassifiable_ratio_is_not_a_measured_pad_input():
+    """A typed attention schema with no classifiable shift has no voluntary
+    ratio, so the ratio is not named measured and PAD keeps its default."""
+    from mtc.consciousness.attention_schema import AttentionSchemaModule
+
+    schema = AttentionSchemaModule().schema
+    assert schema.voluntary_ratio is None
+    sources, measured = extract_pad_sources(_state(attention_schema=schema))
+    assert "voluntary_attention_ratio" not in measured
+    assert sources.voluntary_attention_ratio == PADSources().voluntary_attention_ratio
+    # A classified ratio is a measured input
+    _, measured = extract_pad_sources(
+        _state(attention_schema=SimpleNamespace(voluntary_ratio=0.25))
+    )
+    assert "voluntary_attention_ratio" in measured
+
+
+def test_agency_is_unmeasured_without_a_meta_reading():
+    """The meta confidence before any scored forecast is the prior, not a
+    reading: agency is not named measured and PAD keeps its 0.5 default."""
+    from mtc.consciousness.active_inference import ActiveInferenceModule
+
+    absent = _state(active_inference_state=SimpleNamespace(meta_confidence=None))
+    sources, measured = extract_pad_sources(absent)
+    assert "agency_score" not in measured
+    assert sources.agency_score == 0.5
+    # The real module's state before a scored forecast carries no reading
+    fresh = ActiveInferenceModule().get_state()
+    assert fresh.meta_confidence is None
+    sources, measured = extract_pad_sources(_state(active_inference_state=fresh))
+    assert "agency_score" not in measured
+    assert sources.agency_score == 0.5
+
+
+def _drives():
+    from mtc.consciousness.active_inference import HomeostaticDrives
+
+    return HomeostaticDrives()
+
+
+class _Winner:
+    def __init__(self, summary, content_type, salience):
+        self.candidate = SimpleNamespace(summary=summary, content_type=content_type)
+        self.salience = salience
+
+
+def _damasio_state(result):
+    return _state(damasio_state=result)
+
+
+def test_somatic_valence_without_markers_is_not_measured():
+    from mtc.consciousness.damasio import DamasioLayers
+
+    async def run():
+        layers = DamasioLayers()
+        empty = await layers.process(homeostatic_drives=_drives(), workspace_winners=[])
+        winner = await layers.process(
+            homeostatic_drives=_drives(),
+            workspace_winners=[_Winner("a synthetic topic", "thought", 0.7)],
+        )
+        return empty, winner
+
+    empty, winner = asyncio.run(run())
+    assert empty["core"]["somatic_valence"] is None
+    sources, measured = extract_pad_sources(_damasio_state(empty))
+    assert "somatic_valence" not in measured
+    assert sources.somatic_valence == PADSources().somatic_valence
+    assert winner["core"]["somatic_valence"] is not None
+    _, measured = extract_pad_sources(_damasio_state(winner))
+    assert "somatic_valence" in measured
+
+
+def test_first_protoself_update_names_no_arousal():
+    from mtc.consciousness.damasio import DamasioLayers
+
+    async def run(layers):
+        first = await layers.process(homeostatic_drives=_drives(), workspace_winners=[])
+        second = await layers.process(
+            homeostatic_drives=_drives(), workspace_winners=[]
+        )
+        return first, second
+
+    first, second = asyncio.run(run(DamasioLayers()))
+    assert first["protoself"]["primordial_feelings"]["arousal"] is None
+    _, measured = extract_pad_sources(_damasio_state(first))
+    assert "protoself_arousal" not in measured
+    # The second update has a previous body state: a measured arousal
+    _, measured = extract_pad_sources(_damasio_state(second))
+    assert "protoself_arousal" in measured
+    # The legacy first update records 0.0, which the extractor names
+    legacy, _ = asyncio.run(run(DamasioLayers(first_delta="v04_zero")))
+    _, measured = extract_pad_sources(_damasio_state(legacy))
+    assert "protoself_arousal" in measured
+
+
+class _SpyPAD(PADAffectModel):
+    def __init__(self):
+        super().__init__()
+        self.measured_args = []
+
+    def compute(self, sources, measured=None):
+        self.measured_args.append(None if measured is None else tuple(measured))
+        return super().compute(sources, measured)
+
+
+def test_after_cycle_hands_measured_inputs_to_the_pad_state():
+    pad = _SpyPAD()
+    augmenter = CycleAugmenter(
+        CycleAugmenterConfig.from_overrides({"pad_from_state": True}, pinned_off=True),
+        _Workspace(),
+        pad_model=pad,
+    )
+    augmenter.before_cycle([])
+    state = _state()
+    record = augmenter.after_cycle(state)
+    sources, measured = extract_pad_sources(state, augmenter.workspace, None)
+    # No drives and no substrate: homeostatic satisfaction and both SNN inputs
+    # are not measured and contribute nothing
+    assert "homeostatic_satisfaction" not in measured
+    assert "snn_valence" not in measured
+    assert pad.measured_args == [measured]
+    assert record.pad_sources_measured == measured
+    assert record.pad_state is not None
+    assert record.pad_state.measured_inputs == measured
+    expected = PADAffectModel().compute(sources, measured)
+    assert (state.pad_pleasure, state.pad_arousal, state.pad_dominance) == (
+        expected.pleasure,
+        expected.arousal,
+        expected.dominance,
+    )
+    assert state.pad_label == expected.label
+    # Pleasure is the mean over its one measured input, not diluted by the
+    # unmeasured defaults
+    assert state.pad_pleasure == pytest.approx(0.25)
+    assert PADAffectModel().compute(sources).pleasure == pytest.approx(0.1)
+
+
+def test_no_pad_recorded_without_measured_sources():
+    pad = PADAffectModel()
+    augmenter = CycleAugmenter(
+        CycleAugmenterConfig.from_overrides({"pad_from_state": True}, pinned_off=True),
+        _Workspace(),
+        pad_model=pad,
+    )
+    augmenter.before_cycle([])
+    bare = SimpleNamespace(
+        pad_pleasure=None, pad_arousal=None, pad_dominance=None, pad_label=None
+    )
+    record = augmenter.after_cycle(bare)
+    assert bare.pad_label is None
+    assert (bare.pad_pleasure, bare.pad_arousal, bare.pad_dominance) == (
+        None,
+        None,
+        None,
+    )
+    assert record.pad_state is None
+    assert record.pad_sources_measured == ()
+    # One dimension measured is not enough: no coordinate, the list is kept
+    augmenter.before_cycle([])
+    arousal_only = SimpleNamespace(
+        ignition_events=2,
+        pad_pleasure=None,
+        pad_arousal=None,
+        pad_dominance=None,
+        pad_label=None,
+    )
+    record = augmenter.after_cycle(arousal_only)
+    assert record.pad_state is None
+    assert record.pad_sources_measured == ("ignition_rate",)
+    assert arousal_only.pad_arousal is None
+    assert pad.history_length == 0
+
+
 def test_all_off_is_identity():
     workspace = _Workspace(urgent=[("curiosity", 0.9)])
     augmenter = CycleAugmenter(CycleAugmenterConfig.all_off(), workspace)
@@ -382,3 +555,99 @@ def test_state_dict_round_trip():
     assert restored.to_state_dict()["histories"]["prospective"] == (
         saved["histories"]["prospective"]
     )
+
+
+def _bare_pad_state():
+    return SimpleNamespace(
+        pad_pleasure=None, pad_arousal=None, pad_dominance=None, pad_label=None
+    )
+
+
+def _pad_gate_on():
+    return CycleAugmenter(
+        CycleAugmenterConfig.from_overrides(
+            {"gate_arousal": "pad", "pad_from_state": True}, pinned_off=True
+        ),
+        _Workspace(),
+        pad_model=PADAffectModel(),
+    )
+
+
+def test_pad_gate_warning_names_why_no_arousal_was_recorded(caplog):
+    gate_logger = "mtc.pipeline.cycle_augmenter"
+    # Arousal is measured (the ignition count, as in every real cycle) while
+    # pleasure and dominance have no measured input: the cause names those two
+    on = _pad_gate_on()
+    on.before_cycle([])
+    state = _bare_pad_state()
+    state.ignition_events = 2
+    with caplog.at_level("WARNING", logger=gate_logger):
+        record = on.after_cycle(state)
+    assert record.gate_arousal_value is None
+    assert "ignition_rate" in record.pad_sources_measured
+    messages = [r.getMessage() for r in caplog.records if r.name == gate_logger]
+    assert len(messages) == 1
+    assert "pad_from_state off" not in messages[0]
+    assert "no measured arousal input" not in messages[0]
+    assert "no measured input this cycle for pleasure, dominance" in messages[0]
+
+    # Pleasure and arousal measured, dominance not: only dominance is named
+    caplog.clear()
+    on = _pad_gate_on()
+    on.before_cycle([])
+    state = _bare_pad_state()
+    state.ignition_events = 2
+    state.damasio_state = {"core": {"somatic_valence": 0.25}}
+    with caplog.at_level("WARNING", logger=gate_logger):
+        on.after_cycle(state)
+    messages = [r.getMessage() for r in caplog.records if r.name == gate_logger]
+    assert len(messages) == 1
+    assert "no measured input this cycle for dominance)" in messages[0]
+    assert "pleasure" not in messages[0]
+
+    caplog.clear()
+    off = CycleAugmenter(
+        CycleAugmenterConfig.from_overrides(
+            {"gate_arousal": "pad", "pad_from_state": False}, pinned_off=True
+        ),
+        _Workspace(),
+    )
+    off.before_cycle([])
+    with caplog.at_level("WARNING", logger=gate_logger):
+        off.after_cycle(_bare_pad_state())
+    messages = [r.getMessage() for r in caplog.records if r.name == gate_logger]
+    assert len(messages) == 1
+    assert "pad_from_state off" in messages[0]
+    assert "no measured arousal input" not in messages[0]
+
+
+def test_pad_computed_reports_whether_this_call_computed_the_pad():
+    augmenter = CycleAugmenter(
+        CycleAugmenterConfig.from_overrides({"pad_from_state": True}, pinned_off=True),
+        _Workspace(),
+        pad_model=PADAffectModel(),
+    )
+    assert augmenter.pad_computed is False
+    augmenter.before_cycle([])
+    record = augmenter.after_cycle(_bare_pad_state())
+    # The computation returned without a coordinate: it still ran
+    assert record.pad_state is None
+    assert augmenter.pad_computed is True
+
+    class _BrokenPAD(PADAffectModel):
+        def compute(self, sources, measured=None):
+            raise RuntimeError("pad broke")
+
+    augmenter._pad_model = _BrokenPAD()
+    augmenter.before_cycle([])
+    with pytest.raises(RuntimeError):
+        augmenter.after_cycle(_bare_pad_state())
+    assert augmenter.pad_computed is False
+
+    off = CycleAugmenter(
+        CycleAugmenterConfig.from_overrides({"pad_from_state": False}, pinned_off=True),
+        _Workspace(),
+    )
+    off.before_cycle([])
+    off.after_cycle(_bare_pad_state())
+    assert off.pad_computed is False

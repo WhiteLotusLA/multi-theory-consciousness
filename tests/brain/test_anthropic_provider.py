@@ -369,8 +369,11 @@ async def test_image_parts_refused():
         ],
     }
     provider = _provider(client)
-    with pytest.raises(CapabilityUnavailableError):
+    with pytest.raises(CapabilityUnavailableError) as refused:
         await provider.complete(_params(messages=[image]))
+    # the refusal states the release scope and names no Settings key
+    assert "image input is not part of this release" in str(refused.value)
+    assert "VISION_ENABLED" not in str(refused.value)
     with pytest.raises(CapabilityUnavailableError):
         await _collect(provider, _params(messages=[image]))
     assert client.messages.stream_calls == []

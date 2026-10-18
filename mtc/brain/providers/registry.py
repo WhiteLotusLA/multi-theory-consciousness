@@ -129,8 +129,12 @@ class ProviderRegistry:
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
+            # The file name and the key only: the directory can hold a home
+            # path or a user name.
             logger.warning(
-                "Provider state file %s is unreadable (%s)", path, type(exc).__name__
+                "provider state file %s (PROVIDER_STATE_PATH) is unreadable (%s)",
+                path.name,
+                type(exc).__name__,
             )
             return None
         provider_id = (

@@ -14,10 +14,10 @@ the example finishes in seconds on a CPU:
 3. HTM: the compact ``HTM`` with 512 columns of 16 cells (``ProductionHTM``
    has 4,096 columns of 32 cells).
 
-The numbers printed are what one short run produced; a spike rate of zero or
-an anomaly score of one on random input is a reading, not a fault. In the
-runtime the neural orchestrator runs the production substrates and keeps
-their latest signals, which each workspace cycle receives.
+The numbers printed are what one short run produced; an anomaly score of one
+on random input is a reading, not a fault. In the runtime the neural
+orchestrator runs the production substrates and keeps their latest signals,
+which each workspace cycle receives.
 
 Needs the ``neural`` extra (torch, snntorch, reservoirpy). Runs on the CPU and
 opens no network connection.
@@ -63,7 +63,8 @@ def main():
     snn_output, snn_state = snn.process_input(snn_input)
     snn_ms = (time.perf_counter() - t0) * 1000
     print(f"    Output shape:     {tuple(snn_output.shape)}")
-    print(f"    Spike rate:       {snn_state.get('output_spike_rate', 0):.3f}")
+    print(f"    Mean firing rate: {snn_state['mean_firing_rate']:.3f}")
+    print(f"    Total spikes:     {snn_state['total_spikes']}")
     print(f"    Processing time:  {snn_ms:.1f} ms (this run)")
 
     # 2. Liquid state machine

@@ -38,8 +38,11 @@ baseline's overall score stays None while the assessment reports insufficient
 data, and the default assessment scales its bounded histories by
 ``OrchestratorConfig.assessment_warmup_cycles``, never by the running cycle
 count; every Optional ``ConsciousnessState`` field left None is named in
-``absent_signals`` with a reason from ``ABSENT_REASONS``; the PAD inputs that
-were measured are listed in ``pad_sources_measured``. The orchestrator and the
+``absent_signals`` with a reason from ``ABSENT_REASONS`` (``failed`` when the
+step that fills it failed in that cycle); the PAD inputs that were measured
+are listed in ``pad_sources_measured``. A cached assessment report is reused
+only while no cycle has run since it was taken, and is applied to the
+baseline once. The orchestrator and the
 augmenter share one PAD model and one prospective simulator, and the neural
 orchestrator is reached through its public surface only
 (``publish_retrieved_memories``, ``verification_neural_data``, the latest
@@ -75,6 +78,7 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Set,
     Tuple,
 )
 
@@ -103,6 +107,8 @@ logger = logging.getLogger(__name__)
 THEORIES: Tuple[str, ...] = ("GWT", "IIT", "AST", "HOT", "FEP", "RPT", "BLT", "AE")
 
 BASELINE_UNMEASURED = "unmeasured"
+# The assessment's report status when no indicator was measured.
+INSUFFICIENT_STATUS = "insufficient_data"
 MESSAGE_CONTENT_TYPE = "message"
 
 # The two theory modulations the workspace applies as the next cycle's
@@ -152,6 +158,31 @@ _PHI_MARK = re.compile(r"(?<![a-z])phi(?![a-z])|integration[ _-]?proxy", re.IGNO
 _OPTIONAL_STATE_FIELDS: Tuple[str, ...] = tuple(
     item.name for item in fields(ConsciousnessState) if item.default is None
 )
+# Optional state fields the default scan cannot see (they have no default or
+# a non-None one), named explicitly whenever the cycle leaves them None.
+_EXPLICIT_OPTIONAL_FIELDS: Tuple[str, ...] = (
+    "integration_level",
+    "broadcast_coverage",
+    "binding_quality",
+    "protoself_stability",
+    "feeling_of_knowing",
+    "autobiographic_continuity",
+)
+# Every state field the cycle names in ``absent_signals`` when it is None.
+NAMED_STATE_FIELDS: Tuple[str, ...] = _OPTIONAL_STATE_FIELDS + tuple(
+    name for name in _EXPLICIT_OPTIONAL_FIELDS if name not in _OPTIONAL_STATE_FIELDS
+)
+# (state field prefix, the orchestrator step that fills it): a field left None
+# in a cycle whose step failed is named ``failed``. The PAD fields are judged
+# apart: their step also runs the gate and prospective sub-steps, so a failure
+# of that step names them ``failed`` only when PAD from the state is on and
+# the PAD computation itself did not finish.
+_PRODUCER_STEPS: Tuple[Tuple[str, str], ...] = (
+    ("rpt_", "rpt"),
+    ("causal_emergence", "causal_emergence"),
+    ("prm_discrimination", "reality_monitor"),
+)
+_PAD_STEP = "augment_after"
 
 
 def _finite(value: Any) -> Optional[float]:
@@ -174,6 +205,27 @@ def _read(item: Any, key: str, default: Any = None) -> Any:
 
 def _text(value: Any) -> str:
     return str(value).strip() if value is not None else ""
+
+
+def _template_label(candidate: Any, metadata: Mapping[str, Any]) -> str:
+    """The kind of an authored-template candidate, never its words: for a
+    prospective simulation 'a prospective-simulation template (kind:
+    anticipatory)'."""
+    content_type = _text(getattr(candidate, "content_type", "")) or "authored"
+    kind = _text(metadata.get("sim_type")) or content_type
+    return f"a {content_type.replace('_', '-')} template (kind: {kind})"
+
+
+def _theory_name(theory: Any) -> Optional[str]:
+    """The theory key of an indicator result: an enum member's name (the
+    assessment's ``ConsciousnessTheory``) or a plain string; None when the
+    result names no theory."""
+    if theory is None:
+        return None
+    if isinstance(theory, str):
+        return theory or None
+    name = getattr(theory, "name", None)
+    return name if isinstance(name, str) and name else None
 
 
 def _names_phi(text: Any) -> bool:
@@ -234,9 +286,10 @@ def _mean(values: List[Optional[float]]) -> Optional[float]:
 def _metacognition_summary(state: Any) -> Optional[str]:
     """This cycle's higher-order thoughts in neutral third person: how many the
     cycle generated, with their mean confidence and clarity. The module's
-    standing confidence and doubt are left out (they keep their defaults until
-    an introspection sets them). None when the cycle recorded no metacognitive
-    state."""
+    standing confidence and doubt are left out: under the hot_mean source (the
+    default) the standing confidence is the mean over the buffered higher-order
+    thoughts (None before the first), and nothing measures doubt. None when
+    the cycle recorded no metacognitive state."""
     if getattr(state, "metacognitive_state", None) is None:
         return None
     thoughts = list(getattr(state, "higher_order_thoughts", None) or [])
@@ -266,8 +319,10 @@ class ConsciousnessBaseline:
     """The cached assessment the modulation layers read.
 
     ``overall_score`` and every theory score stay None until an assessment
-    measures them; ``status`` is ``unmeasured`` before the first report and the
-    report's own status afterwards. ``stretch_ceiling`` is 1.2 times the
+    measures them (an ``insufficient_data`` report measures nothing, and a
+    theory with no measured indicator result keeps None); ``status`` is
+    ``unmeasured`` before the first report and the report's own status
+    afterwards. ``stretch_ceiling`` is 1.2 times the
     measured overall (capped at 1.0) and ``trend`` needs five scores.
     """
 
@@ -292,16 +347,42 @@ class ConsciousnessBaseline:
         return self.overall_score is not None
 
     def update_from_report(self, report: Any, now: datetime) -> None:
-        """Take a ``ConsciousnessReport``; an insufficient overall stays None."""
+        """Take a ``ConsciousnessReport``; an insufficient overall stays None.
+
+        A report whose status is ``insufficient_data`` measured nothing, so its
+        overall is stored as None whatever number it carries: no stretch
+        ceiling and no score history entry.
+        """
+        status = str(getattr(report, "status", None) or "measured")
         overall = _finite(getattr(report, "overall_score", None))
+        if status == INSUFFICIENT_STATUS:
+            overall = None
         scores = dict(getattr(report, "theory_scores", None) or {})
+        results = getattr(report, "indicator_results", None) or {}
+        # A theory score is kept only for a theory with at least one measured
+        # indicator result; one whose included results are all absent or
+        # insufficient is not a measurement. A report whose results name no
+        # theory (an injected assessor's plain report) keeps its scores.
+        named, measured_theories = False, set()
+        for result in results.values():
+            theory = _theory_name(getattr(result, "theory", None))
+            if theory is None:
+                continue
+            named = True
+            if getattr(result, "status", "measured") == "measured":
+                measured_theories.add(theory)
+
+        def kept(theory: str, value: Any) -> Optional[float]:
+            if named and theory not in measured_theories:
+                return None
+            return _finite(value)
+
         self.theory_scores = {
-            theory: _finite(scores.get(theory)) for theory in THEORIES
+            theory: kept(theory, scores.get(theory)) for theory in THEORIES
         }
         for theory, value in scores.items():
             if theory not in self.theory_scores:
-                self.theory_scores[theory] = _finite(value)
-        results = getattr(report, "indicator_results", None) or {}
+                self.theory_scores[theory] = kept(str(theory), value)
         self.indicator_scores = {
             name: (
                 _finite(getattr(result, "score", None))
@@ -310,7 +391,7 @@ class ConsciousnessBaseline:
             )
             for name, result in results.items()
         }
-        self.status = str(getattr(report, "status", None) or "measured")
+        self.status = status
         self.coverage = _finite(getattr(report, "coverage", None))
         self.overall_score = overall
         if overall is not None:
@@ -635,6 +716,11 @@ class ConsciousnessOrchestrator:
         self._baseline_due_reason: Optional[str] = "never_measured"
         self._last_report: Any = None
         self._last_report_at: Optional[datetime] = None
+        self._last_report_cycle: Optional[int] = None
+        # Serial of the stored report (one per assessment run) and of the one
+        # the baseline last took, so a reused cached report is not re-applied
+        self._report_serial = 0
+        self._applied_serial: Optional[int] = None
 
         self._cycle_count = 0
         self._last_state: Optional[Any] = None
@@ -642,6 +728,9 @@ class ConsciousnessOrchestrator:
         self._last_pad_sources: Tuple[str, ...] = ()
         self._last_record: Optional[AugmentRecord] = None
         self._failures: Dict[str, int] = {}
+        # The steps that failed in the cycle being processed (cleared when a
+        # turn starts); the absent reasons consult it first
+        self._cycle_failures: Set[str] = set()
 
         self._max_ignition = 0
         self._max_epistemic_depth: Optional[int] = None
@@ -679,6 +768,7 @@ class ConsciousnessOrchestrator:
     def _record_failure(self, step: str, exc: BaseException) -> None:
         count = self._failures.get(step, 0) + 1
         self._failures[step] = count
+        self._cycle_failures.add(step)
         if count == 1 or count % 100 == 0:
             logger.warning(
                 "orchestrator step %s failed (%d so far): %s",
@@ -706,6 +796,7 @@ class ConsciousnessOrchestrator:
         """Run the cycle for one turn and return the modulated context."""
         if not isinstance(raw, RawConversationContext):
             raise TypeError("process takes a RawConversationContext")
+        self._cycle_failures = set()
         with self.profiler.stage("process"):
             with self._step("publish_retrieval"):
                 self._publish_retrieval(raw)
@@ -743,6 +834,7 @@ class ConsciousnessOrchestrator:
                 )
             self._cycle_count += 1
             self._last_state = state
+            self._mark_due_on_first_data()
 
             with self._step("rpt"):
                 self._run_rpt(state)
@@ -826,6 +918,13 @@ class ConsciousnessOrchestrator:
     def _mark_due(self, reason: str) -> None:
         self._baseline_due = True
         self._baseline_due_reason = reason
+
+    def _mark_due_on_first_data(self) -> None:
+        """After a successful cycle an insufficient baseline that is not due
+        becomes due (reason ``first_data``), so the next refresh measures the
+        data this cycle produced instead of waiting for the heartbeat."""
+        if self.baseline.status == INSUFFICIENT_STATUS and not self._baseline_due:
+            self._mark_due("first_data")
 
     def _read_goals(self) -> List[str]:
         """Top goals from the goal source, handed to the prospective simulator."""
@@ -1074,14 +1173,19 @@ class ConsciousnessOrchestrator:
 
     @staticmethod
     def _memory_to_candidate(memory: Any) -> WorkspaceCandidate:
-        """A retrieved memory; an unscored one competes at the neutral 0.5."""
+        """A retrieved memory; an unscored one competes at the neutral 0.5.
+
+        A memory without a measured emotional weight competes with no
+        emotional salience (0.0, a competition input) and is flagged
+        ``emotional_weight_measured`` False in the metadata."""
         score = None
         for key in ("score", "similarity_score", "relevance"):
             score = _finite(_read(memory, key))
             if score is not None:
                 break
         text = _text(_read(memory, "content") or _read(memory, "text"))
-        weight = _finite(_read(memory, "emotional_weight")) or 0.0
+        measured_weight = _finite(_read(memory, "emotional_weight"))
+        weight = 0.0 if measured_weight is None else measured_weight
         return WorkspaceCandidate(
             content=memory,
             content_type="memory",
@@ -1092,7 +1196,10 @@ class ConsciousnessOrchestrator:
             emotional_salience=_clip(weight),
             novelty_score=0.1,
             recency_bonus=0.2,
-            metadata={"scored": score is not None},
+            metadata={
+                "scored": score is not None,
+                "emotional_weight_measured": measured_weight is not None,
+            },
         )
 
     @staticmethod
@@ -1143,7 +1250,12 @@ class ConsciousnessOrchestrator:
 
     @staticmethod
     def _gist_to_candidate(gist: Any) -> WorkspaceCandidate:
-        """A thought gist, read through the ThoughtGist field names."""
+        """A thought gist, read through the ThoughtGist field names.
+
+        An unmeasured importance competes at the neutral 0.5 and an unmeasured
+        retention at full strength (competition inputs, not measurements); the
+        metadata flags ``importance_measured`` and ``retention_measured`` say
+        which were measured."""
         summary = _text(_read(gist, "summary"))
         importance = _finite(_read(gist, "importance_score"))
         retention = _finite(_read(gist, "retention_strength"))
@@ -1168,6 +1280,7 @@ class ConsciousnessOrchestrator:
                 "source_count": count,
                 "dominant_emotion": emotion or None,
                 "importance_measured": importance is not None,
+                "retention_measured": retention is not None,
             },
         )
 
@@ -1236,7 +1349,8 @@ class ConsciousnessOrchestrator:
         )
 
     async def assess_now(self) -> Optional[Any]:
-        """Run the assessment, reusing a report younger than the cache window.
+        """Run the assessment, reusing a report younger than the cache window
+        that was taken after the latest cycle (a cycle since makes it stale).
 
         Returns the report, or None when the assessment failed: the failure is
         counted under ``assessment`` (raised instead under ``DEBUG``), whether
@@ -1246,6 +1360,7 @@ class ConsciousnessOrchestrator:
         if (
             self._last_report is not None
             and self._last_report_at is not None
+            and self._last_report_cycle == self._cycle_count
             and (now - self._last_report_at).total_seconds()
             <= self.config.assessment_cache_s
         ):
@@ -1258,6 +1373,8 @@ class ConsciousnessOrchestrator:
             return None
         self._last_report = report
         self._last_report_at = self._now()
+        self._last_report_cycle = self._cycle_count
+        self._report_serial += 1
         return report
 
     async def refresh_baseline(self, trigger: str = "heartbeat") -> Optional[Any]:
@@ -1271,16 +1388,20 @@ class ConsciousnessOrchestrator:
         report = await self.assess_now()
         if report is None:
             return None
-        updated: Optional[ConsciousnessBaseline] = None
-        with self._step("baseline_update"):
-            # Update a copy and swap it in, so a report that breaks the update
-            # halfway never leaves a partly updated baseline behind
-            candidate = copy.deepcopy(self.baseline)
-            candidate.update_from_report(report, self._now())
-            updated = candidate
-        if updated is None:
-            return None
-        self.baseline = updated
+        if self._applied_serial != self._report_serial:
+            updated: Optional[ConsciousnessBaseline] = None
+            with self._step("baseline_update"):
+                # Update a copy and swap it in, so a report that breaks the
+                # update halfway never leaves a partly updated baseline behind
+                candidate = copy.deepcopy(self.baseline)
+                candidate.update_from_report(report, self._now())
+                updated = candidate
+            if updated is None:
+                return None
+            self.baseline = updated
+            self._applied_serial = self._report_serial
+        # The same cached report applied again adds no second score; the due
+        # flag is still cleared and the snapshot still taken under this trigger
         self._baseline_due = False
         self._baseline_due_reason = None
         if self.snapshot_service is not None:
@@ -1325,9 +1446,27 @@ class ConsciousnessOrchestrator:
 
     @staticmethod
     def _winner_summary(state: Any) -> str:
-        """This cycle's winner's summary; empty when nothing ignited."""
+        """This cycle's winner's summary; empty when nothing ignited.
+
+        A winner whose candidate is flagged ``authored_template`` (authored
+        sentences, such as a prospective simulation) is named by its kind,
+        never by its words: the words were written, not produced.
+        """
         candidate = cycle_winner(state)
-        return _text(getattr(candidate, "summary", "")) if candidate is not None else ""
+        if candidate is None:
+            return ""
+        if ConsciousnessOrchestrator._template_winner(state):
+            return _template_label(candidate, candidate.metadata)
+        return _text(getattr(candidate, "summary", ""))
+
+    @staticmethod
+    def _template_winner(state: Any) -> bool:
+        """True when this cycle's winner is flagged ``authored_template``
+        (any truthy value, the same test the workspace applies when it
+        withholds the higher-order thought)."""
+        candidate = cycle_winner(state)
+        metadata = getattr(candidate, "metadata", None)
+        return isinstance(metadata, Mapping) and bool(metadata.get("authored_template"))
 
     def _momentary_consciousness(self, state: Any) -> Optional[float]:
         integration = _finite(getattr(state, "integration_level", None))
@@ -1384,7 +1523,10 @@ class ConsciousnessOrchestrator:
         momentary = self._momentary_consciousness(state)
         profile = self._elastic(profile, momentary)
 
-        narrative = self._narrative(raw, state, winner_is_message, winner, ignited)
+        template = self._template_winner(state)
+        narrative = self._narrative(
+            raw, state, winner_is_message, winner, ignited, template
+        )
         sections = self._theory_sections(state, competed)
         temperature = self._temperature(state, profile)
         directives = self._directives(
@@ -1432,12 +1574,20 @@ class ConsciousnessOrchestrator:
         winner_is_message: bool,
         winner: str,
         ignited: bool = True,
+        template: bool = False,
     ) -> str:
+        """``template`` is whether this cycle's winner is an authored
+        template, whose ``winner`` text is then its kind, not its words."""
         flags = self.narration
         lines: List[str] = []
 
         if winner_is_message:
             lines.append("The workspace is focused on the incoming message.")
+        elif ignited and template:
+            lines.append(
+                f"The workspace is holding {winner}. "
+                "It ranks above the incoming message this cycle."
+            )
         elif ignited:
             lines.append(
                 f"The workspace is holding another item: {winner or 'unnamed content'}. "
@@ -1830,6 +1980,9 @@ class ConsciousnessOrchestrator:
 
     def _absent_reason(self, name: str, state: Any) -> str:
         ws = self.workspace
+        for prefix, step in _PRODUCER_STEPS:
+            if name.startswith(prefix) and step in self._cycle_failures:
+                return "failed"
         if name in (
             "dominant_hierarchy_level",
             "level_winner_counts",
@@ -1851,9 +2004,13 @@ class ConsciousnessOrchestrator:
         if name.startswith("rpt_"):
             if self.rpt_measurement is None:
                 return "no_producer"
-            return "cadence_not_reached"
+            # On a cadence cycle the step ran without error and measured nothing
+            due = self._cycle_count % self.config.rpt_every_n_cycles == 0
+            return "no_input" if due else "cadence_not_reached"
         if name == "prm_discrimination":
-            return "no_producer" if self.reality_monitor is None else "warming_up"
+            if self.reality_monitor is None:
+                return "no_producer"
+            return self._prm_reason()
         if name.startswith("causal_emergence"):
             if (
                 self.causal_emergence is None
@@ -1863,20 +2020,49 @@ class ConsciousnessOrchestrator:
             due = self._cycle_count % self.config.causal_emergence_every_n_cycles == 0
             return "warming_up" if due else "cadence_not_reached"
         if name.startswith("pad_"):
-            return (
-                "disabled"
-                if not self.augmenter.config.pad_from_state
-                else "no_producer"
-            )
+            if not self.augmenter.config.pad_from_state:
+                return "disabled"
+            if _PAD_STEP in self._cycle_failures and not getattr(
+                self.augmenter, "pad_computed", False
+            ):
+                return "failed"
+            # The augmenter computed PAD and a dimension had no measured input
+            return "no_input"
         if name == "prediction_error_rank":
             return "warming_up"
         if name == "primary_content":
             return "no_input"
+        if name == "integration_level":
+            # Measured from the neural orchestrator's signals only; no stand-in
+            return "no_producer" if self.neural_orchestrator is None else "no_input"
+        if name in (
+            "broadcast_coverage",
+            "binding_quality",
+            "autobiographic_continuity",
+        ):
+            return "no_input"
+        if name in ("protoself_stability", "feeling_of_knowing"):
+            # The first body update has no previous body state to compare with
+            return "warming_up" if self._cycle_count <= 1 else "no_input"
         return "no_producer"
+
+    def _prm_reason(self) -> str:
+        """``no_input`` once both kinds were seen and every classified signal
+        came without an attribution confidence (nothing supplies one, and no
+        prior stands in for it); ``warming_up`` before both kinds were seen."""
+        reader = getattr(self.reality_monitor, "get_statistics", None)
+        stats = reader() if callable(reader) else None
+        if isinstance(stats, Mapping):
+            both = (stats.get("external_count") or 0) > 0 and (
+                stats.get("internal_count") or 0
+            ) > 0
+            if both and stats.get("default_attribution_fraction") == 1.0:
+                return "no_input"
+        return "warming_up"
 
     def _absent_signals(self, state: Any) -> Dict[str, str]:
         absent: Dict[str, str] = {}
-        for name in _OPTIONAL_STATE_FIELDS:
+        for name in NAMED_STATE_FIELDS:
             if getattr(state, name, None) is None:
                 absent[name] = self._absent_reason(name, state)
         return absent
@@ -2030,7 +2216,19 @@ class ConsciousnessOrchestrator:
                 baseline.last_updated = parsed
             except ValueError:
                 baseline.last_updated = None
+        if baseline.status == INSUFFICIENT_STATUS:
+            # A state written before the insufficient guard may carry a number
+            # for a report that measured nothing; it is restored unmeasured.
+            baseline.overall_score = None
+            baseline.stretch_ceiling = None
+            baseline.score_history = []
+            baseline.trend = None
         self.baseline = baseline
+        # A report cached before the restore describes the replaced state
+        self._last_report = None
+        self._last_report_at = None
+        self._last_report_cycle = None
+        self._applied_serial = None
         self._baseline_due = not baseline.measured
         self._baseline_due_reason = "never_measured" if self._baseline_due else None
         self._max_ignition = int(scalars.get("max_ignition", 0) or 0)
@@ -2046,6 +2244,7 @@ class ConsciousnessOrchestrator:
 
 __all__ = [
     "THEORIES",
+    "NAMED_STATE_FIELDS",
     "CONSUMED_MODULATIONS",
     "EMOTION_WORDS",
     "ConsciousnessBaseline",

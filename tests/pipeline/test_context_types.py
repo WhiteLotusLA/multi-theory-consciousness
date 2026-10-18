@@ -67,7 +67,52 @@ def test_turn_payload_has_no_identity_internals():
         "speaker_label",
         "provider_id",
         "blocked",
+        "safety_gate",
+        "safety_decision",
     }
+    assert payload["safety_gate"] is None
+    assert payload["safety_decision"] is None
+
+
+def test_turn_payload_carries_the_gate_state_and_the_safety_decision():
+    result = TurnResult(
+        success=False,
+        response=None,
+        thinking=None,
+        conversation_id="conv-1",
+        message_count=0,
+        timestamp=datetime(2000, 1, 1, tzinfo=timezone.utc),
+        error_code="blocked",
+        blocked=True,
+        safety_gate="applied",
+        safety_decision="emergency_shutdown",
+    )
+    payload = result.to_payload()
+    assert payload["safety_gate"] == "applied"
+    assert payload["safety_decision"] == "emergency_shutdown"
+    for state in ("absent", "bypassed", "applied", "unchecked"):
+        assert (
+            TurnResult(
+                success=True,
+                response="x",
+                thinking=None,
+                conversation_id=None,
+                message_count=0,
+                timestamp=datetime(2000, 1, 1, tzinfo=timezone.utc),
+                safety_gate=state,
+            ).to_payload()["safety_gate"]
+            == state
+        )
+    with pytest.raises(ValueError, match="safety_gate"):
+        TurnResult(
+            success=True,
+            response="x",
+            thinking=None,
+            conversation_id=None,
+            message_count=0,
+            timestamp=datetime(2000, 1, 1, tzinfo=timezone.utc),
+            safety_gate="ok",
+        )
 
 
 def test_absent_reason_vocabulary():
@@ -77,6 +122,7 @@ def test_absent_reason_vocabulary():
         "no_producer",
         "no_input",
         "disabled",
+        "failed",
     )
     context = ModulatedContext.unavailable("cycle_failed", 0.7)
     for reason in ABSENT_REASONS:
@@ -85,6 +131,8 @@ def test_absent_reason_vocabulary():
         context.name_absent("other_field", "made_up")
     context.name_absent("rpt_deep_recurrence", "cadence_not_reached")
     assert context.absent_signals["rpt_deep_recurrence"] == "cadence_not_reached"
+    context.name_absent("prm_discrimination", "failed")
+    assert context.absent_signals["prm_discrimination"] == "failed"
 
 
 def test_unavailable_context_has_empty_narrative():

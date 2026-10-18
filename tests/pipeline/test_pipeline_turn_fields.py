@@ -3,9 +3,10 @@ field is set or explained, nothing fails, the provenance snapshot carries the
 provider, and the theory slots reach the brain."""
 
 import secrets
+import typing
 from dataclasses import fields
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import pytest
 
@@ -19,8 +20,14 @@ from mtc.pipeline.runtime import Runtime, build_runtime
 
 ROOT = Path(__file__).resolve().parents[2]
 TOKEN_ENV = "MTC_TEST_TURN_FIELDS_TOKEN"
+_HINTS = typing.get_type_hints(ConsciousnessState)
+# The Optional state fields: those that default to None, and the measurements
+# annotated Optional[float] that keep a numeric default or none (a measured
+# number or None, never a stand-in).
 OPTIONAL_FIELDS = tuple(
-    item.name for item in fields(ConsciousnessState) if item.default is None
+    item.name
+    for item in fields(ConsciousnessState)
+    if item.default is None or _HINTS[item.name] == Optional[float]
 )
 SLOT_SECTIONS = {
     "neural_state": "neural_state",

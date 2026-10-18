@@ -431,3 +431,205 @@ async def test_reply_carries_provider_id(tmp_path):
 def test_no_synthesis_method():
     assert not hasattr(LLMBrain, "synthesize_knowledge")
     assert not hasattr(LLMBrain, "synthesize")
+
+
+class CountingMock(MockProvider):
+    """A mock provider that counts its health checks."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.health_checks = 0
+
+    async def health_check(self) -> HealthStatus:
+        self.health_checks += 1
+        return await super().health_check()
+
+
+class FakeMonotonic:
+    def __init__(self, start: float = 1000.0):
+        self.now = float(start)
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _recheck_brain(tmp_path: Path, provider: Any, **kwargs) -> LLMBrain:
+    settings = _settings(tmp_path)
+    registry = ProviderRegistry(state_path=tmp_path / "data" / "provider_state.json")
+    registry.register(provider)
+    registry.set_active(provider.model_info().id)
+    return LLMBrain(
+        registry=registry,
+        assembler=PromptAssembler(settings=settings, identity_statement=""),
+        settings=settings,
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_degraded_brain_recovers_when_the_provider_does(tmp_path):
+    provider = CountingMock(healthy=False)
+    brain = _recheck_brain(tmp_path, provider, health_recheck_s=0.0)
+    assert (await brain.initialize()).ok is False
+    with pytest.raises(BrainUnavailableError, match="set unhealthy"):
+        await brain.think("hello")
+    assert provider.requests == []
+    provider.healthy = True
+    reply = await brain.think("hello")
+    assert reply.text
+    assert len(provider.requests) == 1
+    assert brain.available is True
+    # the conversational path recovers the same way
+    provider.healthy = False
+    await brain.refresh_health()
+    provider.healthy = True
+    assert (await brain.think_with_context("hi")).text
+    assert len(provider.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_degraded_brain_probes_at_most_once_per_interval(tmp_path):
+    clock = FakeMonotonic()
+    provider = CountingMock(healthy=False)
+    brain = _recheck_brain(tmp_path, provider, health_recheck_s=5.0, monotonic=clock)
+    assert brain.health_recheck_s == 5.0
+    await brain.initialize()
+    assert provider.health_checks == 1
+    for _ in range(5):
+        with pytest.raises(BrainUnavailableError):
+            await brain.think_with_context("hello")
+    assert provider.health_checks == 1
+    clock.now += 5.0
+    for _ in range(3):
+        with pytest.raises(BrainUnavailableError):
+            await brain.think("hello")
+    assert provider.health_checks == 2
+    assert provider.requests == []
+    # a provider that was healthy at start is never probed on the call path
+    healthy = CountingMock()
+    steady = _recheck_brain(tmp_path, healthy, health_recheck_s=0.0, monotonic=clock)
+    await steady.initialize()
+    for _ in range(3):
+        clock.now += 60.0
+        assert (await steady.think("hello")).text
+    assert healthy.health_checks == 1
+    assert len(healthy.requests) == 3
+    # the default interval is the code constant
+    assert _recheck_brain(tmp_path, MockProvider()).health_recheck_s == 5.0
+    with pytest.raises(ValueError, match="health_recheck_s"):
+        _recheck_brain(tmp_path, MockProvider(), health_recheck_s=-1.0)
+
+
+class GatedHealthMock(CountingMock):
+    """Healthy for none of its checks; every check after the first waits."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, healthy=False, **kwargs)
+        self.release = asyncio.Event()
+
+    async def health_check(self) -> HealthStatus:
+        if self.health_checks >= 1:
+            self.health_checks += 1
+            await self.release.wait()
+            return await MockProvider.health_check(self)
+        return await super().health_check()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_calls_on_a_degraded_brain_probe_once(tmp_path):
+    clock = FakeMonotonic()
+    provider = GatedHealthMock()
+    brain = _recheck_brain(tmp_path, provider, health_recheck_s=5.0, monotonic=clock)
+    await brain.initialize()
+    assert provider.health_checks == 1
+    clock.now += 5.0
+    calls = [asyncio.create_task(brain.think(f"call {i}")) for i in range(3)]
+    for _ in range(5):
+        await asyncio.sleep(0)
+    # one re-check is in flight; the other calls saw it started and did not
+    # start their own
+    assert provider.health_checks == 2
+    provider.release.set()
+    outcomes = await asyncio.gather(*calls, return_exceptions=True)
+    assert provider.health_checks == 2
+    assert all(isinstance(o, BrainUnavailableError) for o in outcomes)
+    assert provider.requests == []
+
+
+@pytest.mark.asyncio
+async def test_last_call_outcome_is_recorded_and_never_gates(tmp_path):
+    from mtc.brain.providers.base import ProviderError, ProviderTimeoutError
+
+    provider = MockProvider(
+        replies=[
+            "first answer",
+            ProviderError("server error", status_code=500),
+            "second answer",
+            ProviderTimeoutError("stalled"),
+            MockEvent.EMPTY,
+        ]
+    )
+    brain = _recheck_brain(tmp_path, provider)
+    await brain.initialize()
+    status = brain.status()
+    assert status["last_call_ok"] is None
+    assert status["last_call_at"] is None
+    assert (await brain.think("one")).text
+    status = brain.status()
+    assert status["last_call_ok"] is True
+    assert isinstance(status["last_call_at"], str)
+    with pytest.raises(BrainUnavailableError):
+        await brain.think("two")
+    assert brain.status()["last_call_ok"] is False
+    # the record never refuses a call: the next call is sent and succeeds
+    assert brain.available is True
+    assert (await brain.think("three")).text
+    assert len(provider.requests) == 3
+    assert brain.status()["last_call_ok"] is True
+    with pytest.raises(ProviderTimeoutError):
+        await brain.think("four")
+    assert brain.status()["last_call_ok"] is False
+    # a completion that came back empty is a returned completion
+    with pytest.raises(NoAnswerError):
+        await brain.think("five")
+    assert brain.status()["last_call_ok"] is True
+    assert len(provider.requests) == 5
+    # the recorded health keeps its own fields
+    assert brain.status()["health"]["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_given_last_turn_at_wins_over_the_history_tail(tmp_path):
+    brain, provider = _brain(tmp_path)
+    await brain.initialize()
+    evening = datetime(2000, 1, 1, 21, 0, tzinfo=timezone.utc)
+    history = [
+        {"role": "user", "content": "good evening", "timestamp": evening},
+        {
+            "role": "user",
+            "speaker": "clock",
+            "content": "[Clock note, not a person: a night passed at this point.]",
+            "timestamp": None,
+            "is_clock_note": True,
+        },
+    ]
+    await brain.think_with_context(
+        "good morning", conversation_history=history, last_turn_at=evening
+    )
+    system = provider.requests[-1].messages[0]["content"]
+    assert "Time since the last exchange:" in system
+    # without it the tail (a clock note with no time) gives no gap line
+    await brain.think_with_context("good morning", conversation_history=history)
+    assert (
+        "Time since the last exchange:"
+        not in provider.requests[-1].messages[0]["content"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_image_refusal_names_no_removed_key(tmp_path):
+    brain, mock = _brain(tmp_path)
+    with pytest.raises(CapabilityUnavailableError) as refused:
+        await brain.think_with_context("look", image=b"\x89PNG")
+    assert str(refused.value) == "image input is not part of this release"
+    assert mock.requests == []

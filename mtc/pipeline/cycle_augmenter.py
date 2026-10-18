@@ -26,8 +26,11 @@ off for the runners unless the layered overrides set it, and ``all_off`` is an
 identity: the candidates come back unchanged and the state is not touched, so
 a seeded run stays bit-identical.
 
-Honest measurement: a PAD input absent in a cycle keeps its ``PADSources``
-default and is left out of ``AugmentRecord.pad_sources_measured``. One PAD
+Honest measurement: a PAD input absent in a cycle is left out of
+``AugmentRecord.pad_sources_measured`` and contributes nothing: each PAD
+dimension is the weighted mean over its measured inputs, and when a dimension
+has none no coordinate is recorded (the state's PAD fields stay None and
+``AugmentRecord.pad_state`` is None; the measured list is still kept). One PAD
 model and one prospective simulator: a caller that also reads them hands its
 own over with ``adopt_pad_model`` and ``adopt_prospective`` (a different one
 already in use raises), or reads the augmenter's. No Settings are read here.
@@ -49,7 +52,14 @@ from mtc.consciousness.enhanced_global_workspace import (
     WorkspaceCandidate,
     WorkspaceCandidateSource,
 )
-from mtc.consciousness.pad_affect import PADAffectModel, PADSources, PADState
+from mtc.consciousness.pad_affect import (
+    AROUSAL_WEIGHTS,
+    DOMINANCE_WEIGHTS,
+    PLEASURE_WEIGHTS,
+    PADAffectModel,
+    PADSources,
+    PADState,
+)
 from mtc.consciousness.prospective_memory import (
     ProspectiveContext,
     ProspectiveSimulator,
@@ -178,6 +188,31 @@ class AugmentRecord:
     pad_state: Optional[PADState] = None
 
 
+_PAD_DIMENSION_WEIGHTS: Tuple[Tuple[str, Mapping[str, float]], ...] = (
+    ("pleasure", PLEASURE_WEIGHTS),
+    ("arousal", AROUSAL_WEIGHTS),
+    ("dominance", DOMINANCE_WEIGHTS),
+)
+
+
+def _pad_gate_cause(record: AugmentRecord) -> str:
+    """Why the PAD gate found no arousal with PAD from the state on.
+
+    Names the PAD dimensions that had no measured input this cycle (any one
+    of them leaves the coordinate unrecorded); when every dimension had one,
+    says only that no finite PAD arousal reached the state.
+    """
+    measured = set(record.pad_sources_measured)
+    missing = [
+        dimension
+        for dimension, weights in _PAD_DIMENSION_WEIGHTS
+        if not any(name in measured for name in weights)
+    ]
+    if missing:
+        return "no measured input this cycle for " + ", ".join(missing)
+    return "no finite PAD arousal on the state this cycle"
+
+
 def extract_pad_sources(
     state: Any,
     workspace: Any = None,
@@ -186,7 +221,9 @@ def extract_pad_sources(
     """PAD inputs from a cycle's state and its producers.
 
     Returns the sources and the names of the inputs that were measured; an
-    absent input keeps its declared ``PADSources`` default and is not named.
+    absent input keeps its declared ``PADSources`` default and is not named,
+    so a caller that passes the names to ``PADAffectModel.compute`` leaves it
+    out of the coordinate.
     """
     sources = PADSources()
     measured: List[str] = []
@@ -334,6 +371,7 @@ class CycleAugmenter:
             "capped": 0,
         }
         self._pad_gate_warned = False
+        self._pad_computed = False
 
     # ------------------------------------------------------------------
     # Components, built on first use when their switch is on
@@ -487,11 +525,20 @@ class CycleAugmenter:
         self._pending = record
         return out
 
+    @property
+    def pad_computed(self) -> bool:
+        """True when the latest ``after_cycle`` call ran the PAD computation
+        to its end (with or without a coordinate); False when PAD from the
+        state is off, before the first call, or when the computation raised.
+        A failure later in the same call leaves it True."""
+        return self._pad_computed
+
     def after_cycle(
         self, state: Any, inputs: Optional[CycleInputs] = None
     ) -> AugmentRecord:
         """Record PAD on the state, feed the gate and prepare the next cycle."""
         self._after_calls += 1
+        self._pad_computed = False
         record = self._pending
         self._pending = AugmentRecord()
         cfg = self.config
@@ -499,13 +546,18 @@ class CycleAugmenter:
         if cfg.pad_from_state:
             affect = inputs.neural_affect if inputs is not None else None
             sources, measured = extract_pad_sources(state, self.workspace, affect)
-            pad_state = self._ensure_pad_model().compute(sources)
-            state.pad_pleasure = pad_state.pleasure
-            state.pad_arousal = pad_state.arousal
-            state.pad_dominance = pad_state.dominance
-            state.pad_label = pad_state.label
+            # Each dimension is computed over its measured inputs only; a
+            # dimension with none leaves the coordinate unrecorded (None on
+            # the state, no PAD state), while the measured list is still kept
+            pad_state = self._ensure_pad_model().compute(sources, measured=measured)
+            self._pad_computed = True
             record.pad_sources_measured = measured
             record.pad_state = pad_state
+            if pad_state is not None:
+                state.pad_pleasure = pad_state.pleasure
+                state.pad_arousal = pad_state.arousal
+                state.pad_dominance = pad_state.dominance
+                state.pad_label = pad_state.label
 
         if cfg.gate_arousal == "protoself":
             arousal = protoself_arousal(state)
@@ -520,9 +572,15 @@ class CycleAugmenter:
             record.gate_arousal_value = _finite(getattr(state, "pad_arousal", None))
             if record.gate_arousal_value is None and not self._pad_gate_warned:
                 self._pad_gate_warned = True
+                cause = (
+                    _pad_gate_cause(record)
+                    if cfg.pad_from_state
+                    else "pad_from_state off"
+                )
                 logger.warning(
                     "gate_arousal is pad but no PAD arousal was recorded on the "
-                    "state (pad_from_state off); the gate keeps its own source"
+                    "state (%s); the gate keeps its own source",
+                    cause,
                 )
 
         if cfg.prospective_candidates:

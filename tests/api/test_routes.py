@@ -2,9 +2,11 @@
 stores (no network, no store client, no model)."""
 
 import asyncio
+import functools
 import json
 import os
 import secrets
+import typing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
@@ -13,20 +15,34 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mtc.api.auth import API_KEY_HEADER, SPEAKER_TOKEN_HEADER
-from mtc.api.schemas import INTEGRATION_PROXY_LABEL, TimeoutPayload
-from mtc.api.server import create_app
+from mtc.api.schemas import (
+    ERROR_CODES,
+    INTEGRATION_PROXY_LABEL,
+    HealthResponse,
+    TimeoutPayload,
+    TurnPayload,
+    brain_verified,
+    health_status,
+)
+from mtc.api.server import ERROR_STATUS, create_app
 from mtc.assessment.assessment import (
     ConsciousnessAssessment,
     ConsciousnessReport,
     ConsciousnessTheory,
 )
 from mtc.brain.brain import LLMBrain
-from mtc.brain.providers.base import ProviderError, ProviderTimeoutError
+from mtc.brain.providers.base import (
+    HealthStatus,
+    ProviderError,
+    ProviderTimeoutError,
+)
 from mtc.brain.providers.mock_provider import MockEvent, MockProvider, _last_user_text
+from mtc.brain.providers.registry import ProviderRegistry
 from mtc.core import config as config_module
 from mtc.core.embeddings import HashEmbedder
 from mtc.core.logger import reset_logging
 from mtc.memory.inmemory import InMemoryGraphStore
+from mtc.pipeline.context_types import SAFETY_GATE_STATES, TurnResult
 from mtc.pipeline.runtime import build_runtime
 from tests.api.test_auth import (
     FakePipeline,
@@ -228,6 +244,7 @@ class HangingPipeline(FakePipeline):
         stream_callback=None,
         request_id=None,
         timeout_s=None,
+        on_generated=None,
     ):
         self.calls.append({"message": message})
         if self.first_chunk and stream_callback is not None:
@@ -292,6 +309,205 @@ def test_bound_timeout_reports_only_what_is_known(clean_env, first_chunk, bound)
         assert body["first_token_s"] is None
         assert "no first token" in body["error"]
     assert runtime.pipeline.cancelled is True
+
+
+def test_chat_returns_the_reply_when_post_turn_is_slow(clean_env):
+    """A reply that is stored before the post-turn work runs is returned with
+    200 even when that work outlasts the stall bound: the route lifts its
+    generation bounds once the pipeline reports the reply stored."""
+    key = secrets.token_hex(24)
+    cfg = api_settings(
+        clean_env,
+        API_KEY=key,
+        GENERATION_TIMEOUT_S=60.0,
+        GENERATION_STALL_TIMEOUT_S=0.2,
+        METRICS_UPDATE_INTERVAL=0,
+        CTM_CONFIG_DIR=str(ROOT / "config" / "ctm"),
+    )
+
+    async def builder(settings):
+        return await build_runtime(
+            settings, embedder=HashEmbedder(), allow_non_semantic=True, substrates=False
+        )
+
+    app = create_app(settings=cfg, runtime_builder=builder)
+    with TestClient(app) as client:
+        pipeline = app.state.runtime.pipeline
+        post_turn = pipeline.post_turn
+        real_run = post_turn.run
+        ran = []
+
+        async def slow_run(record):
+            # Five times the stall bound after the last streamed chunk.
+            await asyncio.sleep(1.0)
+            ran.append(record.turn_number)
+            return await real_run(record)
+
+        post_turn.run = slow_run
+        try:
+            response = client.post(
+                "/api/chat",
+                json={"message": "Tell me about the garden."},
+                headers={API_KEY_HEADER: key},
+            )
+        finally:
+            post_turn.run = real_run
+        status = pipeline.status()
+    assert response.status_code == 200, response.json()
+    body = response.json()
+    assert body["success"] is True
+    assert body["response"].startswith("[mock] reply to: Tell me about the garden.")
+    assert ran == [1], "the post-turn work ran to its end"
+    assert status["cancelled"] == 0
+    assert "post_turn" not in status["failures"]
+
+
+class UnverifiedMock(KeyedMock):
+    """A provider whose health check reflects configuration only (ok, not
+    verified by an exchange), as a hosted provider's does before any call."""
+
+    async def health_check(self) -> HealthStatus:
+        return HealthStatus(True, "configured", datetime.now(timezone.utc), False)
+
+
+def _health_app(tmp_path, provider):
+    """An application over a runtime whose brain has ``provider`` only; no
+    continuous thought, so no background user calls the brain."""
+    key = secrets.token_hex(24)
+    cfg = api_settings(
+        tmp_path,
+        API_KEY=key,
+        CTM_ENABLED=False,
+        METRICS_UPDATE_INTERVAL=0,
+    )
+
+    async def builder(settings):
+        registry = ProviderRegistry(
+            state_path=Path(settings.DATA_DIRECTORY) / "provider_state.json",
+            settings=settings,
+        )
+        registry.register(provider)
+        registry.set_active("mock")
+        return await build_runtime(
+            settings,
+            brain=LLMBrain(registry=registry, settings=settings),
+            embedder=HashEmbedder(),
+            allow_non_semantic=True,
+            substrates=False,
+        )
+
+    return create_app(settings=cfg, runtime_builder=builder), key
+
+
+def test_health_reads_unverified_until_a_real_call_succeeds(clean_env):
+    """A provider whose health only reflects configuration is not reported as
+    ok: /health reads unverified (brain_verified false) until a real call
+    returns a completion, then ok (brain_verified true)."""
+    app, key = _health_app(clean_env, UnverifiedMock())
+    with TestClient(app) as client:
+        before = client.get("/health")
+        turn = client.post(
+            "/api/chat", json={"message": "hello"}, headers={API_KEY_HEADER: key}
+        )
+        after = client.get("/health")
+    assert before.status_code == 200
+    HealthResponse.model_validate(before.json())
+    assert before.json()["status"] == "unverified"
+    assert before.json()["ready"] is True
+    assert before.json()["brain_verified"] is False
+    assert turn.status_code == 200
+    assert after.json()["status"] == "ok"
+    assert after.json()["brain_verified"] is True
+
+
+def test_health_reads_degraded_after_a_failed_call(clean_env):
+    """A verified, healthy provider that then fails a real call makes /health
+    read degraded (still 200, still unauthenticated); the next successful
+    call makes it ok again, and the record never refused a call."""
+    app, key = _health_app(clean_env, KeyedMock())
+    with TestClient(app) as client:
+        healthy = client.get("/health").json()
+        failed = client.post(
+            "/api/chat",
+            json={"message": f"Anyone there {DOWN}"},
+            headers={API_KEY_HEADER: key},
+        )
+        degraded = client.get("/health")
+        again = client.post(
+            "/api/chat", json={"message": "hello"}, headers={API_KEY_HEADER: key}
+        )
+        recovered = client.get("/health").json()
+    assert healthy["status"] == "ok" and healthy["brain_verified"] is True
+    assert failed.status_code == 503
+    assert degraded.status_code == 200
+    assert degraded.json()["status"] == "degraded"
+    assert again.status_code == 200
+    assert recovered["status"] == "ok"
+
+
+def test_health_keeps_the_old_rule_for_a_brain_without_a_health_record(clean_env):
+    """A runtime brain that keeps no health record (only ``available``) reads
+    ok when available and ready, and brain_verified is unknown (null)."""
+    key = secrets.token_hex(24)
+    cfg = api_settings(clean_env, API_KEY=key)
+    runtime = FakeRuntime(cfg)
+    with TestClient(make_app(cfg, runtime)) as client:
+        body = client.get("/health").json()
+        runtime.brain.available = False
+        down = client.get("/health").json()
+    assert body["status"] == "ok" and body["brain_verified"] is None
+    assert down["status"] == "degraded" and down["brain_verified"] is None
+
+
+class _RecordedBrain:
+    """A brain stand-in whose ``status()`` returns a fixed record or raises."""
+
+    def __init__(self, available, status=None, raises=False):
+        self.available = available
+        self._status = status
+        self._raises = raises
+
+    def status(self):
+        if self._raises:
+            raise RuntimeError("status unreadable")
+        return self._status
+
+
+def test_brain_verified_is_false_for_a_failed_verified_exchange():
+    """A health record that came from a real exchange that failed (verified
+    but not ok) does not confirm the provider answers: brain_verified False,
+    and /health reads degraded."""
+    brain = _RecordedBrain(
+        False, {"health": {"ok": False, "verified": True}, "last_call_ok": None}
+    )
+    assert brain_verified(brain) is False
+    assert health_status(True, brain) == ("degraded", False)
+    answered = _RecordedBrain(
+        True, {"health": {"ok": True, "verified": True}, "last_call_ok": None}
+    )
+    assert brain_verified(answered) is True
+    assert health_status(True, answered) == ("ok", True)
+
+
+def test_unreadable_health_record_reads_unverified(caplog):
+    """A brain whose status cannot be read is not reported ok on availability
+    alone: /health reads unverified (degraded when unavailable), brain_verified
+    is False, and the failure is logged at DEBUG."""
+    import logging
+
+    brain = _RecordedBrain(True, raises=True)
+    with caplog.at_level(logging.DEBUG, logger="mtc.api.schemas"):
+        assert health_status(True, brain) == ("unverified", False)
+        assert brain_verified(brain) is False
+    assert any(
+        record.levelno == logging.DEBUG and "RuntimeError" in record.getMessage()
+        for record in caplog.records
+    )
+    assert health_status(True, _RecordedBrain(False, raises=True)) == (
+        "degraded",
+        False,
+    )
+    assert health_status(False, brain) == ("degraded", False)
 
 
 def test_meta_reports_missing_indicator_metadata_as_null(clean_env, monkeypatch):
@@ -359,6 +575,81 @@ def test_chat_blocked_403(served):
     body = response.json()
     assert body["blocked"] is True and body["error_code"] == "blocked"
     assert body["response"] is None
+
+
+class Unavailable:
+    """A safety check that cannot run."""
+
+    async def pre_message_check(self, message, sender, speaker_role=None):
+        raise RuntimeError("the safety stack is down")
+
+
+def test_safety_unavailable_is_503(served):
+    """With the default fail-closed gate a check that could not run refuses an
+    untrusted speaker's turn: 503 with the turn's payload (error code
+    ``safety_unavailable``, gate ``unchecked``, no reply) and nothing stored.
+    The trusted creator is not refused: the gate is bypassed for that turn."""
+    pipeline = served.runtime.pipeline
+    repository = pipeline.persistence.repository
+    text = "Hello from a speaker the gate could not check"
+    original = pipeline.safety
+    memory_writes = pipeline.persistence.status()["written"]["working_memory"]
+    pipeline.safety = Unavailable()
+    try:
+        refused = served.chat(text, speaker="Guest")
+        memory_after_refusal = pipeline.persistence.status()["written"][
+            "working_memory"
+        ]
+        rows = served.client.portal.call(
+            functools.partial(repository.timeline, 1.0, 1000, addressee="[Guest]")
+        )
+        trusted = served.chat("Hello there", speaker="Alice", token=served.token)
+    finally:
+        pipeline.safety = original
+    assert served.cfg.SAFETY_GATE_FAIL_CLOSED is True
+    assert refused.status_code == 503
+    body = refused.json()
+    TurnPayload.model_validate(body)
+    assert body["success"] is False and body["response"] is None
+    assert body["error_code"] == "safety_unavailable"
+    assert body["safety_gate"] == "unchecked"
+    assert body["blocked"] is False and body["safety_decision"] is None
+    assert body["error"] == (
+        "The safety check could not run; the message was not processed and "
+        "nothing was stored."
+    )
+    # The turn stored nothing: no message row, no working-memory entry (the
+    # session's conversation record is opened before the gate runs).
+    assert not [row for row in rows if row["content"] == text]
+    assert memory_after_refusal == memory_writes
+    assert trusted.status_code == 200
+    assert trusted.json()["safety_gate"] == "bypassed"
+
+
+def test_turn_payload_model_carries_the_gate_fields():
+    """The payload model names exactly the gate states the pipeline reports,
+    and every key of ``TurnResult.to_payload()`` is a field of the model."""
+    gate = TurnPayload.model_fields["safety_gate"].annotation
+    assert set(typing.get_args(typing.get_args(gate)[0])) == set(SAFETY_GATE_STATES)
+    result = TurnResult(
+        success=False,
+        response=None,
+        thinking=None,
+        conversation_id=None,
+        message_count=0,
+        timestamp=datetime(2000, 1, 1, tzinfo=timezone.utc),
+        error_code="blocked",
+        blocked=True,
+        safety_gate="applied",
+        safety_decision="emergency_shutdown",
+    )
+    payload = result.to_payload()
+    assert set(payload) <= set(TurnPayload.model_fields)
+    model = TurnPayload.model_validate(payload)
+    assert model.safety_gate == "applied"
+    assert model.safety_decision == "emergency_shutdown"
+    assert "safety_unavailable" in ERROR_CODES
+    assert ERROR_STATUS["safety_unavailable"] == 503
 
 
 def test_status_exposes_counters_timings_first_run_and_safety_components(served):

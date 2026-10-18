@@ -760,3 +760,293 @@ async def test_thought_listener_failure_counted_and_raises_under_debug(tmp_path)
     with pytest.raises(ValueError, match="listener bug"):
         await loud.broadcast_thought({"content": "a thought"})
     assert loud.listener_failures == 1
+
+
+@pytest.mark.asyncio
+async def test_turns_succeed_once_the_provider_recovers_without_a_restart(
+    tmp_path, token
+):
+    cfg = _settings(tmp_path, DEBUG=False)
+    registry = ProviderRegistry(
+        state_path=tmp_path / "data" / "provider_state.json", settings=cfg
+    )
+    provider = MockProvider(healthy=False)
+    registry.register(provider)
+    registry.set_active("mock")
+    brain = LLMBrain(registry=registry, settings=cfg)
+    # The interval itself is pinned in tests/brain; here the next call may
+    # re-check at once.
+    brain.health_recheck_s = 0.0
+    runtime = await _build(tmp_path, settings=cfg, brain=brain)
+    await runtime.start()
+    try:
+        first = await runtime.pipeline.send_message(
+            "hello", speaker="Operator", speaker_token=token
+        )
+        assert first.success is False
+        assert first.error_code == "brain_unavailable"
+        provider.healthy = True
+        second = await runtime.pipeline.send_message(
+            "hello again", speaker="Operator", speaker_token=token
+        )
+        assert second.success is True
+        assert second.response
+        assert runtime.status()["brain"]["available"] is True
+    finally:
+        await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_ctm_level_is_unavailable_until_the_baseline_is_measured(tmp_path, token):
+    runtime = await _build(tmp_path)
+    try:
+        assert runtime.ctm is not None and runtime.level_cache is not None
+        baseline = runtime.orchestrator.baseline
+        # the shape an insufficient assessment leaves before any guard: a
+        # 0.0 overall under status insufficient_data
+        baseline.overall_score = 0.0
+        baseline.status = "insufficient_data"
+        await runtime.ctm.tick()
+        status = runtime.ctm.get_status()
+        assert status["consciousness_level"] is None
+        assert status["modulation"] == "unavailable"
+        assert status["modulation_factor"] == 1.0
+        # a baseline that measured nothing yet reads no level either
+        runtime.level_cache.min_interval_s = 0.0
+        baseline.overall_score = None
+        baseline.status = "unmeasured"
+        assert await runtime.level_cache.level() is None
+        # a measured baseline hands its score to the machine
+        baseline.overall_score = 0.42
+        baseline.status = "partial"
+        assert await runtime.level_cache.level() == pytest.approx(0.42)
+    finally:
+        await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_sleep_prune_dry_run_setting_reaches_the_scheduler(tmp_path, token):
+    default = await _build(tmp_path)
+    try:
+        assert default.settings.SLEEP_PRUNE_DRY_RUN is False
+        assert default.sleep_scheduler is not None
+        assert default.sleep_scheduler.config.prune_dry_run is False
+    finally:
+        await default.stop()
+    dry = await _build(tmp_path, settings=_settings(tmp_path, SLEEP_PRUNE_DRY_RUN=True))
+    try:
+        assert dry.sleep_scheduler.config.prune_dry_run is True
+    finally:
+        await dry.stop()
+
+
+@pytest.mark.asyncio
+async def test_compass_has_no_brain_unless_deep_mode_is_on(tmp_path, token):
+    deep = await _build(tmp_path, settings=_settings(tmp_path, DEBUG=False))
+    try:
+        assert deep.settings.TRUST_COMPASS_DEEP_MODE is True
+        assert isinstance(deep.compass.brain, GatedBrain)
+        assert deep.compass.brain.background is False
+        assert deep.compass.status()["deep_mode"] is True
+        provider = deep.brain.registry.active()
+        before = len(provider.requests)
+        result = await deep.pipeline.send_message("What is the capital of France?")
+        assert result.success is True
+        # the neutral message passed the keyword screen: no reflection call,
+        # only the turn's own request
+        assert len(provider.requests) - before == 1
+        compass = deep.pipeline.status()["last_turn"]["safety_compass"]
+        assert compass == {"status": "not_needed", "method": None}
+    finally:
+        await deep.stop()
+    keyword = await _build(
+        tmp_path,
+        settings=_settings(tmp_path, DEBUG=False, TRUST_COMPASS_DEEP_MODE=False),
+    )
+    try:
+        assert keyword.compass.brain is None
+        status = keyword.compass.status()
+        assert status["deep_mode"] is False and status["backend"] == "keyword"
+    finally:
+        await keyword.stop()
+
+
+@pytest.mark.asyncio
+async def test_runtime_hands_its_goal_system_to_learning(tmp_path, token):
+    runtime = await _build(tmp_path)
+    try:
+        assert runtime.goals is not None
+        assert runtime.learning.goals is runtime.goals
+    finally:
+        await runtime.stop()
+
+
+async def _failing_neural_runtime(tmp_path, **overrides):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    runtime = await _build(tmp_path, settings=_settings(tmp_path, **overrides))
+    calls: List[str] = []
+
+    async def broken_shutdown():
+        calls.append("neural")
+        raise RuntimeError("shutdown bug")
+
+    memory_close = runtime.memory.close
+    brain_shutdown = runtime.brain.shutdown
+
+    async def close_memory():
+        calls.append("memory")
+        await memory_close()
+
+    async def shut_brain():
+        calls.append("brain")
+        await brain_shutdown()
+
+    runtime.neural.shutdown = broken_shutdown
+    runtime.memory.close = close_memory
+    runtime.brain.shutdown = shut_brain
+    pool = FakePool()
+    runtime.store_clients.append(("postgres_pool", pool))
+    return runtime, calls, pool
+
+
+@pytest.mark.asyncio
+async def test_stop_continues_after_a_failing_step(tmp_path, token):
+    runtime, calls, pool = await _failing_neural_runtime(tmp_path, DEBUG=False)
+    await runtime.start()
+    report = await runtime.stop()
+    assert calls == ["neural", "memory", "brain"]
+    assert pool.closed is True
+    assert report["errors"] == {"neural": "RuntimeError"}
+    assert runtime.stopped is True
+    assert runtime.last_stop_order == [
+        "background_tasks",
+        "conversations",
+        "hub_save",
+        "memory",
+        "store_clients",
+        "brain",
+    ]
+    assert not any(task.running for task in runtime.background)
+    # under DEBUG every step still runs, then the first error is raised
+    strict, strict_calls, strict_pool = await _failing_neural_runtime(
+        tmp_path / "strict", DEBUG=True
+    )
+    with pytest.raises(RuntimeError, match="shutdown bug"):
+        await strict.stop()
+    assert strict_calls == ["neural", "memory", "brain"]
+    assert strict_pool.closed is True
+    assert strict.stopped is True
+    assert "neural" not in strict.last_stop_order
+
+
+@pytest.mark.asyncio
+async def test_repository_fallback_is_reported(tmp_path, monkeypatch):
+    from mtc.memory import conversation_store
+    from mtc.memory.inmemory import InMemoryConversationRepository
+    from mtc.pipeline import runtime as runtime_module
+
+    report: Dict[str, Any] = {"enabled": True, "backend": "postgres", "error": None}
+    built = runtime_module._conversation_stores(FakePool(), None, report)
+    assert isinstance(built[0], conversation_store.PostgresConversationRepository)
+    assert report["in_memory_parts"] == []
+    assert report["error"] is None
+
+    class Broken:
+        def __init__(self, *args, **kwargs):
+            raise TypeError("constructor bug")
+
+    monkeypatch.setattr(conversation_store, "PostgresConversationRepository", Broken)
+    report = {"enabled": True, "backend": "postgres", "error": None}
+    repository, snapshots, audit = runtime_module._conversation_stores(
+        FakePool(), None, report
+    )
+    assert isinstance(repository, InMemoryConversationRepository)
+    assert report["in_memory_parts"] == ["conversations", "snapshots", "safety_audit"]
+    assert "TypeError" in report["error"]
+    # the memory stack still uses Postgres, so the backend keeps its name
+    assert report["backend"] == "postgres"
+    assert snapshots is not None and audit is not None
+    # without a pool every part is in memory by configuration, not by fallback
+    report = {"enabled": False, "backend": "memory", "error": None}
+    repository, _snapshots, _audit = runtime_module._conversation_stores(
+        None, None, report
+    )
+    assert isinstance(repository, InMemoryConversationRepository)
+    assert "in_memory_parts" not in report
+
+
+@pytest.mark.asyncio
+async def test_build_runtime_reports_the_repository_fallback(tmp_path, monkeypatch):
+    # Every enable key stays false; the memory factory is wrapped so that the
+    # stack carries a fake pool, which is what build_runtime hands to the
+    # conversation stores when Postgres is on.
+    import dataclasses
+
+    from mtc.memory import conversation_store
+    from mtc.memory.inmemory import InMemoryConversationRepository
+    from mtc.pipeline import runtime as runtime_module
+
+    real_factory = runtime_module.build_memory_manager
+
+    async def with_fake_pool(*args, **kwargs):
+        stack = await real_factory(*args, **kwargs)
+        return dataclasses.replace(stack, pool=FakePool())
+
+    monkeypatch.setattr(runtime_module, "build_memory_manager", with_fake_pool)
+    runtime = await _build(tmp_path)
+    try:
+        postgres = runtime.stores["postgres"]
+        assert postgres["in_memory_parts"] == []
+        assert isinstance(
+            runtime.repository, conversation_store.PostgresConversationRepository
+        )
+    finally:
+        await runtime.stop()
+
+    class Broken:
+        def __init__(self, *args, **kwargs):
+            raise TypeError("constructor bug")
+
+    monkeypatch.setattr(conversation_store, "PostgresConversationRepository", Broken)
+    fallback = await _build(tmp_path)
+    try:
+        postgres = fallback.stores["postgres"]
+        assert postgres["in_memory_parts"] == [
+            "conversations",
+            "snapshots",
+            "safety_audit",
+        ]
+        assert "TypeError" in postgres["error"]
+        assert isinstance(fallback.repository, InMemoryConversationRepository)
+    finally:
+        await fallback.stop()
+
+
+@pytest.mark.asyncio
+async def test_live_workspace_runs_on_the_elapsed_clock(tmp_path, token):
+    from datetime import datetime, timedelta, timezone
+
+    moments = [datetime(2000, 1, 1, 12, 0, tzinfo=timezone.utc)]
+    runtime = await _build(tmp_path, clock=lambda: moments[0])
+    try:
+        workspace = runtime.workspace
+        assert workspace.refractory_clock == "elapsed"
+        # the workspace reads the runtime's clock, in seconds
+        assert workspace.clock() == moments[0].timestamp()
+        moments[0] += timedelta(minutes=1)
+        assert workspace.clock() == moments[0].timestamp()
+    finally:
+        await runtime.stop()
+    # another gwt key keeps the elapsed default; the operator's choice wins
+    other = await _build(tmp_path, overrides={"gwt": {"capacity": 5}})
+    try:
+        assert other.workspace.refractory_clock == "elapsed"
+    finally:
+        await other.stop()
+    pinned = await _build(
+        tmp_path, overrides={"gwt": {"refractory_clock": "per_cycle"}}
+    )
+    try:
+        assert pinned.workspace.refractory_clock == "per_cycle"
+    finally:
+        await pinned.stop()

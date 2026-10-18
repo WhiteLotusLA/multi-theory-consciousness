@@ -6,7 +6,10 @@ Pydantic models for every HTTP route and every websocket frame type.
 
 Request models forbid unknown fields and cap their text: a chat message at
 ``MAX_MESSAGE_CHARS`` (32000) characters, a speaker name at
-``MAX_SPEAKER_CHARS`` (200). A websocket frame is a JSON text frame
+``MAX_SPEAKER_CHARS`` (200). A speaker name that holds a control character,
+a line separator or a paragraph separator is refused with a fixed message
+that does not quote it (the HTTP route answers 422, the websocket an
+``invalid_message`` error). A websocket frame is a JSON text frame
 ``{"type", "data"}`` of at most ``MAX_FRAME_BYTES`` (1 MiB). The speaker
 token of a websocket ``message`` frame is a ``SecretStr``, so its value is
 hidden from every repr and validation message; it is read once, to hand it
@@ -24,11 +27,20 @@ names and tokens are private at runtime.
 
 import dataclasses
 import enum
+import logging
 import math
+import unicodedata
 from datetime import date, datetime
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+)
 
 MAX_MESSAGE_CHARS = 32000
 MAX_SPEAKER_CHARS = 200
@@ -38,6 +50,8 @@ MAX_REQUEST_ID_CHARS = 128
 MAX_TOKEN_CHARS = 512
 MAX_TOP_K = 50
 MAX_FRAME_BYTES = 1024 * 1024
+
+logger = logging.getLogger(__name__)
 
 THOUGHT_STATES: Tuple[str, ...] = ("awake", "drowsy", "dreaming", "deep_sleep")
 
@@ -64,6 +78,7 @@ ERROR_CODES: Tuple[str, ...] = (
     "blocked",
     "no_answer",
     "brain_unavailable",
+    "safety_unavailable",
     "generation_timeout",
     "turn_failed",
     "runtime_not_ready",
@@ -75,6 +90,26 @@ ERROR_CODES: Tuple[str, ...] = (
 
 class _Request(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+# Unicode categories a speaker name may not hold: the control characters and
+# the line and paragraph separators, each of which could break the one line
+# the name is rendered on.
+SPEAKER_REFUSED_CATEGORIES: Tuple[str, ...] = ("Cc", "Zl", "Zp")
+SPEAKER_REFUSED_MESSAGE = (
+    "the speaker name must not contain control characters or line breaks"
+)
+
+
+def _refuse_control_characters(value: Optional[str]) -> Optional[str]:
+    """``value`` unchanged, or a ValueError with a fixed message (never the
+    value) when it holds a character of ``SPEAKER_REFUSED_CATEGORIES``."""
+    if value is None:
+        return value
+    for character in value:
+        if unicodedata.category(character) in SPEAKER_REFUSED_CATEGORIES:
+            raise ValueError(SPEAKER_REFUSED_MESSAGE)
+    return value
 
 
 class _Response(BaseModel):
@@ -171,6 +206,11 @@ class ChatRequest(_Request):
     message: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
     speaker: Optional[str] = Field(default=None, max_length=MAX_SPEAKER_CHARS)
 
+    @field_validator("speaker")
+    @classmethod
+    def _speaker_on_one_line(cls, value: Optional[str]) -> Optional[str]:
+        return _refuse_control_characters(value)
+
 
 class MemorySearchRequest(_Request):
     """``POST /api/memory/search``."""
@@ -185,6 +225,18 @@ class ConceptRelatedRequest(_Request):
     name: str = Field(min_length=1, max_length=MAX_CONCEPT_CHARS)
 
 
+class SafetyResumeRequest(_Request):
+    """``POST /api/safety/resume``: who asks; the speaker token travels in
+    ``X-Speaker-Token``."""
+
+    speaker: str = Field(min_length=1, max_length=MAX_SPEAKER_CHARS)
+
+    @field_validator("speaker")
+    @classmethod
+    def _speaker_on_one_line(cls, value: str) -> str:
+        return _refuse_control_characters(value)
+
+
 class CTMStartRequest(_Request):
     """``POST /api/ctm/start``: optionally the thought mode to start in."""
 
@@ -197,14 +249,25 @@ class CTMStartRequest(_Request):
 
 
 class HealthResponse(_Response):
-    status: Literal["ok", "degraded"]
+    """``GET /health``; ``brain_verified`` is None for a brain that keeps no
+    health record."""
+
+    status: Literal["ok", "unverified", "degraded"]
     ready: bool
     version: str
+    brain_verified: Optional[bool] = None
 
 
 class TurnPayload(_Response):
     """``TurnResult.to_payload()``: the display label only, never identity
-    internals or tokens."""
+    internals or tokens.
+
+    ``safety_gate`` is the state of the safety gate for the turn (``absent``,
+    ``bypassed``, ``applied`` or ``unchecked``; None for a result built
+    outside the pipeline); ``safety_decision`` is the safety monitor's
+    decision for a blocked turn (``emergency_shutdown`` when the untrusted
+    conversations are suspended) and None otherwise.
+    """
 
     success: bool
     response: Optional[str] = None
@@ -218,6 +281,16 @@ class TurnPayload(_Response):
     speaker_label: str = ""
     provider_id: Optional[str] = None
     blocked: bool = False
+    safety_gate: Optional[Literal["absent", "bypassed", "applied", "unchecked"]] = None
+    safety_decision: Optional[str] = None
+
+
+class SafetyResumeResponse(_Response):
+    """``POST /api/safety/resume``: whether a suspension was lifted, and
+    whether the untrusted conversations are suspended now."""
+
+    resumed: bool
+    suspended: bool
 
 
 class TimeoutPayload(_Response):
@@ -370,6 +443,11 @@ class WSMessageData(_Request):
     speaker_token: Optional[SecretStr] = Field(default=None, max_length=MAX_TOKEN_CHARS)
     request_id: Optional[str] = Field(default=None, max_length=MAX_REQUEST_ID_CHARS)
 
+    @field_validator("speaker")
+    @classmethod
+    def _speaker_on_one_line(cls, value: Optional[str]) -> Optional[str]:
+        return _refuse_control_characters(value)
+
 
 class ServerFrame(BaseModel):
     """A frame to the client: ``{"type", "data"}``."""
@@ -395,6 +473,7 @@ class StatusData(_Response):
     version: str
     client_authenticated: bool
     brain_available: Optional[bool] = None
+    brain_verified: Optional[bool] = None
     max_frame_bytes: int = MAX_FRAME_BYTES
     heartbeat_s: Optional[float] = None
 
@@ -420,10 +499,18 @@ class ErrorData(_Response):
 
 
 class SpontaneousThoughtData(_Response):
+    """A thought the continuous thought machine expressed. ``salience_basis``
+    names what ``salience`` rests on and ``form`` whether the text is a
+    template, a model's or injected; each is None when the record lacks it."""
+
     thought_id: str
     content: str
     thought_type: str
     timestamp: Optional[str] = None
+    intensity: Optional[str] = None
+    salience: Optional[float] = None
+    salience_basis: Optional[str] = None
+    form: Optional[str] = None
 
 
 class PongData(_Response):
@@ -457,6 +544,76 @@ _CONTENT_FIELDS: Tuple[str, ...] = (
     "posterior_mappings",
     "beautiful_loop_moment",
 )
+
+
+# ---------------------------------------------------------------------------
+# Brain health (shared by /health and the websocket status frame)
+# ---------------------------------------------------------------------------
+
+
+# The brain has a status reader, but reading it raised: no confirmation can be
+# read, so the brain is reported unverified, never ok on availability alone.
+_UNREADABLE: Dict[str, Any] = {}
+
+
+def _health_record(brain: Any) -> Optional[Dict[str, Any]]:
+    """The brain's status when it keeps a health record (its ``health`` names
+    ``verified``, as ``LLMBrain.status()`` does); ``_UNREADABLE`` when its
+    status reader raised (logged at DEBUG); None otherwise."""
+    reader = getattr(brain, "status", None)
+    if not callable(reader):
+        return None
+    try:
+        status = reader()
+    except Exception as exc:  # noqa: BLE001 - reported as unverified
+        logger.debug("brain status could not be read: %s", type(exc).__name__)
+        return _UNREADABLE
+    health = status.get("health") if isinstance(status, dict) else None
+    if not isinstance(health, dict) or "verified" not in health:
+        return None
+    return status
+
+
+def _verified(status: Dict[str, Any]) -> bool:
+    if status is _UNREADABLE:
+        return False
+    health = status["health"]
+    return (health.get("verified") is True and health.get("ok") is True) or (
+        status.get("last_call_ok") is True
+    )
+
+
+def brain_verified(brain: Any) -> Optional[bool]:
+    """Whether a real exchange confirmed the provider answers.
+
+    True when the brain's recorded health came from a real exchange that
+    succeeded (``verified`` and ``ok``) or its last real provider call
+    returned a completion (``last_call_ok``); False when it keeps a health
+    record and neither holds, or when its status could not be read; None for
+    a brain that keeps no health record.
+    """
+    status = _health_record(brain)
+    return None if status is None else _verified(status)
+
+
+def health_status(ready: bool, brain: Any) -> Tuple[str, Optional[bool]]:
+    """``(status, brain_verified)`` for ``/health``.
+
+    ``degraded`` while the runtime is not ready, while the brain is not
+    available, or after its last real call failed; ``ok`` when it is
+    available and verified (``brain_verified``); otherwise ``unverified``
+    (a brain whose status cannot be read included). A brain without a health
+    record keeps the availability rule alone: ``ok`` when ready and
+    available, else ``degraded``.
+    """
+    available = getattr(brain, "available", None)
+    status = _health_record(brain)
+    if status is None:
+        return ("ok" if ready and available is True else "degraded"), None
+    verified = _verified(status)
+    if not ready or available is not True or status.get("last_call_ok") is False:
+        return "degraded", verified
+    return ("ok" if verified else "unverified"), verified
 
 
 def latest_state(runtime: Any) -> Optional[Any]:

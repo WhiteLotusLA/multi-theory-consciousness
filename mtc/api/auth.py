@@ -28,9 +28,15 @@ The speaker token is a separate secret with its own carriers
 message frame); it is handed to the speaker trust source unchanged and is
 never compared, logged or interpreted here.
 
+With ``API_AUTH_ENABLED`` false a websocket handshake that sends an
+``Origin`` header not in ``API_CORS_ORIGINS`` is refused the same way (1008,
+the neutral reason); a handshake without an Origin header (a client that is
+not a browser) is unchanged.
+
 Config keys read at call time from the application's Settings:
-``API_AUTH_ENABLED``, ``API_KEY`` and ``API_HOST``. Nothing is persisted. No
-key, token or any part of one is ever written to a log line or a response.
+``API_AUTH_ENABLED``, ``API_KEY``, ``API_HOST`` and ``API_CORS_ORIGINS``.
+Nothing is persisted. No key, token or any part of one is ever written to a
+log line or a response.
 """
 
 import logging
@@ -178,16 +184,44 @@ async def require_api_key(request: Request) -> None:
     raise HTTPException(status_code=code, detail=reason, headers=headers)
 
 
+def _normalize_origin(origin: str) -> str:
+    return str(origin).strip().lower().rstrip("/")
+
+
+def ws_origin_allowed(cfg: Settings, origin: Optional[str]) -> bool:
+    """Whether a websocket handshake's ``Origin`` header may connect.
+
+    True when no Origin header was sent (a client that is not a browser) and
+    when the header equals one of ``API_CORS_ORIGINS_LIST`` after lower-casing
+    and stripping a trailing slash; False otherwise, the literal ``null`` (a
+    sandboxed page or a local file) included.
+    """
+    if origin is None:
+        return True
+    presented = _normalize_origin(origin)
+    if not presented or presented == "null":
+        return False
+    listed = {_normalize_origin(item) for item in cfg.API_CORS_ORIGINS_LIST}
+    listed.discard("")
+    return presented in listed
+
+
 def ws_api_key_valid(websocket: Any) -> Tuple[bool, int, str]:
     """``(allowed, close_code, reason)`` for a websocket handshake.
 
     The key is read from the ``X-API-Key`` header only; a key in the query
     string is ignored, so a handshake that carries it there is refused as
-    missing. A refusal closes with 1008 (policy violation) and the neutral
-    ``WS_REFUSAL_REASON`` whatever the cause.
+    missing. With ``API_AUTH_ENABLED`` false the handshake's ``Origin`` must
+    pass ``ws_origin_allowed``, because a browser page from any origin can
+    open a websocket (CORS does not apply to it); with authentication on the
+    key decides and the Origin is not read. A refusal closes with 1008
+    (policy violation) and the neutral ``WS_REFUSAL_REASON`` whatever the
+    cause.
     """
     cfg = settings_for(getattr(websocket, "app", None))
     allowed, _code, _reason = check_api_key(cfg, websocket.headers.get(API_KEY_HEADER))
+    if allowed and not cfg.API_AUTH_ENABLED:
+        allowed = ws_origin_allowed(cfg, websocket.headers.get("origin"))
     if allowed:
         return True, WS_NORMAL, ""
     return False, WS_POLICY_VIOLATION, WS_REFUSAL_REASON
@@ -197,8 +231,10 @@ def client_authenticated(cfg: Settings, presented: Optional[str]) -> bool:
     """True only when auth is on and the presented key is the configured one.
 
     A connection on a server with auth disabled is allowed but is not an
-    authenticated client, so nothing restricted to authenticated clients
-    reaches it.
+    authenticated client. The only content withheld from a connection that is
+    not an authenticated client is the ``spontaneous_thought`` frame;
+    ``consciousness_state`` frames go to every subscriber, as the state route
+    serves the same payload to every caller the route admits.
     """
     if not cfg.API_AUTH_ENABLED or not cfg.API_KEY or not presented:
         return False

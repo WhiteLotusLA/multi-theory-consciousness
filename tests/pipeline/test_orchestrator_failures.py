@@ -259,6 +259,145 @@ def test_absent_signals_named_after_first_cycle():
     assert absent["rpt_deep_recurrence"] == "no_producer"
 
 
+class _FlakyRPT:
+    """Raises on the cycles listed in ``fail_on``; otherwise returns the
+    scripted metrics (None: ran cleanly and measured nothing)."""
+
+    def __init__(self, fail_on, metrics=None):
+        self.fail_on = set(fail_on)
+        self.metrics = metrics
+        self.measurement_count = 0
+        self.calls = 0
+
+    def set_oscillatory_binding_stats(self, stats):
+        pass
+
+    def measure_full(self, **kwargs):
+        self.calls += 1
+        if self.calls in self.fail_on:
+            raise RuntimeError("rpt broke")
+        return self.metrics
+
+
+class _FlakyMonitor:
+    def __init__(self, fail_on):
+        self.fail_on = set(fail_on)
+        self.calls = 0
+
+    def record_signal(self, *args, **kwargs):
+        pass
+
+    def discrimination(self):
+        self.calls += 1
+        if self.calls in self.fail_on:
+            raise ValueError("monitor broke")
+        return None
+
+
+class _FlakyAnalyzer:
+    def __init__(self, fail_on):
+        self.fail_on = set(fail_on)
+        self.calls = 0
+
+    def analyze_modules(self, tracker):
+        self.calls += 1
+        if self.calls in self.fail_on:
+            raise RuntimeError("analyzer broke")
+        return None
+
+
+def test_failed_producer_is_named_failed_not_warming_up():
+    from mtc.pipeline.consciousness_orchestrator import OrchestratorConfig
+
+    rpt = _FlakyRPT(fail_on={1})
+    monitor = _FlakyMonitor(fail_on={1})
+    analyzer = _FlakyAnalyzer(fail_on={1})
+    orchestrator = _build(
+        rpt_measurement=rpt,
+        reality_monitor=monitor,
+        causal_emergence=analyzer,
+        config=OrchestratorConfig(
+            rpt_every_n_cycles=1, causal_emergence_every_n_cycles=1
+        ),
+    )
+    failed = _turn(orchestrator)
+    assert failed.cycle_ok
+    absent = failed.absent_signals
+    assert absent["rpt_deep_recurrence"] == "failed"
+    assert absent["rpt_superficial_recurrence"] == "failed"
+    assert absent["prm_discrimination"] == "failed"
+    assert absent["causal_emergence"] == "failed"
+    assert set(orchestrator.status()["failures"]) == {
+        "rpt",
+        "reality_monitor",
+        "causal_emergence",
+    }
+    # The next clean cycle returns to the configured reasons: the cadence
+    # step ran and measured nothing (no input), the monitor and the analyzer
+    # are warming up
+    clean = _turn(orchestrator)
+    absent = clean.absent_signals
+    assert absent["rpt_deep_recurrence"] == "no_input"
+    assert absent["prm_discrimination"] == "warming_up"
+    assert absent["causal_emergence"] == "warming_up"
+    assert "failed" not in absent.values()
+
+    # A failed PAD computation is named failed, then measured again
+    class _FlakyPAD(PADAffectModel):
+        calls = 0
+
+        def compute(self, sources, measured=None):
+            type(self).calls += 1
+            if type(self).calls == 1:
+                raise RuntimeError("pad broke")
+            return super().compute(sources, measured)
+
+    pad = _build(augmenter_config=CycleAugmenterConfig())
+    pad.augmenter._pad_model = _FlakyPAD()
+    first = _turn(pad)
+    assert first.absent_signals["pad_arousal"] == "failed"
+    assert pad.status()["failures"] == {"augment_after": 1}
+    second = _turn(pad)
+    assert "pad_arousal" not in second.absent_signals
+
+
+def test_cadence_cycle_that_measured_nothing_reads_no_input():
+    from mtc.pipeline.consciousness_orchestrator import OrchestratorConfig
+
+    orchestrator = _build(
+        rpt_measurement=_FlakyRPT(fail_on=set()),
+        config=OrchestratorConfig(rpt_every_n_cycles=2),
+    )
+    off_cadence, on_cadence = _turn(orchestrator), _turn(orchestrator)
+    assert off_cadence.absent_signals["rpt_deep_recurrence"] == "cadence_not_reached"
+    assert on_cadence.absent_signals["rpt_deep_recurrence"] == "no_input"
+
+
+class _StateWorkspace(EnhancedGlobalWorkspace):
+    """A real workspace whose cycle returns a state with no dominance input:
+    no meta reading, no classified attention shift, no loop moment."""
+
+    async def process_consciousness_cycle(self, candidates, neural_signals=None, **kw):
+        state = await super().process_consciousness_cycle(
+            candidates, neural_signals=neural_signals, **kw
+        )
+        state.active_inference_state = None
+        state.attention_schema = None
+        state.beautiful_loop_moment = None
+        return state
+
+
+def test_unmeasured_pad_dimension_is_named_no_input():
+    orchestrator = _build(workspace=_StateWorkspace(thalamic_gate_enabled=False))
+    context = _turn(orchestrator)
+    state = context.consciousness_state
+    assert state.pad_dominance is None and state.pad_label is None
+    assert "ignition_rate" in context.pad_sources_measured
+    for name in ("pad_pleasure", "pad_arousal", "pad_dominance", "pad_label"):
+        assert context.absent_signals[name] == "no_input", name
+    assert "augment_after" not in orchestrator.status()["failures"]
+
+
 def test_state_dict_round_trip():
     orchestrator = _build(state_manager=_FailingManager())
     _turn(orchestrator)
@@ -304,3 +443,42 @@ def test_state_dict_round_trip():
     empty.from_state_dict({"scalars": {}, "arrays": {}, "histories": {}})
     assert empty.baseline.measured is False
     assert empty.baseline_due is True
+
+
+class _UnmeasuredPAD(PADAffectModel):
+    """A PAD model whose dimensions have no measured input this cycle."""
+
+    def compute(self, sources, measured=None):
+        return None
+
+
+def _break_gate_arousal(monkeypatch):
+    """Makes the augmenter's gate arousal sub-step raise; it runs after the
+    PAD computation inside the same orchestrator step."""
+    import mtc.pipeline.cycle_augmenter as augmenter_module
+
+    def _raise(state):
+        raise RuntimeError("gate arousal broke")
+
+    monkeypatch.setattr(augmenter_module, "protoself_arousal", _raise)
+
+
+def test_disabled_pad_is_not_named_failed_by_another_augment_failure(monkeypatch):
+    _break_gate_arousal(monkeypatch)
+    orchestrator = _build(augmenter_config=CycleAugmenterConfig(pad_from_state=False))
+    context = _turn(orchestrator)
+    assert orchestrator.status()["failures"] == {"augment_after": 1}
+    assert context.absent_signals["pad_arousal"] == "disabled"
+    assert context.absent_signals["pad_label"] == "disabled"
+
+
+def test_unmeasured_pad_before_a_later_augment_failure_reads_no_input(monkeypatch):
+    _break_gate_arousal(monkeypatch)
+    orchestrator = _build()
+    orchestrator.augmenter._pad_model = _UnmeasuredPAD()
+    context = _turn(orchestrator)
+    assert orchestrator.status()["failures"] == {"augment_after": 1}
+    # The PAD computation itself returned (no measured input); the failure
+    # belongs to the gate arousal sub-step that ran after it
+    assert context.absent_signals["pad_arousal"] == "no_input"
+    assert context.absent_signals["pad_pleasure"] == "no_input"

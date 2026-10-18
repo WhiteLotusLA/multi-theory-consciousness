@@ -4,9 +4,8 @@ Multi-Theory Consciousness Pipeline
 ===================================
 
 Wires the theory modules together by hand for one stimulus, then assesses
-them. The framework implements eight theories; six have modules wired below,
-and the assessment measures the other two (IIT and Recurrent Processing) and
-Agency and Embodiment from module statistics:
+them. The framework implements eight theories, and six have modules wired
+below:
 
 1. GWT: the enhanced global workspace (competition, ignition, broadcast)
 2. AST: the attention schema (a model of attention)
@@ -16,6 +15,10 @@ Agency and Embodiment from module statistics:
 6. Damasio's three layers (protoself, core and extended consciousness), which
    has no indicator of its own
 
+Of the other theories, the assessment reads part of Recurrent Processing and
+Agency and Embodiment from module statistics, and the IIT indicators are
+absent here because no Phi input is passed.
+
 The assessment defines 30 positive and 3 negative indicators. After a single
 cycle some of them still read ``insufficient_data`` (for example the error
 trend needs 10 prediction errors) and others ``absent`` (no RPT, PAD or Phi
@@ -24,7 +27,8 @@ input is passed here); the script prints how many of each. The live runtime
 ``examples/full_pipeline_demo.py``. Scores describe functional architecture,
 not experience.
 
-Needs the ``fep`` extra (pymdp). Opens no network connection.
+Needs the ``fep`` extra (pymdp); without it the example prints one line that
+names the extra and exits 2. Opens no network connection.
 
 Usage:
     python examples/multi_theory_pipeline.py
@@ -32,10 +36,12 @@ Usage:
 
 import asyncio
 import logging
+import sys
 
 import numpy as np
 
 from mtc.assessment.assessment import ConsciousnessAssessment
+from mtc.cli.missing_extra import explain_missing_extra
 from mtc.consciousness.active_inference import ActiveInferenceModule
 from mtc.consciousness.attention_schema import (
     AttentionSchemaModule,
@@ -58,7 +64,12 @@ from mtc.consciousness.metacognition import (
 logging.basicConfig(level=logging.WARNING)
 
 
-async def main():
+def _reading(value):
+    """A measured number to three places, or "not measured" for None."""
+    return "not measured" if value is None else f"{value:.3f}"
+
+
+async def run():
     rng = np.random.default_rng(7)
 
     # 1. The theory modules.
@@ -157,9 +168,9 @@ async def main():
         workspace_winners=state.workspace_contents,
         inference_result=inference,
     )
-    print(f"    Loop quality:       {moment.loop_quality:.3f}")
+    print(f"    Loop quality:       {_reading(moment.loop_quality)}")
     print(f"    Epistemic depth:    {moment.epistemic_depth}")
-    print(f"    Binding quality:    {moment.binding_quality:.3f}")
+    print(f"    Binding quality:    {_reading(moment.binding_quality)}")
 
     # 8. Damasio: the three layers over the drives and the winners.
     print("\n  Damasio: three layers")
@@ -167,9 +178,12 @@ async def main():
         homeostatic_drives=active_inference.homeostatic_drives,
         workspace_winners=state.workspace_contents,
     )
-    print(f"    Protoself stability:       {layers['protoself_stability']:.3f}")
-    print(f"    Self-world binding:        {layers['self_world_binding']:.3f}")
-    print(f"    Autobiographic continuity: {layers['autobiographic_continuity']:.3f}")
+    print(f"    Protoself stability:       {_reading(layers['protoself_stability'])}")
+    print(f"    Self-world binding:        {_reading(layers['self_world_binding'])}")
+    print(
+        "    Autobiographic continuity: "
+        f"{_reading(layers['autobiographic_continuity'])}"
+    )
 
     # 9. The assessment over the wired modules.
     print("\n  Assessment")
@@ -198,5 +212,20 @@ async def main():
     print("\n" + "=" * 64 + "\n")
 
 
+def main() -> int:
+    """Run the example; on an install without the ``fep`` extra print the one
+    line that names it to stderr and return 2 (any other ImportError is
+    raised)."""
+    try:
+        asyncio.run(run())
+    except ImportError as exc:
+        line = explain_missing_extra(exc)
+        if line is None:
+            raise
+        print(line, file=sys.stderr)
+        return 2
+    return 0
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(main())

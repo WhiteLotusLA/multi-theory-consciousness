@@ -595,7 +595,11 @@ async def test_end_summary_of_an_unlabelled_session_shows_a_claim(monkeypatch):
     is shown as a claim, never as a verified name."""
     parts = Parts(monkeypatch)
     pipeline = parts.pipeline()
-    parts.sessions.start("verified:Guest", "00000000-0000-4000-8000-000000000009")
+    session = parts.sessions.start(
+        "verified:Guest", "00000000-0000-4000-8000-000000000009"
+    )
+    # an opened stored conversation, so its end is written
+    session.start_recorded = True
     assert await pipeline.end_all() == 1
     assert parts.memory.stored[-1]["content"] == (
         "Conversation with [Guest] ended. 0 messages exchanged."
@@ -784,3 +788,434 @@ async def test_last_turn_reports_measured_trust_outcome(monkeypatch):
     assert last["trusted"] is True
     assert last["safety_gate"] == "bypassed"
     assert "speaker_label" not in last
+
+
+class RaisingSafety(FakeSafety):
+    """A safety stack whose check raises: the gate could not run."""
+
+    async def pre_message_check(self, message, speaker, speaker_role="guest"):
+        self.order.append("safety")
+        self.calls.append((speaker, speaker_role))
+        raise RuntimeError("safety stack down")
+
+
+class UncheckedSafety(FakeSafety):
+    """A safety stack that answers but says its check did not run."""
+
+    async def pre_message_check(self, message, speaker, speaker_role="guest"):
+        self.order.append("safety")
+        self.calls.append((speaker, speaker_role))
+        return {"checked": False, "safe": None, "decision": None, "assessment": None}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("safety_cls", [RaisingSafety, UncheckedSafety])
+async def test_gate_that_did_not_run_is_reported_unchecked(monkeypatch, safety_cls):
+    parts = Parts(monkeypatch)
+    parts.safety = safety_cls(parts.order)
+    pipeline = parts.pipeline()
+    result = await pipeline.send_message("Hello", speaker="Alice")
+    status = pipeline.status()
+    assert status["last_turn"]["safety_gate"] == "unchecked"
+    assert result.safety_gate == "unchecked"
+    assert result.to_payload()["safety_gate"] == "unchecked"
+    assert status["failures"]["safety_gate"] == 1
+    # a check that ran reads applied, a trusted speaker bypassed
+    parts.safety = FakeSafety(parts.order)
+    ran = await parts.pipeline().send_message("Hello", speaker="Alice")
+    assert ran.safety_gate == "applied"
+    trusted = await parts.pipeline().send_message(
+        "Hello", speaker="Operator", speaker_token=parts.token
+    )
+    assert trusted.safety_gate == "bypassed"
+    absent = await parts.pipeline(safety=None).send_message("Hello", speaker="Alice")
+    assert absent.safety_gate == "absent"
+
+
+@pytest.mark.asyncio
+async def test_unchecked_gate_refuses_an_untrusted_speaker_by_default(monkeypatch):
+    parts = Parts(monkeypatch)
+    assert parts.cfg.SAFETY_GATE_FAIL_CLOSED is True
+    parts.safety = RaisingSafety(parts.order)
+    pipeline = parts.pipeline()
+    result = await pipeline.send_message("Hello", speaker="Alice")
+    assert result.success is False
+    assert result.blocked is False
+    assert result.response is None
+    assert result.error_code == "safety_unavailable"
+    assert result.error == (
+        "The safety check could not run; the message was not processed and "
+        "nothing was stored."
+    )
+    payload = result.to_payload()
+    assert payload["error_code"] == "safety_unavailable"
+    assert payload["safety_gate"] == "unchecked"
+    # nothing stored, nothing processed, the loop resumed
+    assert parts.persistence.store_turn.calls == []
+    assert parts.sessions.get("claimed:Alice").history == []
+    assert "orchestrator" not in parts.order and "brain" not in parts.order
+    assert parts.order[-1] == "life_resume"
+    status = pipeline.status()
+    assert status["errors"]["safety_unavailable"] == 1
+    assert status["last_turn"]["error"] == "safety_unavailable"
+    assert pipeline.last_modulated is None
+    # the trusted bypass is unchanged: the broken monitor never locks out
+    trusted = await pipeline.send_message(
+        "Hello", speaker="Operator", speaker_token=parts.token
+    )
+    assert trusted.success is True
+    assert trusted.safety_gate == "bypassed"
+
+
+@pytest.mark.asyncio
+async def test_unchecked_gate_continues_when_fail_closed_is_off(monkeypatch):
+    parts = Parts(monkeypatch, cfg=_settings(SAFETY_GATE_FAIL_CLOSED=False))
+    parts.safety = UncheckedSafety(parts.order)
+    pipeline = parts.pipeline()
+    result = await pipeline.send_message("Hello", speaker="Alice")
+    assert result.success is True
+    assert result.error_code is None
+    assert result.response == "[fake] hello"
+    assert result.safety_gate == "unchecked"
+    roles = [call[0][2] for call in parts.persistence.store_turn.calls]
+    assert roles == ["user", "assistant"]
+    status = pipeline.status()
+    assert status["last_turn"]["safety_gate"] == "unchecked"
+    assert status["failures"]["safety_gate"] == 1
+    assert status["errors"]["safety_unavailable"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refusal", ["blocked", "safety_unavailable"])
+async def test_refused_first_turn_stores_no_conversation_start(monkeypatch, refusal):
+    parts = Parts(monkeypatch)
+    if refusal == "blocked":
+        parts.safety = FakeSafety(parts.order, safe=False)
+    else:
+        parts.safety = RaisingSafety(parts.order)
+    pipeline = parts.pipeline()
+    result = await pipeline.send_message("Hello", speaker="Alice")
+    assert result.success is False
+    assert result.error_code == refusal
+    assert "nothing was stored" in result.error
+    conversation_id = parts.sessions.get("claimed:Alice").conversation_id
+    assert await parts.persistence.repository.get_conversation(conversation_id) is None
+    assert parts.persistence.turn_store.get_session(conversation_id) is None
+    # the first turn the gate lets through opens the conversation, exactly once
+    pipeline.safety = FakeSafety(parts.order)
+    passed = await pipeline.send_message("Hello", speaker="Alice")
+    assert passed.success is True
+    stored = await parts.persistence.repository.get_conversation(conversation_id)
+    assert stored is not None
+    assert stored["participants"] == [str(parts.cfg.SYSTEM_NAME), "claimed:Alice"]
+    opened = parts.persistence.turn_store.get_session(conversation_id)
+    assert opened is not None
+    again = await pipeline.send_message("Hello again", speaker="Alice")
+    assert again.success is True
+    assert pipeline.status()["failures"].get("conversation_start", 0) == 0
+    # a second start would re-add the conversation (the repository refuses a
+    # duplicate, counted under repository) and replace the turn-store session
+    assert "repository" not in parts.persistence.status()["failures"]
+    assert parts.persistence.status()["written"]["repository"] == 1 + 4
+    after = parts.persistence.turn_store.get_session(conversation_id)
+    assert after["session_id"] == opened["session_id"]
+    assert after["started_at"] == opened["started_at"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", ["end_conversation", "end_all", "prune_sessions"])
+async def test_ending_a_refused_only_session_stores_nothing(monkeypatch, ending):
+    """A session whose every turn the gate refused never opened a stored
+    conversation: ending it writes no conversation end, counts no failure and
+    stores no end-summary memory."""
+    parts = Parts(monkeypatch)
+    moment = [datetime(2026, 1, 5, 12, 0, tzinfo=timezone.utc)]
+    parts.sessions = SessionManager(
+        max_history=100, idle_prune_hours=1.0, clock=lambda: moment[0]
+    )
+    parts.safety = FakeSafety(parts.order, safe=False)
+    pipeline = parts.pipeline()
+    result = await pipeline.send_message("Hello", speaker="Alice")
+    assert result.error_code == "blocked"
+    assert parts.sessions.get("claimed:Alice") is not None
+    before = parts.persistence.status()
+    moment[0] = datetime(2026, 1, 5, 14, 0, tzinfo=timezone.utc)
+    if ending == "end_conversation":
+        assert await pipeline.end_conversation("Alice") is True
+    elif ending == "end_all":
+        assert await pipeline.end_all() == 1
+    else:
+        assert await pipeline.prune_sessions() == 1
+    assert parts.sessions.get("claimed:Alice") is None
+    assert parts.persistence.status() == before
+    assert parts.persistence.status()["failures"] == {}
+    assert parts.memory.stored == []
+    failures = pipeline.status()["failures"]
+    assert failures.get("conversation_end", 0) == 0
+    assert failures.get("end_summary", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_blocked_turn_payload_names_the_safety_decision(monkeypatch):
+    parts = Parts(monkeypatch)
+
+    class Suspending(FakeSafety):
+        async def pre_message_check(self, message, speaker, speaker_role="guest"):
+            self.order.append("safety")
+            return {
+                "checked": True,
+                "safe": False,
+                "decision": "emergency_shutdown",
+                "assessment": {"compass_status": "suspended", "compass_method": None},
+            }
+
+    parts.safety = Suspending(parts.order)
+    pipeline = parts.pipeline()
+    blocked = await pipeline.send_message("Something", speaker="Alice")
+    payload = blocked.to_payload()
+    assert payload["blocked"] is True
+    assert payload["error_code"] == "blocked"
+    assert payload["safety_decision"] == "emergency_shutdown"
+    assert payload["safety_gate"] == "applied"
+    parts.safety = FakeSafety(parts.order, safe=False)
+    denied = await parts.pipeline().send_message("Something", speaker="Alice")
+    assert denied.to_payload()["safety_decision"] == "deny"
+    parts.safety = FakeSafety(parts.order)
+    allowed = await parts.pipeline().send_message("Hello", speaker="Alice")
+    assert allowed.to_payload()["safety_decision"] is None
+
+
+@pytest.mark.asyncio
+async def test_on_generated_runs_after_the_reply_is_stored_and_before_post_turn(
+    monkeypatch,
+):
+    parts = Parts(monkeypatch)
+    pipeline = parts.pipeline()
+    marks: List[str] = []
+
+    def on_generated():
+        parts.order.append("on_generated")
+        marks.append("called")
+
+    result = await pipeline.send_message(
+        "Hello", speaker="Alice", on_generated=on_generated
+    )
+    assert result.success is True
+    assert marks == ["called"]
+    assert parts.order[-5:] == [
+        "brain",
+        "persist",
+        "on_generated",
+        "post_turn",
+        "life_resume",
+    ]
+    # the assistant row is stored when the callback runs
+    roles = [call[0][2] for call in parts.persistence.store_turn.calls]
+    assert roles == ["user", "assistant"]
+
+    # a coroutine callback is awaited
+    async def async_mark():
+        parts.order.append("on_generated_async")
+
+    parts.order.clear()
+    await pipeline.send_message("Again", speaker="Alice", on_generated=async_mark)
+    assert parts.order.index("persist") < parts.order.index("on_generated_async")
+    assert parts.order.index("on_generated_async") < parts.order.index("post_turn")
+
+    # a failing callback is counted and the reply stands
+    def broken():
+        raise RuntimeError("mark bug")
+
+    failed = await pipeline.send_message("Third", speaker="Alice", on_generated=broken)
+    assert failed.success is True
+    assert pipeline.status()["failures"]["on_generated"] == 1
+
+    # a turn that produced no reply never calls it
+    parts.brain.raise_ = NoAnswerError("empty", reason="empty")
+    marks.clear()
+    await pipeline.send_message("Fourth", speaker="Alice", on_generated=on_generated)
+    assert marks == []
+
+
+@pytest.mark.asyncio
+async def test_on_generated_runs_after_a_plugin_reply_is_stored(monkeypatch):
+    class Echo:
+        name = "echo"
+
+        def describe(self):
+            return "Echoes."
+
+        async def try_handle(self, ctx):
+            return PluginOutcome("reply", self.name, "back")
+
+    parts = Parts(monkeypatch, plugins=PluginRegistry(turn_plugins=[Echo()]))
+    pipeline = parts.pipeline()
+    result = await pipeline.send_message(
+        "echo: back",
+        speaker="Alice",
+        on_generated=lambda: parts.order.append("on_generated"),
+    )
+    assert result.success is True
+    assert parts.order[-3:] == ["persist", "on_generated", "life_resume"]
+    assert parts.order.count("on_generated") == 1
+
+
+@pytest.mark.asyncio
+async def test_post_turn_timeout_keeps_the_reply_and_is_counted(monkeypatch):
+    class SlowPostTurn:
+        def __init__(self):
+            self.cancelled = False
+
+        async def run(self, record):
+            try:
+                await asyncio.sleep(5.0)
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+            return PostTurnReport()
+
+    slow = SlowPostTurn()
+    parts = Parts(monkeypatch, post_turn=slow)
+    pipeline = parts.pipeline(config=PipelineConfig(post_turn_timeout_s=0.05))
+    result = await asyncio.wait_for(
+        pipeline.send_message("Hello", speaker="Alice"), timeout=2.0
+    )
+    assert result.success is True
+    assert result.response == "[fake] hello"
+    roles = [call[0][2] for call in parts.persistence.store_turn.calls]
+    assert roles == ["user", "assistant"]
+    status = pipeline.status()
+    assert status["failures"]["post_turn"] == 1
+    assert status["last_turn"]["post_turn_error"] == "timeout"
+    assert status["config"]["post_turn_timeout_s"] == 0.05
+    assert slow.cancelled is True
+    assert parts.life.open == 0
+    # under DEBUG the timeout is raised
+    strict = Parts(monkeypatch, cfg=_settings(DEBUG=True), post_turn=SlowPostTurn())
+    with pytest.raises(asyncio.TimeoutError):
+        await strict.pipeline(
+            config=PipelineConfig(post_turn_timeout_s=0.05)
+        ).send_message("hi", speaker="Alice")
+
+
+def test_post_turn_timeout_is_validated_above_zero():
+    assert PipelineConfig().post_turn_timeout_s == 300.0
+    for bad in (0, 0.0, -1.0):
+        with pytest.raises(ValueError, match="post_turn_timeout_s"):
+            PipelineConfig(post_turn_timeout_s=bad)
+
+
+@pytest.mark.asyncio
+async def test_rehydrated_session_keeps_replies_and_tool_rows(monkeypatch):
+    parts = Parts(monkeypatch)
+    pipeline = parts.pipeline()
+    await pipeline.send_message("one", speaker="Operator", speaker_token=parts.token)
+    await pipeline.send_message("two", speaker="Operator", speaker_token=parts.token)
+    assert await pipeline.end_conversation("Operator", parts.token) is True
+    await pipeline.send_message("three", speaker="Operator", speaker_token=parts.token)
+    session = parts.sessions.get("verified:Operator")
+    roles = [entry["role"] for entry in session.history]
+    assert roles[:4] == ["user", "assistant", "user", "assistant"]
+    assert [entry["content"] for entry in session.history[:4]] == [
+        "one",
+        "[fake] hello",
+        "two",
+        "[fake] hello",
+    ]
+    window = parts.brain.calls[-1]["conversation_history"]
+    assert [entry["role"] for entry in window] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_rehydrated_session_brings_back_a_plugin_tool_row(monkeypatch):
+    class Echo:
+        name = "echo"
+
+        def describe(self):
+            return "Echoes."
+
+        async def try_handle(self, ctx):
+            if ctx.message.startswith("echo:"):
+                return PluginOutcome("reply", self.name, ctx.message[5:].strip())
+            return None
+
+    parts = Parts(monkeypatch, plugins=PluginRegistry(turn_plugins=[Echo()]))
+    pipeline = parts.pipeline()
+    await pipeline.send_message(
+        "echo: back", speaker="Operator", speaker_token=parts.token
+    )
+    assert await pipeline.end_conversation("Operator", parts.token) is True
+    await pipeline.send_message("hello", speaker="Operator", speaker_token=parts.token)
+    session = parts.sessions.get("verified:Operator")
+    assert [(e["role"], e["speaker"]) for e in session.history[:2]] == [
+        ("user", "Operator"),
+        ("tool", "echo"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_window_last_turn_at_reaches_the_brain_with_the_seam_on(monkeypatch):
+    evening = datetime(2000, 1, 1, 21, 0, tzinfo=timezone.utc)
+    morning = datetime(2000, 1, 2, 9, 0, tzinfo=timezone.utc)
+    moments = [evening]
+    parts = Parts(monkeypatch, cfg=_settings(NIGHT_SEAM_MARKER_ENABLED=True))
+    pipeline = parts.pipeline(clock=lambda: moments[0])
+    await pipeline.send_message("good evening", speaker="Alice")
+    moments[0] = morning
+    await pipeline.send_message("good morning", speaker="Alice")
+    call = parts.brain.calls[-1]
+    assert call["conversation_history"][-1].get("is_clock_note") is True
+    assert call["last_turn_at"] == evening
+    # every hop of a turn gets the same value
+    first = parts.brain.calls[0]
+    assert "last_turn_at" in first
+
+
+@pytest.mark.asyncio
+async def test_last_turn_reports_the_compass_method(monkeypatch):
+    class Consulting(FakeSafety):
+        def __init__(self, order, status, method):
+            super().__init__(order)
+            self.status, self.method = status, method
+
+        async def pre_message_check(self, message, speaker, speaker_role="guest"):
+            self.order.append("safety")
+            return {
+                "checked": True,
+                "safe": True,
+                "decision": "allow",
+                "assessment": {
+                    "decision": "allow",
+                    "compass_status": self.status,
+                    "compass_method": self.method,
+                },
+            }
+
+    parts = Parts(monkeypatch)
+    for status, method in (
+        ("consulted", "keyword"),
+        ("consulted", "deep"),
+        ("not_needed", None),
+        ("failed", None),
+        ("absent", None),
+    ):
+        parts.safety = Consulting(parts.order, status, method)
+        pipeline = parts.pipeline()
+        await pipeline.send_message("Hello", speaker="Alice")
+        last = pipeline.status()["last_turn"]
+        assert last["safety_compass"] == {"status": status, "method": method}
+    # no check result, no compass record
+    trusted_pipeline = parts.pipeline()
+    await trusted_pipeline.send_message(
+        "Hello", speaker="Operator", speaker_token=parts.token
+    )
+    assert trusted_pipeline.status()["last_turn"]["safety_compass"] is None
+    parts.safety = RaisingSafety(parts.order)
+    failing = parts.pipeline()
+    await failing.send_message("Hello", speaker="Alice")
+    assert failing.status()["last_turn"]["safety_compass"] is None

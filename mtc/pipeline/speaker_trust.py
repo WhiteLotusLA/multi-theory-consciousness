@@ -9,6 +9,13 @@ grants nothing: an unknown or unauthenticated speaker receives
 ``DEFAULT_SPEAKER_TRUST``, no activation bonus, no safety bypass and the
 default emotion trust, whatever they are called.
 
+A name no token backs is reduced by ``claimed_name`` to one safe line before
+it becomes the identity's name: letters, digits, space, period, apostrophe,
+hyphen and underscore, at most ``MAX_CLAIMED_NAME_CHARS`` characters; a claim
+with nothing usable left is the anonymous default speaker. The entry lookup
+and the token comparison use the presented name as given (stripped), and an
+authenticated identity keeps its configured entry name.
+
 Single-source rule: this module is the only reader of ``SPEAKERS_PATH``,
 ``SPEAKER_TOKENS``, ``TRUSTED_SPEAKERS``, ``TRUST_ACTIVATION_BONUS``,
 ``TRUSTED_EMOTION_TRUST`` and ``DEFAULT_EMOTION_TRUST`` (a tree-wide test pins
@@ -57,6 +64,27 @@ _SESSION_AUTHENTICATED = "verified"
 _SESSION_CLAIMED = "claimed"
 
 _ENTRY_FIELDS = ("name", "role", "trust", "token_env")
+
+# The longest name an unauthenticated speaker keeps, after ``claimed_name``.
+MAX_CLAIMED_NAME_CHARS = 64
+# Characters a claimed name keeps besides letters and digits.
+_CLAIMED_NAME_EXTRA = frozenset(" .'-_")
+
+
+def claimed_name(raw: Optional[str]) -> str:
+    """A claimed speaker name as one safe line.
+
+    Every character that is not a letter or digit (``str.isalnum``) and not
+    one of space, period, apostrophe, hyphen and underscore becomes a space;
+    runs of whitespace collapse to one space; the result is stripped and cut
+    to ``MAX_CLAIMED_NAME_CHARS``. An empty result means nothing usable was
+    given.
+    """
+    text = "".join(
+        char if char.isalnum() or char in _CLAIMED_NAME_EXTRA else " "
+        for char in str(raw or "")
+    )
+    return " ".join(text.split())[:MAX_CLAIMED_NAME_CHARS].strip()
 
 
 @dataclass(frozen=True)
@@ -263,21 +291,25 @@ class SpeakerTrust:
 
         An empty name is the anonymous default speaker. An unknown name, a
         missing or empty token, an entry without a configured token and a
-        mismatch all yield the default trust and no role.
+        mismatch all yield the default trust and no role, under the name
+        ``claimed_name`` makes of the presented one (the anonymous default
+        when nothing usable is left). The entry lookup and the token
+        comparison use the presented name as given, stripped.
         """
         cfg = self._cfg()
         self._verifications += 1
         default_trust = float(cfg.DEFAULT_SPEAKER_TRUST)
         given = (name or "").strip()
+        anonymous = SpeakerIdentity(
+            name=cfg.DEFAULT_SPEAKER,
+            role=None,
+            trust=default_trust,
+            authenticated=False,
+            trusted=False,
+            is_default=True,
+        )
         if not given:
-            return SpeakerIdentity(
-                name=cfg.DEFAULT_SPEAKER,
-                role=None,
-                trust=default_trust,
-                authenticated=False,
-                trusted=False,
-                is_default=True,
-            )
+            return anonymous
         entry = self._entries.get(given)
         authenticated = False
         if entry is not None and isinstance(token, str) and token:
@@ -285,8 +317,11 @@ class SpeakerTrust:
             if expected is not None:
                 authenticated = secrets.compare_digest(token.encode("utf-8"), expected)
         if not authenticated or entry is None:
+            safe = claimed_name(given)
+            if not safe:
+                return anonymous
             return SpeakerIdentity(
-                name=given,
+                name=safe,
                 role=None,
                 trust=default_trust,
                 authenticated=False,
@@ -376,7 +411,7 @@ class SpeakerTrust:
 
     def trust_lookup(self, name: str) -> float:
         """Trust for a name-keyed consumer: the current authenticated identity's
-        trust when the name is hers, else ``DEFAULT_SPEAKER_TRUST``."""
+        trust when the name is that identity's, else ``DEFAULT_SPEAKER_TRUST``."""
         current = self._current.get()
         if (
             current is not None

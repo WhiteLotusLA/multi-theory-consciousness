@@ -3,6 +3,7 @@ triggers, snapshots, honest None and the first-run report."""
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -327,6 +328,267 @@ def test_insufficient_overall_kept_as_none():
     context = _turn(orchestrator)
     assert context.extras["expression_profile"] is None
     assert context.extras["baseline_status"] == "insufficient_data"
+
+
+def test_zero_overall_with_insufficient_status_is_not_measured():
+    """The real shape of an unmeasured report (a number with the status
+    insufficient_data) is not taken as a measurement."""
+    assessor = _Assessor(_report(overall=0.0, status="insufficient_data"))
+    orchestrator = _build(assessor=assessor)
+    report = asyncio.run(orchestrator.refresh_baseline())
+    assert report is assessor.report
+    baseline = orchestrator.baseline
+    assert baseline.overall_score is None
+    assert baseline.measured is False
+    assert baseline.status == "insufficient_data"
+    assert baseline.stretch_ceiling is None
+    assert baseline.score_history == []
+    assert baseline.trend is None
+    assert baseline.as_dict()["measured"] is False
+    context = _turn(orchestrator)
+    assert context.extras["expression_profile"] is None
+    assert context.extras["baseline_status"] == "insufficient_data"
+    # The same number under a measured status is a measurement
+    measured = _build(assessor=_Assessor(_report(overall=0.0)))
+    asyncio.run(measured.refresh_baseline())
+    assert measured.baseline.overall_score == 0.0
+    assert measured.baseline.score_history == [0.0]
+
+
+def test_insufficient_baseline_is_due_again_after_the_next_cycle():
+    clock = _Clock()
+    assessor = _Assessor(_report(overall=0.0, status="insufficient_data"))
+    orchestrator = _build(
+        workspace=_ScriptedWorkspace([_state() for _ in range(6)]),
+        clock=clock,
+        assessor=assessor,
+    )
+    asyncio.run(orchestrator.refresh_baseline())
+    # Right after the insufficient refresh the baseline is not due
+    assert orchestrator.baseline_due is False
+    assert orchestrator.baseline_due_reason is None
+    _turn(orchestrator)
+    # A successful cycle brings data: the baseline is due again
+    assert orchestrator.baseline_due is True
+    assert orchestrator.baseline_due_reason == "first_data"
+    assert assessor.calls == 1  # the turn itself runs no assessment
+    # A measured refresh clears it, and further cycles leave it clear
+    assessor.report = _report()
+    clock.advance(60)
+    asyncio.run(orchestrator.refresh_baseline())
+    assert orchestrator.baseline.measured is True
+    assert orchestrator.baseline_due is False
+    _turn(orchestrator)
+    assert orchestrator.baseline_due is False
+    # A failed cycle marks nothing
+    failing = _build(
+        workspace=_ScriptedWorkspace([]),
+        assessor=_Assessor(_report(overall=0.0, status="insufficient_data")),
+    )
+    asyncio.run(failing.refresh_baseline())
+    context = _turn(failing)
+    assert context.cycle_ok is False
+    assert failing.baseline_due is False
+
+
+def test_restored_insufficient_baseline_is_unmeasured_and_due():
+    saved = _build(assessor=_Assessor(_report(overall=0.0))).to_state_dict()
+    scalars = saved["scalars"]
+    # A state file written before the insufficient guard existed
+    scalars.update(
+        baseline_overall_score=0.0,
+        baseline_status="insufficient_data",
+        baseline_stretch_ceiling=0.0,
+        baseline_trend="stable",
+        baseline_score_history=[0.0, 0.0, 0.0, 0.0, 0.0],
+        baseline_last_updated=T0.isoformat(),
+    )
+    restored = _build()
+    restored.from_state_dict(saved)
+    baseline = restored.baseline
+    assert baseline.overall_score is None
+    assert baseline.measured is False
+    assert baseline.status == "insufficient_data"
+    assert baseline.stretch_ceiling is None
+    assert baseline.score_history == []
+    assert baseline.trend is None
+    assert restored.baseline_due is True
+    # A measured state restores as measured and not due
+    scalars.update(baseline_overall_score=0.4, baseline_status="partial")
+    measured = _build()
+    measured.from_state_dict(saved)
+    assert measured.baseline.overall_score == pytest.approx(0.4)
+    assert measured.baseline.score_history == [0.0, 0.0, 0.0, 0.0, 0.0]
+    assert measured.baseline_due is False
+
+
+def test_refresh_after_a_cycle_never_reuses_an_older_report():
+    clock = _Clock()
+    reports = [_report(overall=0.3), _report(overall=0.55)]
+
+    class _Sequence(_Assessor):
+        async def __call__(self):
+            self.calls += 1
+            return reports[self.calls - 1]
+
+    assessor = _Sequence()
+    orchestrator = _build(
+        workspace=_ScriptedWorkspace([_state() for _ in range(3)]),
+        clock=clock,
+        assessor=assessor,
+    )
+    first = asyncio.run(orchestrator.refresh_baseline())
+    assert first is reports[0]
+    assert assessor.calls == 1
+    _turn(orchestrator)
+    clock.advance(5)  # inside the cache window, but a cycle ran since
+    second = asyncio.run(orchestrator.refresh_baseline())
+    assert assessor.calls == 2
+    assert second is reports[1]
+    assert orchestrator.baseline.overall_score == pytest.approx(0.55)
+    assert orchestrator.baseline.score_history == [
+        pytest.approx(0.3),
+        pytest.approx(0.55),
+    ]
+    # assess_now follows the same rule
+    assert asyncio.run(orchestrator.assess_now()) is reports[1]
+    assert assessor.calls == 2
+
+
+def test_reapplying_the_same_report_does_not_duplicate_the_score():
+    clock = _Clock()
+    snapshots = _Snapshots()
+    assessor = _Assessor()
+    orchestrator = _build(clock=clock, assessor=assessor, snapshot_service=snapshots)
+    first = asyncio.run(orchestrator.refresh_baseline("heartbeat"))
+    clock.advance(5)
+    second = asyncio.run(orchestrator.refresh_baseline("loop_quality"))
+    assert second is first
+    assert assessor.calls == 1
+    assert orchestrator.baseline.score_history == [pytest.approx(0.62)]
+    assert snapshots.taken == [("heartbeat", first), ("loop_quality", first)]
+    assert orchestrator.baseline_due is False
+    # A new report is applied again
+    clock.advance(20)
+    asyncio.run(orchestrator.refresh_baseline())
+    assert assessor.calls == 2
+    assert len(orchestrator.baseline.score_history) == 2
+
+
+def test_theory_without_a_measured_indicator_reads_none():
+    """A theory whose only included results are absent or insufficient is
+    scored 0.0 by the assessment; the baseline does not take that as a
+    measurement, and the expression profile loses the stand-in's term."""
+    from mtc.assessment.assessment import ConsciousnessTheory
+    from mtc.pipeline.consciousness_orchestrator import (
+        ConsciousnessBaseline,
+        ExpressionProfile,
+    )
+
+    def result(theory, status, score=0.0):
+        return SimpleNamespace(theory=theory, status=status, score=score)
+
+    report = SimpleNamespace(
+        overall_score=0.5,
+        theory_scores={"GWT": 0.7, "IIT": 0.0, "XT": 0.3, "YT": 0.6},
+        indicator_results={
+            "global_broadcast": result(ConsciousnessTheory.GWT, "measured", 0.7),
+            "integrated_information": result(ConsciousnessTheory.IIT, "absent"),
+            "phi_structure": result(ConsciousnessTheory.IIT, "insufficient_data"),
+            "extra_absent": result("XT", "absent"),
+            "extra_measured": result("YT", "measured", 0.6),
+        },
+        status="partial",
+        coverage=0.4,
+    )
+    baseline = ConsciousnessBaseline()
+    baseline.update_from_report(report, T0)
+    assert baseline.theory_scores["IIT"] is None
+    assert baseline.theory_scores["GWT"] == pytest.approx(0.7)
+    # Theories outside the eight follow the same rule
+    assert baseline.theory_scores["XT"] is None
+    assert baseline.theory_scores["YT"] == pytest.approx(0.6)
+    assert baseline.overall_score == pytest.approx(0.5)
+
+    expected = ConsciousnessBaseline()
+    expected.update_from_report(report, T0)
+    expected.theory_scores = dict(expected.theory_scores, IIT=None)
+    stand_in = ConsciousnessBaseline()
+    stand_in.update_from_report(report, T0)
+    stand_in.theory_scores = dict(stand_in.theory_scores, IIT=0.0)
+    profile = ExpressionProfile.from_baseline(baseline)
+    assert profile == ExpressionProfile.from_baseline(expected)
+    assert profile.abstract_thinking == pytest.approx(
+        ExpressionProfile.from_baseline(stand_in).abstract_thinking + 0.05
+    )
+
+    # A plain report whose results name no theory keeps its scores as given
+    plain = ConsciousnessBaseline()
+    plain.update_from_report(_report(IIT=0.0), T0)
+    assert plain.theory_scores["IIT"] == 0.0
+    assert plain.theory_scores["GWT"] == pytest.approx(0.7)
+
+
+@pytest.fixture
+def _runtime_side_effects(monkeypatch):
+    """build_runtime configures the mtc logger and records its Settings in the
+    PyPhi bridge; both are given back to the suite."""
+    from mtc.consciousness import pyphi_bridge
+    from mtc.core.logger import reset_logging
+
+    monkeypatch.setattr(pyphi_bridge, "_home_settings", None)
+    yield
+    reset_logging()
+
+
+def _runtime_settings(tmp_path):
+    return Settings(
+        _env_file=None,
+        PROJECT_ROOT=str(Path(__file__).resolve().parents[2]),
+        DATA_DIRECTORY=str(tmp_path / "data"),
+        STATE_DIR=str(tmp_path / "state"),
+        LOG_DIRECTORY=str(tmp_path / "logs"),
+        RESULTS_DIR=str(tmp_path / "results"),
+        AGENT_SPACE_DIR=str(tmp_path / "agent_space"),
+        IDENTITY_STATEMENT_PATH=str(tmp_path / "absent.md"),
+        SPEAKERS_PATH=str(tmp_path / "absent_speakers.yaml"),
+        LLM_PROVIDER="mock",
+        CTM_PROFILE="demo",
+        SYSTEM_NAME="Testagent",
+        DEVICE="cpu",
+        DEBUG=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_fresh_runtime_heartbeat_leaves_the_baseline_unmeasured(
+    tmp_path, _runtime_side_effects
+):
+    from mtc.core.embeddings import HashEmbedder
+    from mtc.pipeline.runtime import build_runtime
+
+    runtime = await build_runtime(
+        _runtime_settings(tmp_path),
+        embedder=HashEmbedder(dim=128),
+        allow_non_semantic=True,
+        substrates=False,
+    )
+    try:
+        orchestrator = runtime.orchestrator
+        assert orchestrator.baseline_due is True
+        (heartbeat,) = [
+            task for task in runtime.background if task.name == "baseline_heartbeat"
+        ]
+        report = await heartbeat.tick()
+        assert report is not None
+        assert report.status == "insufficient_data"
+        assert orchestrator.baseline.measured is False
+        assert orchestrator.baseline.overall_score is None
+        assert orchestrator.baseline.score_history == []
+        assert runtime.level_cache is not None
+        assert await runtime.level_cache.level() is None
+    finally:
+        await runtime.stop()
 
 
 def test_sample_phi_state_records_last_state():

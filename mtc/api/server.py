@@ -7,8 +7,15 @@ serves it with uvicorn in a single process (the runtime is in-process state).
 
 Routes (every one except ``/health`` needs the ``X-API-Key`` header):
 
-- ``GET /health``: ``status`` (``ok``, or ``degraded`` while the runtime is
-  not started or the brain is unavailable), ``ready`` and ``version``.
+- ``GET /health``: ``status``, ``ready``, ``version`` and ``brain_verified``.
+  ``status`` is ``degraded`` while the runtime is not started, while the
+  brain is unavailable or after its last real provider call failed; ``ok``
+  when the brain is available and a real exchange confirmed the provider (a
+  verified health check or a completion that came back); ``unverified``
+  otherwise (a provider whose health reflects configuration only and that
+  has answered no call yet). ``brain_verified`` says whether that
+  confirmation exists (None for a brain that keeps no health record, which
+  keeps the availability rule alone). Always 200, never authenticated.
 - ``GET /api/meta``: the system name, the version, the eight theories, every
   indicator the assessment defines with its metadata (positive and negative;
   a threshold, weight, description or theory the assessment does not define
@@ -16,12 +23,27 @@ Routes (every one except ``/health`` needs the ``X-API-Key`` header):
   which are none unless a plugin registers one), the narration flags and
   whether auth is on.
 - ``POST /api/chat`` (``{message, speaker?}`` with an optional
-  ``X-Speaker-Token`` header): one turn, ``TurnResult.to_payload()``; 403 when
-  the safety gate blocked it, 502 when the model gave no answer, 503 when the
-  brain is unavailable, 504 when the pipeline's own bound ran out (the turn's
-  payload) or when the first-token or stall bound here cancelled the turn
-  (``TimeoutPayload``: the bound, its limit, the elapsed seconds, the
-  first-token time and the cancelled state, nothing else).
+  ``X-Speaker-Token`` header): one turn, ``TurnResult.to_payload()`` (with
+  ``safety_gate``, and ``safety_decision`` on a blocked turn); 403 when the
+  safety gate blocked it, 502 when the model gave no answer, 503 when the
+  brain is unavailable or when the safety check could not run for an
+  untrusted speaker (``safety_unavailable`` under ``SAFETY_GATE_FAIL_CLOSED``:
+  the message was not processed and the turn stored nothing), 504 when the
+  pipeline's own bound ran out (the turn's payload) or when the first-token
+  or stall bound here cancelled the turn (``TimeoutPayload``: the bound, its
+  limit, the elapsed seconds, the first-token time and the cancelled state,
+  nothing else). The two bounds stop once the pipeline reports the reply
+  stored (``on_generated``), so a slow post-turn step never turns a stored
+  reply into a 504.
+- ``POST /api/safety/resume`` (``{speaker}`` with the ``X-Speaker-Token``
+  header): lifts an emergency suspension of the untrusted conversations
+  (``EMERGENCY_SHUTDOWN_ENABLED``) by calling the safety integration with the
+  configured ``SAFETY_ESCALATION_ROLE``; answers ``{resumed, suspended}``.
+  403 unless the speaker trust source verifies the speaker as trusted (the
+  token authenticates the name and the name is allowlisted, the predicate
+  that bypasses the safety gate); 503 without a speaker trust source or a
+  safety stack; 500 when the safety stack returns no outcome with both
+  booleans.
 - ``GET /api/consciousness/status``: orchestrator counters and stage timings,
   the first-run report, the theory modulations with their ``consumed`` flags,
   gate statistics, the continuous thought status and quiet reason, store,
@@ -60,7 +82,8 @@ Config keys read: ``API_HOST``, ``API_PORT``, ``API_KEY``,
 ``API_AUTH_ENABLED``, ``API_CORS_ORIGINS`` (credentials are never allowed),
 ``WEBSOCKET_ENABLED``, ``WEBSOCKET_PING_INTERVAL``,
 ``WEBSOCKET_PING_TIMEOUT``, ``METRICS_UPDATE_INTERVAL``, ``SYSTEM_NAME``,
-``RAG_MIN_SCORE`` and, through ``mtc.api.progress``, the generation bounds.
+``RAG_MIN_SCORE``, ``SAFETY_ESCALATION_ROLE`` and, through
+``mtc.api.progress``, the generation bounds.
 Nothing is persisted here. Message text, names, memories and thoughts are
 private runtime data; no key or token reaches a log line or a response.
 """
@@ -104,10 +127,13 @@ from mtc.api.schemas import (
     MetaResponse,
     ModelsResponse,
     RelatedConceptsResponse,
+    SafetyResumeRequest,
+    SafetyResumeResponse,
     SnapshotsResponse,
     StateResponse,
     StatusResponse,
     TurnPayload,
+    health_status,
     jsonable,
     state_payload,
     validation_details,
@@ -126,6 +152,7 @@ ERROR_STATUS: Dict[str, int] = {
     "blocked": 403,
     "no_answer": 502,
     "brain_unavailable": 503,
+    "safety_unavailable": 503,
     "generation_timeout": 504,
 }
 TURN_FAILED_STATUS = 500
@@ -578,12 +605,12 @@ def _add_routes(app: FastAPI) -> None:
     async def health(request: Request) -> Dict[str, Any]:
         runtime = getattr(request.app.state, "runtime", None)
         ready = bool(runtime is not None and request.app.state.started)
-        available = getattr(getattr(runtime, "brain", None), "available", None)
-        healthy = ready and available is True
+        status, verified = health_status(ready, getattr(runtime, "brain", None))
         return {
-            "status": "ok" if healthy else "degraded",
+            "status": status,
             "ready": ready,
             "version": __version__,
+            "brain_verified": verified,
         }
 
     @app.get("/api/meta", response_model=MetaResponse, dependencies=_AUTH)
@@ -628,6 +655,7 @@ def _add_routes(app: FastAPI) -> None:
                     body.speaker,
                     speaker_token,
                     stream_callback=mark.wrap(None),
+                    on_generated=mark.finish,
                 ),
                 on_heartbeat=None,
                 settings=cfg,
@@ -644,6 +672,47 @@ def _add_routes(app: FastAPI) -> None:
         code = "blocked" if result.blocked else str(result.error_code or "")
         status_code = ERROR_STATUS.get(code, TURN_FAILED_STATUS)
         return JSONResponse(status_code=status_code, content=payload)
+
+    @app.post(
+        "/api/safety/resume", response_model=SafetyResumeResponse, dependencies=_AUTH
+    )
+    async def safety_resume(
+        body: SafetyResumeRequest,
+        request: Request,
+        speaker_token: Optional[str] = Header(default=None, alias=SPEAKER_TOKEN_HEADER),
+    ) -> Dict[str, Any]:
+        cfg = _settings(request)
+        runtime = _runtime(request)
+        trust = getattr(runtime, "speaker_trust", None)
+        verify = getattr(trust, "verify", None)
+        if not callable(verify):
+            raise HTTPException(status_code=503, detail="speaker trust not built")
+        identity = verify(body.speaker, speaker_token)
+        if getattr(identity, "trusted", False) is not True:
+            logger.warning("safety resume refused: the speaker is not trusted")
+            raise HTTPException(
+                status_code=403, detail="resuming needs a trusted speaker"
+            )
+        resume = getattr(getattr(runtime, "safety", None), "resume_conversations", None)
+        if not callable(resume):
+            raise HTTPException(status_code=503, detail="safety stack not built")
+        outcome = await resume(cfg.SAFETY_ESCALATION_ROLE)
+        try:
+            resumed = outcome["resumed"]
+            suspended = outcome["suspended"]
+        except (KeyError, TypeError):
+            resumed = suspended = None
+        if not isinstance(resumed, bool) or not isinstance(suspended, bool):
+            logger.error("safety resume: the safety stack returned no outcome")
+            raise HTTPException(
+                status_code=500, detail="the safety stack returned no resume outcome"
+            )
+        logger.info(
+            "safety resume by a trusted speaker: resumed %s, suspended %s",
+            resumed,
+            suspended,
+        )
+        return {"resumed": resumed, "suspended": suspended}
 
     @app.get(
         "/api/consciousness/status", response_model=StatusResponse, dependencies=_AUTH
@@ -841,7 +910,10 @@ def _add_routes(app: FastAPI) -> None:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Serve the API with uvicorn on ``API_HOST``:``API_PORT``, one process.
 
-    Returns 2 when the bind is refused (authentication off outside loopback).
+    Returns 2 when the bind is refused (authentication off outside loopback)
+    and when the workspace extra is missing (its one line goes to stderr);
+    returns 1 when the server did not start (the server library logs a failed
+    lifespan startup and returns), 0 after a server that started stops.
     """
     parser = argparse.ArgumentParser(
         prog="python -m mtc.api.server",
@@ -855,6 +927,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except UnsafeBindError as exc:
         logger.error("%s", exc)
         print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    from mtc.cli.missing_extra import workspace_extra_line
+
+    line = workspace_extra_line()
+    if line is not None:
+        print(line, file=sys.stderr)
         return 2
     from mtc.memory.clients import require_client
 
@@ -874,7 +952,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ws_ping_timeout=float(cfg.WEBSOCKET_PING_TIMEOUT),
         lifespan="on",
     )
-    uvicorn.Server(config).run()
+    server = uvicorn.Server(config)
+    server.run()
+    if not getattr(server, "started", False):
+        logger.error("the API server did not start")
+        print("the API server did not start; see the log above", file=sys.stderr)
+        return 1
     return 0
 
 

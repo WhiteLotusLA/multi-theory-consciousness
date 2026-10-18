@@ -24,7 +24,10 @@ Rules the renderer enforces:
 - The speaker block is chosen by the verified identity alone: the ``creator``
   template only for an authenticated speaker whose role is ``creator``, the
   ``known`` template for any other authenticated speaker, the ``unverified``
-  template for a name no token backs. The name is displayed, never compared.
+  template for a name no token backs. The name is displayed, never compared:
+  it is rendered on one line, and under the ``unverified`` template it is put
+  in double quotes (a double quote inside it becomes an apostrophe), so a
+  claimed name cannot start a section of its own.
 - Capability text appears only through ``register_capability``, which an
   enabled feature calls; none ships. The ``perception`` section is reserved
   and can never be registered: vision input is not part of this release.
@@ -36,8 +39,8 @@ Rules the renderer enforces:
   for the API and the logs, not a line in a prompt). Memories, the summary and
   user text are conversation content and are not filtered. Thought mood
   stamps render only when ``narrate_thought_mood`` is true.
-- Memory dates render in ``TIMEZONE``; the clock section is Phase 4's
-  ``build_now_block`` over the injected clock.
+- Memory dates render in ``TIMEZONE``; the clock section is the temporal
+  context's ``build_now_block`` over the injected clock.
 - ``disabled_sections`` ablate sections by name for experiments; an unknown
   name raises ``ValueError``.
 
@@ -257,6 +260,12 @@ class AssembledPrompt:
 
 def _text(value: Any) -> str:
     return str(value).strip() if value is not None else ""
+
+
+def _one_line(value: Any) -> str:
+    """The value as text on one line: every run of whitespace, line breaks
+    included, becomes one space."""
+    return " ".join(_text(value).split())
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
@@ -538,7 +547,7 @@ class PromptAssembler:
             "pronoun_subject": _text(pronouns.get("subject")) or "they",
             "pronoun_object": _text(pronouns.get("object")) or "them",
             "pronoun_possessive": _text(pronouns.get("possessive")) or "their",
-            "speaker": _text(speaker.name) if speaker is not None else "",
+            "speaker": _one_line(speaker.name) if speaker is not None else "",
         }
 
     def _fill(self, template: str, values: Mapping[str, str], where: str) -> str:
@@ -619,12 +628,15 @@ class PromptAssembler:
         )
         values = self._values(speaker)
         if not values["speaker"]:
-            values["speaker"] = _text(speaker.label) or "an unnamed speaker"
+            values["speaker"] = _one_line(speaker.label) or "an unnamed speaker"
+        elif which == "unverified":
+            # Quoted, so the claim reads as a claim; the name cannot close it.
+            values["speaker"] = '"' + values["speaker"].replace('"', "'") + '"'
         lines = [
             "# Speaker",
             self._fill(template, values, f"persona.speaker_templates.{which}"),
         ]
-        label = _text(speaker.label)
+        label = _one_line(speaker.label)
         if label:
             lines.append(f"Speaker status: {label}.")
         return "\n".join(lines)

@@ -142,6 +142,61 @@ def test_ws_runtime_not_ready_closes_1013_after_accept(clean_env, key):
     _assert_refused(_first_message(client))
 
 
+LISTED_ORIGIN = "http://ui.invalid"
+
+
+def _auth_off(tmp_path):
+    return api_settings(
+        tmp_path,
+        API_AUTH_ENABLED=False,
+        API_HOST="127.0.0.1",
+        API_CORS_ORIGINS=LISTED_ORIGIN,
+    )
+
+
+def test_ws_cross_origin_refused_when_auth_is_off(clean_env):
+    """With authentication off a browser page from an origin the operator did
+    not list cannot open the socket: the handshake is accepted and closed with
+    1008 and the neutral reason, and no status frame is sent. The literal
+    origin ``null`` (a sandboxed page or a file) is not a listed origin."""
+    app = make_app(_auth_off(clean_env))
+    client = TestClient(app)
+    for origin in ("http://other.invalid", "null", "http://ui.invalid.other.invalid"):
+        _assert_refused(_first_message(client, headers={"Origin": origin}))
+        sent = _asgi_messages(app, [(b"origin", origin.encode("ascii"))])
+        assert [m["type"] for m in sent] == ["websocket.accept", "websocket.close"]
+        _assert_refused(sent[1])
+
+
+def test_ws_listed_origin_and_no_origin_accepted_when_auth_is_off(clean_env):
+    """A listed origin (case and a trailing slash aside) and a client that
+    sends no Origin header at all (a non-browser client) are served."""
+    client = TestClient(make_app(_auth_off(clean_env)))
+    for headers in (
+        {},
+        {"Origin": LISTED_ORIGIN},
+        {"Origin": "HTTP://UI.INVALID/"},
+    ):
+        with client.websocket_connect("/ws", headers=headers) as ws:
+            frame = ws.receive_json()
+        assert frame["type"] == "status", headers
+        assert frame["data"]["client_authenticated"] is False
+
+
+def test_ws_origin_is_not_checked_when_auth_is_on(clean_env, key):
+    """With authentication on the key decides: a valid key from an unlisted
+    origin is served, and an unlisted origin without the key is refused as
+    before."""
+    cfg = api_settings(clean_env, API_KEY=key, API_CORS_ORIGINS=LISTED_ORIGIN)
+    client = TestClient(make_app(cfg))
+    headers = {API_KEY_HEADER: key, "Origin": "http://other.invalid"}
+    with client.websocket_connect("/ws", headers=headers) as ws:
+        frame = ws.receive_json()
+    assert frame["type"] == "status"
+    assert frame["data"]["client_authenticated"] is True
+    _assert_refused(_first_message(client, headers={"Origin": "http://other.invalid"}))
+
+
 def test_ws_auth_disabled_is_allowed_but_not_an_authenticated_client(
     clean_env,
 ):

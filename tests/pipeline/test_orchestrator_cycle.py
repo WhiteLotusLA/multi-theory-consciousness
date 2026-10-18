@@ -156,6 +156,136 @@ def test_cycle_receives_neural_signals():
     assert bare.signal_calls == [None]
 
 
+def test_integration_level_unmeasured_without_neural_signals():
+    from mtc.pipeline.message_persistence import build_turn_snapshot
+
+    # No neural orchestrator: nothing produces the signals
+    orchestrator = _build()
+    (context,) = _turns(orchestrator, 1)
+    assert context.cycle_ok
+    assert context.consciousness_state.integration_level is None
+    section = context.theory_sections.global_workspace_context
+    assert "integration level unmeasured" in section
+    assert "integration level 0" not in section
+    assert context.absent_signals["integration_level"] == "no_producer"
+    assert context.extras["momentary_consciousness"] is None
+    snapshot = build_turn_snapshot(context, provider_id="mock")
+    assert snapshot["computed_state"]["integration_level"] is None
+    assert snapshot["absent_signals"]["integration_level"] == "no_producer"
+
+    # A neural orchestrator whose latest signals are missing: no input
+    neural = _Neural()
+    neural.latest_neural_signals = None
+    (context,) = _turns(_build(neural_orchestrator=neural), 1)
+    assert context.consciousness_state.integration_level is None
+    assert context.absent_signals["integration_level"] == "no_input"
+    assert context.extras["momentary_consciousness"] is None
+
+    # Two usable signals: a measured level, not named absent
+    (context,) = _turns(_build(neural_orchestrator=_Neural()), 1)
+    level = context.consciousness_state.integration_level
+    assert level is not None and level > 0.0
+    assert "integration_level" not in context.absent_signals
+    assert f"integration level {level:.2f}" in (
+        context.theory_sections.global_workspace_context
+    )
+
+
+def test_integration_unmeasured_without_substrate():
+    from mtc.pipeline.message_persistence import build_turn_snapshot
+
+    orchestrator = _build()
+    for context in _turns(orchestrator, 3):
+        assert "integration level unmeasured" in (
+            context.theory_sections.global_workspace_context
+        )
+        snapshot = build_turn_snapshot(context)
+        assert snapshot["computed_state"]["integration_level"] is None
+
+
+def test_newly_optional_state_fields_are_named_when_absent():
+    """The state fields that became Optional (they have a non-None default or
+    none at all, so the default scan does not see them) are named with a
+    reason whenever the cycle leaves them None."""
+    orchestrator = _build()
+    first, second = _turns(orchestrator, 2)
+    expected_first = {
+        "integration_level": "no_producer",
+        "broadcast_coverage": "no_input",
+        "binding_quality": "no_input",
+        "protoself_stability": "warming_up",
+        "feeling_of_knowing": "warming_up",
+        "autobiographic_continuity": "no_input",
+    }
+    from mtc.pipeline.consciousness_orchestrator import NAMED_STATE_FIELDS
+
+    assert set(expected_first) <= set(NAMED_STATE_FIELDS)
+    state = first.consciousness_state
+    for name, reason in expected_first.items():
+        assert getattr(state, name) is None, name
+        assert first.absent_signals[name] == reason, name
+    # After the first cycle every None field is named without warming up; a
+    # measured one is not named
+    state = second.consciousness_state
+    for name in expected_first:
+        value = getattr(state, name)
+        if value is None:
+            assert second.absent_signals[name] in ("no_input", "no_producer"), name
+        else:
+            assert name not in second.absent_signals, name
+    # After the first cycle the body state has a previous reading
+    assert second.consciousness_state.protoself_stability is not None
+    assert "protoself_stability" not in second.absent_signals
+
+
+class _FakeClock:
+    def __init__(self, start=1000.0):
+        self.now = start
+
+    def __call__(self):
+        return self.now
+
+
+def _minute_apart(refractory_clock):
+    from mtc.consciousness.enhanced_global_workspace import TemporalWorkspaceConfig
+
+    clock = _FakeClock()
+    workspace = EnhancedGlobalWorkspace(
+        phi_tracker=PhiTracker(min_transitions=3),
+        temporal_config=TemporalWorkspaceConfig(refractory_clock=refractory_clock),
+        clock=clock,
+    )
+    orchestrator = _build(
+        workspace=workspace, augmenter_config=CycleAugmenterConfig.all_off()
+    )
+
+    async def run():
+        out = []
+        for i in range(3):
+            raw = _raw(orchestrator, f"What should we plant in bed {i}?")
+            out.append(await orchestrator.process(raw))
+            clock.now += 60.0
+        return out
+
+    return asyncio.run(run())
+
+
+def test_turns_a_minute_apart_all_focus_on_the_message():
+    contexts = _minute_apart("elapsed")
+    assert [c.winner_is_message for c in contexts] == [True, True, True]
+    for context in contexts:
+        assert context.cycle_ok
+        assert context.consciousness_state.ignition_events > 0
+        assert context.prompt_context.splitlines()[0] == (
+            "The workspace is focused on the incoming message."
+        )
+        assert context.workspace_winner == "incoming message"
+    # The simulated per-cycle clock keeps the refractory cadence whatever the
+    # real time between turns
+    simulated = _minute_apart("per_cycle")
+    assert [c.winner_is_message for c in simulated] == [True, False, False]
+
+
 def test_phi_recorded_once_per_cycle():
     tracker = PhiTracker(min_transitions=3)
     calls = []
@@ -234,12 +364,17 @@ def test_causal_emergence_every_n_cycles():
 def test_pad_on_state_every_cycle():
     orchestrator = _build()
     contexts = _turns(orchestrator, 3)
-    for context in contexts:
+    for index, context in enumerate(contexts):
         state = context.consciousness_state
         assert state.pad_pleasure is not None
         assert 0.0 <= state.pad_arousal <= 1.0
         assert state.pad_label
-        assert "protoself_arousal" in context.pad_sources_measured
+        # The first body update has no previous body state, so its arousal is
+        # not a measured input; every later one is
+        if index == 0:
+            assert "protoself_arousal" not in context.pad_sources_measured
+        else:
+            assert "protoself_arousal" in context.pad_sources_measured
         assert not any(name.startswith("pad_") for name in context.absent_signals)
     assert orchestrator.augmenter.pad_model.history_length == 3
     # Pinned off: nothing recorded and the absence is named as disabled
@@ -259,10 +394,12 @@ def test_prm_external_and_internal_signals():
     assert kinds.count(("user_message", "external")) == 1
     assert kinds.count(("thought_generator", "internal")) == 3
     assert len(kinds) == 4
-    assert context.consciousness_state.prm_discrimination == pytest.approx(
-        monitor.discrimination()
-    )
-    assert "prm_discrimination" not in context.absent_signals
+    # Both kinds were seen but the pipeline supplies no attribution
+    # confidence, so nothing measures the discrimination: no prior stands in
+    assert monitor.get_statistics()["default_attribution_fraction"] == 1.0
+    assert monitor.discrimination() is None
+    assert context.consciousness_state.prm_discrimination is None
+    assert context.absent_signals["prm_discrimination"] == "no_input"
     # Only the message: nothing internal yet, so the signal is warming up
     fresh = _build(reality_monitor=PerceptualRealityMonitor())
     (context,) = _turns(fresh, 1)

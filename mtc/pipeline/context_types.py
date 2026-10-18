@@ -15,7 +15,10 @@ inputs that were measured this cycle; a failed cycle yields
 ``ModulatedContext.unavailable`` with an empty narrative, never a composed
 one; ``cycle_winner`` names a cycle's winner only when that cycle ignited.
 ``TurnResult.to_payload`` carries the speaker's display label only, never the
-identity's trust, role, authentication state or any token.
+identity's trust, role, authentication state or any token; it also carries the
+state of the safety gate for the turn (``SAFETY_GATE_STATES``: ``unchecked``
+when the check raised or did not run, ``applied`` only when it ran) and, for a
+blocked turn, the safety monitor's decision.
 
 The message, history, memories, thoughts and the speaker's name are private
 conversation data at runtime. Nothing here reads Settings or persists state.
@@ -35,7 +38,12 @@ ABSENT_REASONS: Tuple[str, ...] = (
     "no_producer",
     "no_input",
     "disabled",
+    "failed",
 )
+
+# The safety gate of a turn: no safety stack configured, skipped for a trusted
+# identity, a check that ran, or a check that raised or did not run.
+SAFETY_GATE_STATES: Tuple[str, ...] = ("absent", "bypassed", "applied", "unchecked")
 
 
 def cycle_winner(state: Any) -> Optional[Any]:
@@ -146,7 +154,14 @@ class ModulatedContext:
 
 @dataclass
 class TurnResult:
-    """The outcome of one turn as the caller sees it."""
+    """The outcome of one turn as the caller sees it.
+
+    ``safety_gate`` is one of ``SAFETY_GATE_STATES`` for a turn the pipeline
+    ran (None when the result was built elsewhere and nobody said);
+    ``safety_decision`` is the safety monitor's decision string for a blocked
+    turn (``emergency_shutdown`` when the conversations were suspended) and
+    None otherwise.
+    """
 
     success: bool
     response: Optional[str]
@@ -160,6 +175,17 @@ class TurnResult:
     speaker_label: str = ""
     provider_id: Optional[str] = None
     blocked: bool = False
+    safety_gate: Optional[str] = None
+    safety_decision: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.safety_gate is not None and self.safety_gate not in (
+            SAFETY_GATE_STATES
+        ):
+            raise ValueError(
+                f"safety_gate {self.safety_gate!r} is not in SAFETY_GATE_STATES "
+                f"{SAFETY_GATE_STATES}"
+            )
 
     def to_payload(self) -> Dict[str, Any]:
         """A JSON-ready view: the display label only, never identity internals
@@ -178,4 +204,6 @@ class TurnResult:
             "speaker_label": self.speaker_label,
             "provider_id": self.provider_id,
             "blocked": bool(self.blocked),
+            "safety_gate": self.safety_gate,
+            "safety_decision": self.safety_decision,
         }

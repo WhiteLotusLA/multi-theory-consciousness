@@ -359,3 +359,81 @@ async def test_works_against_committed_report_fields(tmp_path):
     round_trip = TransitionEvaluation.from_dict(evaluation.to_dict())
     assert round_trip == evaluation
     assert TransitionBaseline.from_dict(baseline.to_dict()) == baseline
+
+
+@pytest.mark.asyncio
+async def test_score_drift_ignores_an_insufficient_assessment(tmp_path):
+    # An insufficient report that carries 0.0 measured nothing: no drift is
+    # computed from it and no score alert is raised.
+    protocol = _protocol(
+        tmp_path,
+        assessor=FakeAssessor(
+            _report(overall=0.0, status="insufficient_data"),
+            _report(overall=0.6, status="measured"),
+        ),
+    )
+    baseline = await protocol.capture_pre_transition_baseline()
+    assert baseline.assessment["overall_score"] is None
+    assert baseline.assessment["status"] == "insufficient_data"
+    evaluation = await protocol.evaluate_post_transition()
+    assert evaluation.score_drift is None
+    assert evaluation.details["score"]["reason"] == "insufficient_data"
+    assert not any("score" in alert.lower() for alert in evaluation.alerts)
+    assert evaluation.recommendation == "insufficient_data"
+    # the other way round: a measured baseline against an insufficient 0.0
+    reverse = _protocol(
+        tmp_path / "reverse",
+        assessor=FakeAssessor(
+            _report(overall=0.6, status="measured"),
+            _report(overall=0.0, status="insufficient_data"),
+        ),
+    )
+    await reverse.capture_pre_transition_baseline()
+    after = await reverse.evaluate_post_transition()
+    assert after.score_drift is None
+    assert after.recommendation == "insufficient_data"
+    # a measured 0.0 is a number
+    measured = _protocol(
+        tmp_path / "measured",
+        assessor=FakeAssessor(
+            _report(overall=0.0, status="partial"),
+            _report(overall=0.01, status="partial"),
+        ),
+    )
+    await measured.capture_pre_transition_baseline()
+    assert (await measured.evaluate_post_transition()).score_drift == pytest.approx(
+        0.01
+    )
+
+
+@pytest.mark.asyncio
+async def test_restored_insufficient_baseline_gives_no_score_drift(tmp_path):
+    # A baseline file written before the rule (status insufficient_data with
+    # the report's 0.0 kept as the overall) is restored without that number.
+    first = _protocol(tmp_path, assessor=FakeAssessor(_report(overall=0.6)))
+    await first.capture_pre_transition_baseline()
+    path = tmp_path / "transitions" / "latest_baseline.json"
+    data = json.loads(path.read_text("utf-8"))
+    data["assessment"]["overall_score"] = 0.0
+    data["assessment"]["status"] = "insufficient_data"
+    path.write_text(json.dumps(data), "utf-8")
+    restored = _protocol(
+        tmp_path, assessor=FakeAssessor(_report(overall=0.6, status="measured"))
+    )
+    evaluation = await restored.evaluate_post_transition()
+    assert evaluation.score_drift is None
+    assert evaluation.details["score"]["pre"] is None
+    assert evaluation.details["score"]["reason"] == "insufficient_data"
+    assert not any("score" in alert.lower() for alert in evaluation.alerts)
+    assert evaluation.recommendation == "insufficient_data"
+    report = restored.generate_transition_report(evaluation)
+    assert "Baseline assessment: no overall score (insufficient_data)" in report
+    # a restored measured baseline keeps its number
+    data["assessment"]["overall_score"] = 0.5
+    data["assessment"]["status"] = "partial"
+    path.write_text(json.dumps(data), "utf-8")
+    measured = _protocol(
+        tmp_path, assessor=FakeAssessor(_report(overall=0.6, status="measured"))
+    )
+    after = await measured.evaluate_post_transition()
+    assert after.score_drift == pytest.approx(0.1)

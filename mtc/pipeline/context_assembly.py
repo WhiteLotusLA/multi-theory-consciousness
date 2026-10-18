@@ -24,8 +24,11 @@ into user turns labelled ``tool <name>``, repeated assistant sentences removed
 when ``NIGHT_SEAM_MARKER_ENABLED`` is true (``apply_night_seam``), the
 ``window_notes`` that describe what was changed, and ``last_turn_at``, the
 newest timestamp before the current message (the clock's gap lines read the
-time before this turn). The window never trims tokens: the brain runs the one
-budget pass. The session's own history is never modified here.
+time before this turn): with ``now`` given only entries stamped strictly
+earlier than ``now`` count, so a tool turn stamped with this turn's time is
+not the last exchange, and the session's ``last_turn_at`` is the fallback. The
+window never trims tokens: the brain runs the one budget pass. The session's
+own history is never modified here.
 
 Config keys: ``PROMPT_MAX_THOUGHTS`` and ``PROMPT_MAX_GISTS`` (the caps the
 thought and gist reads take), ``RAG_TOP_K``, ``RAG_MIN_SCORE`` and
@@ -39,7 +42,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from mtc.core.config import Settings, get_settings
@@ -208,6 +211,23 @@ def _split_current(
     return entries, ""
 
 
+def _last_turn_before(
+    history: Sequence[Dict[str, Any]], now: Optional[datetime]
+) -> Optional[datetime]:
+    """The newest readable timestamp of ``history``; with ``now`` given, the
+    newest one strictly earlier than ``now`` (a naive ``now`` counts as
+    UTC)."""
+    if now is None:
+        return infer_last_turn_at(history)
+    limit = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    earlier: List[datetime] = []
+    for entry in history:
+        moment = infer_last_turn_at([entry])
+        if moment is not None and moment < limit:
+            earlier.append(moment)
+    return max(earlier) if earlier else None
+
+
 def build_brain_window(
     session: Session,
     identity: SpeakerIdentity,
@@ -253,7 +273,7 @@ def build_brain_window(
             "window; the stored conversation is unchanged."
         )
 
-    last_turn_at = infer_last_turn_at(history) or session.last_turn_at
+    last_turn_at = _last_turn_before(history, now) or session.last_turn_at
 
     seamed = apply_night_seam(history, now=now, settings=cfg)
     if len(seamed) > len(history):

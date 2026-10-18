@@ -27,7 +27,10 @@ context) and runs one hook per step, in ``STEP_ORDER``:
    and one emotional-history row (the label, its confidence and the PAD
    coordinate) through the persistence layer.
 5. ``learning``: the learning system records the turn with the state's
-   metrics.
+   metrics and, when this cycle's PAD coordinate is complete, the turn's
+   affect as ``emotion_after`` (the emotion step's label, the pleasure as
+   valence and the arousal); its outcomes classify the shift of that affect
+   between consecutive turns of a conversation.
 6. ``theory_of_mind``: the speaker's model is updated inside
    ``SpeakerTrust.use_identity``, so its trust is the verified identity's. A
    speaker who is not authenticated is modelled under the bracketed label, so
@@ -43,9 +46,9 @@ context) and runs one hook per step, in ``STEP_ORDER``:
     with the PAD coordinate.
 11. ``affect_shadow``: the affect shadow tap (``affect_shadow``), shadow only.
 12. ``identity_marker``: every ``identity_marker_every_n`` turns a marker
-    with the values this turn supplies only (a conversation anchor, the
-    measured PAD coordinate as the emotional fingerprint, the provider id):
-    no trait, value or growth stage is invented.
+    with the values this turn supplies only (a conversation anchor, the PAD
+    model's coordinate for this cycle as the emotional fingerprint, the
+    provider id): no trait, value or growth stage is invented.
 13. ``baseline``: the orchestrator's baseline assessment is refreshed when
     it is due, with the orchestrator's due reason as the snapshot trigger (an
     assessment the orchestrator could not run reads ``failed: assessment``;
@@ -171,12 +174,15 @@ class _Skip(Exception):
 
 
 def _pad_state(pad_model: Any, state: Any) -> Dict[str, Optional[float]]:
-    """This cycle's measured PAD coordinate, never an earlier one.
+    """This cycle's PAD coordinate as the PAD model computed it from the
+    inputs listed in ``pad_sources_measured``, never an earlier one.
 
-    The PAD recorded on the cycle's state comes first. When the state carries
-    none, the PAD model's latest reading counts only when it was taken during
-    this cycle (its timestamp is not older than the state's); otherwise every
-    axis is None.
+    The stored copies of the coordinate (the emotional-history row, the
+    episodic emotional context, the identity marker) do not carry that list;
+    the turn's provenance snapshot does. The PAD recorded on the cycle's
+    state comes first. When the state carries none, the PAD model's latest
+    reading counts only when it was taken during this cycle (its timestamp is
+    not older than the state's); otherwise every axis is None.
     """
     coordinate = pad_coordinate(state)
     if any(value is not None for value in coordinate.values()):
@@ -466,10 +472,23 @@ class PostTurnIntegrator:
             return "absent"
         state = record.state
         urgency = getattr(state, "homeostatic_urgency", None)
+        # The turn's affect for the learning system's outcome: this cycle's
+        # PAD (the state's, or the PAD model's reading taken this cycle) with
+        # the emotion step's label, only when the coordinate is complete
+        pad = context["pad"]
+        emotion_after: Optional[Dict[str, Any]] = None
+        if _pad_complete(pad):
+            emotion = report.details.get("emotion")
+            emotion_after = {
+                "label": emotion.get("label") if isinstance(emotion, Mapping) else None,
+                "valence": pad["valence"],
+                "arousal": pad["arousal"],
+            }
         await self.learning.record_turn(
             speaker=self._label(record.identity),
             message=record.message,
             response=context["spoken"],
+            emotion_after=emotion_after,
             state=state,
             conversation_depth=max(1, int(record.turn_number)),
             conversation_id=record.conversation_id,

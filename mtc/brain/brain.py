@@ -16,8 +16,14 @@ system goes through it, and it keeps three promises:
 - One provider. The active provider is ``LLM_PROVIDER``. ``initialize`` runs
   its health check; an unhealthy provider leaves the brain degraded, every
   call raises ``BrainUnavailableError``, and no other provider is tried. A
-  provider failure during a call raises the same error; a timeout propagates
-  as ``ProviderTimeoutError`` so the pipeline can report it as such.
+  degraded brain re-runs the health check when a call arrives, at most once
+  every ``health_recheck_s`` seconds (``HEALTH_RECHECK_S``, a code constant),
+  and serves the call once the provider reports healthy again; a provider
+  that is healthy is never probed on the call path. A provider failure during
+  a call raises the same error; a timeout propagates as
+  ``ProviderTimeoutError`` so the pipeline can report it as such. The outcome
+  of the last real provider call (``last_call_ok`` in ``status()``) is a
+  record only and never refuses a call.
 - One budget pass. ``think_with_context`` renders the system prompt, computes
   the history budget from the prompt size, ``max_tokens`` and ``CONTEXT_SIZE``
   (bounded by ``HISTORY_TOKEN_BUDGET``) and trims the history once with
@@ -46,6 +52,7 @@ choice. Messages carry private conversation text and are never logged.
 import asyncio
 import inspect
 import logging
+import time
 from contextlib import suppress
 from datetime import datetime, timezone
 from typing import (
@@ -91,6 +98,8 @@ logger = logging.getLogger(__name__)
 STREAM_RETRY_SENTINEL = "<|retry|>"
 HISTORY_ROLES = ("user", "assistant")
 DEFAULT_THINK_MAX_TOKENS = 512
+# Seconds between two health checks a degraded brain runs on the call path.
+HEALTH_RECHECK_S = 5.0
 
 
 def _now() -> datetime:
@@ -123,8 +132,22 @@ class LLMBrain:
         registry: Optional[ProviderRegistry] = None,
         assembler: Optional[PromptAssembler] = None,
         settings: Optional[Settings] = None,
+        *,
+        health_recheck_s: float = HEALTH_RECHECK_S,
+        monotonic: Optional[Callable[[], float]] = None,
     ) -> None:
+        if not float(health_recheck_s) >= 0.0:
+            raise ValueError("health_recheck_s must be >= 0")
         self._settings = settings
+        self.health_recheck_s = float(health_recheck_s)
+        self._monotonic: Callable[[], float] = monotonic or time.monotonic
+        # When the last health check started (monotonic seconds); None before.
+        self._health_probe_at: Optional[float] = None
+        # The outcome of the last real provider call: None before any call,
+        # True when a completion came back, False on a provider error or
+        # timeout. A record only: it never refuses a call.
+        self._last_call_ok: Optional[bool] = None
+        self._last_call_at: Optional[datetime] = None
         self.registry = (
             registry if registry is not None else ProviderRegistry(settings=settings)
         )
@@ -199,10 +222,12 @@ class LLMBrain:
         """Initialize the active provider and record its health.
 
         An unhealthy provider leaves the brain degraded: calls raise
-        ``BrainUnavailableError`` until a later ``initialize`` or
-        ``refresh_health`` finds it healthy. No other provider is tried.
+        ``BrainUnavailableError`` until a later health check finds it healthy
+        (``initialize``, ``refresh_health``, or the re-check a call runs at
+        most every ``health_recheck_s`` seconds). No other provider is tried.
         """
         provider = self._active_provider()
+        self._health_probe_at = self._monotonic()
         try:
             await provider.initialize()
             health = await provider.health_check()
@@ -217,6 +242,7 @@ class LLMBrain:
     async def refresh_health(self) -> HealthStatus:
         """Re-run the active provider's health check and record the result."""
         provider = self._active_provider()
+        self._health_probe_at = self._monotonic()
         try:
             health = await provider.health_check()
         except ProviderError as exc:
@@ -260,8 +286,23 @@ class LLMBrain:
         except RuntimeError as exc:
             raise BrainUnavailableError(str(exc)) from exc
 
-    def _ready_provider(self) -> Any:
+    def _recheck_due(self) -> bool:
+        """True when the recorded health is not ok and the last health check
+        started at least ``health_recheck_s`` seconds ago."""
+        if self._health is None or self._health.ok:
+            return False
+        if self._health_probe_at is None:
+            return True
+        return (self._monotonic() - self._health_probe_at) >= self.health_recheck_s
+
+    async def _ready_provider(self) -> Any:
+        """The active provider, or ``BrainUnavailableError`` while the recorded
+        health is not ok. A degraded brain re-checks the provider first when
+        the interval has passed; a healthy record is never re-checked here."""
         provider = self._active_provider()
+        if self._recheck_due():
+            await self.refresh_health()
+            provider = self._active_provider()
         if self._health is not None and not self._health.ok:
             raise BrainUnavailableError(
                 f"provider {provider.model_info().id} is unavailable: "
@@ -398,19 +439,23 @@ class LLMBrain:
         active_inference_context: Optional[Any] = None,
         global_workspace_context: Optional[Any] = None,
         max_tokens: Optional[int] = None,
+        last_turn_at: Optional[datetime] = None,
     ) -> BrainReply:
-        """Render the system prompt, fit the history once and call the model."""
+        """Render the system prompt, fit the history once and call the model.
+
+        ``last_turn_at`` is the time of the last exchange for the clock
+        section; when it is not given the newest history entry's timestamp is
+        used (None when that entry has none, such as a clock note).
+        """
         if image is not None:
-            raise CapabilityUnavailableError(
-                "image input is not part of this release (VISION_ENABLED is false)"
-            )
+            raise CapabilityUnavailableError("image input is not part of this release")
         if speaker is not None and not isinstance(speaker, SpeakerView):
             raise TypeError(
                 "speaker must be a SpeakerView built from the verified identity, "
                 "not a name"
             )
         cfg = self._cfg()
-        provider = self._ready_provider()
+        provider = await self._ready_provider()
         overrides = dict(generation_params or {})
         chosen_max = max_tokens or overrides.get("max_tokens") or cfg.LLM_MAX_TOKENS
         temperature = overrides.get("temperature")
@@ -421,7 +466,8 @@ class LLMBrain:
             thinking = bool(cfg.THINKING_MODE) and bool(provider.supports_thinking())
 
         history = list(conversation_history or [])
-        last_turn_at = history[-1].get("timestamp") if history else None
+        if last_turn_at is None:
+            last_turn_at = history[-1].get("timestamp") if history else None
         inputs = PromptInputs(
             speaker=speaker,
             core_memory=self._core_memory(core_memory),
@@ -525,7 +571,7 @@ class LLMBrain:
         overrides: Optional[Mapping[str, Any]] = None,
         stream_callback: Optional[Callable[[str], Any]] = None,
     ) -> BrainReply:
-        provider = self._ready_provider()
+        provider = await self._ready_provider()
         cfg = self._cfg()
         family = get_family(cfg.LLM_TEMPLATE_FAMILY)
         max_retries = max(0, int(cfg.THINKING_LOOP_MAX_RETRIES))
@@ -545,6 +591,7 @@ class LLMBrain:
             try:
                 if stream_callback is None:
                     result = await provider.complete(params)
+                    self._record_call(True)
                     reasoning, text = self._split(result, family.name)
                     if thinking_mode and reasoning:
                         ThinkingLoopDetector.for_family(family.name).check(reasoning)
@@ -552,7 +599,10 @@ class LLMBrain:
                     reasoning, text, result = await self._stream(
                         provider, params, family.name, thinking_mode, stream_callback
                     )
+                    self._record_call(True)
             except ThinkingLoopDetected as exc:
+                # The provider answered; the reasoning it sent looped.
+                self._record_call(True)
                 attempt += 1
                 logger.warning(
                     "thinking loop detected (%s) on attempt %d; %d retries allowed",
@@ -572,10 +622,12 @@ class LLMBrain:
             except ProviderTimeoutError:
                 self.timeouts += 1
                 self.last_error = "timeout"
+                self._record_call(False)
                 raise
             except ProviderError as exc:
                 self.provider_errors += 1
                 self.last_error = type(exc).__name__
+                self._record_call(False)
                 raise BrainUnavailableError(
                     f"provider {provider.model_info().id} failed: {exc}"
                 ) from exc
@@ -686,6 +738,18 @@ class LLMBrain:
             provider_id=provider.model_info().id,
         )
 
+    def _record_call(self, ok: bool) -> None:
+        """Record the outcome of a real provider call and its time; nothing
+        reads it to refuse a call."""
+        self._last_call_ok = bool(ok)
+        self._last_call_at = _now()
+
+    @property
+    def last_call_ok(self) -> Optional[bool]:
+        """None before any provider call, True when the last one returned a
+        completion, False when it raised a provider error or timed out."""
+        return self._last_call_ok
+
     def _count_no_answer(self, reason: str) -> None:
         self.no_answers[reason] = self.no_answers.get(reason, 0) + 1
 
@@ -711,6 +775,11 @@ class LLMBrain:
             "initialized": self._initialized,
             "available": self.available,
             "health": self._health.as_dict() if self._health is not None else None,
+            "health_recheck_s": self.health_recheck_s,
+            "last_call_ok": self._last_call_ok,
+            "last_call_at": (
+                None if self._last_call_at is None else self._last_call_at.isoformat()
+            ),
             "family": cfg.LLM_TEMPLATE_FAMILY,
             "thinking_mode": bool(cfg.THINKING_MODE),
             "calls": self.calls,

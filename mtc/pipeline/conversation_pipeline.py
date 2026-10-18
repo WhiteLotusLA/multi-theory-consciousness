@@ -6,15 +6,24 @@
    (``use_identity``) for every name-keyed trust lookup of the turn;
 2. route the session by ``SpeakerTrust.session_key`` (a new session is
    rehydrated from the conversation repository only for an authenticated
-   speaker or the anonymous default; a claimed name starts empty);
+   speaker or the anonymous default, with the speaker's turns and the replies
+   and tool rows addressed to the speaker's stored name; a claimed name starts
+   empty);
 3. notify the sleep scheduler of activity and pause the autonomous-life loop;
 4. run the safety gate unless the identity is trusted
    (``SafetySystemsIntegration.pre_message_check`` with the trust source's
-   ``safety_role``): a deny ends the turn ``blocked`` and stores nothing, a
-   check that could not run is counted and the turn continues;
-5. append the user entry, summarize and trim the history, persist the user turn
-   (the participant key is the session key, so a bare name never rehydrates an
-   authenticated speaker's history);
+   ``safety_role``): a deny ends the turn ``blocked`` with the monitor's
+   decision and stores nothing; a check that raised or reported that it did
+   not run is counted and the turn record says ``unchecked``; with
+   ``SAFETY_GATE_FAIL_CLOSED`` true (the default) the turn then ends with
+   ``safety_unavailable`` and stores nothing, with it false the turn
+   continues; the turn record names what the check did with the trust
+   compass (``last_turn['safety_compass']``: status and method);
+5. write the conversation start once per session (only here, after the gate:
+   a refused turn leaves no conversation-start rows), append the user entry,
+   summarize and trim the history, persist the user turn (the participant key
+   is the session key, so a bare name never rehydrates an authenticated
+   speaker's history);
 6. offer the message to the turn plugins: a ``reply`` outcome ends the turn
    with the plugin's text stored under its name with the ``tool`` role, never
    as the system's words; a ``tool_turn`` joins the window and the turn goes on;
@@ -26,21 +35,27 @@
    inside the orchestrator's temperature bounds; drive adjustments are
    reported, never applied;
 10. build the brain window and call ``think_with_context`` through the
-    foreground flight with the five theory sections, bounded by
-    ``GENERATION_TIMEOUT_S`` (or the call's ``timeout_s``);
+    foreground flight with the five theory sections and the window's
+    ``last_turn_at``, bounded by ``GENERATION_TIMEOUT_S`` (or the call's
+    ``timeout_s``);
 11. offer the reply to the response plugins (each hop a tool turn and one more
     bounded brain call, up to the registry's cap);
 12. split reasoning from spoken text, append and persist the assistant turn
-    with the provenance snapshot (``build_turn_snapshot``), run the post-turn
-    integrator (a failure there never discards the reply), resume the loop and
-    return the ``TurnResult``.
+    with the provenance snapshot (``build_turn_snapshot``), call the caller's
+    ``on_generated`` once (the reply is stored; a failing callback is counted
+    under ``on_generated``), run the post-turn integrator bounded by
+    ``PipelineConfig.post_turn_timeout_s`` (a failure or a timeout there is
+    counted under ``post_turn`` and never discards the reply), resume the loop
+    and return the ``TurnResult``. A turn plugin's reply calls
+    ``on_generated`` once after its tool row is stored.
 
 A ``NoAnswerError``, a provider or pipeline timeout and ``BrainUnavailableError``
 end the turn with ``success`` False and an ``error_code`` (``no_answer``,
 ``generation_timeout``, ``brain_unavailable``); no assistant row is written and
 no text is composed in the system's place. A turn its caller cancels (the
-API's first-token and stall bounds, a client that left) re-raises the
-cancellation after counting it (``status()['cancelled']``). Ending a
+API's first-token and stall bounds, or server shutdown) re-raises the
+cancellation after counting it (``status()['cancelled']``). A client that
+disconnects does not cancel its turn: the turn completes and is stored. Ending a
 conversation writes the memory manager's end-of-conversation line naming the
 speaker as the session's stored rows do: a claimed name stays a bracketed
 claim. ``LLMFlight`` is the single-flight
@@ -53,8 +68,9 @@ it directly. Every step failure outside the brain's own errors is counted by
 name, logged at WARNING the first time and every hundredth, raised under
 ``DEBUG``, and reported in ``status()``.
 
-Config keys read at call time: ``SYSTEM_NAME``, ``GENERATION_TIMEOUT_S`` and
-``DEBUG``; trust comes from ``SpeakerTrust`` only. Nothing here is persisted
+Config keys read at call time: ``SYSTEM_NAME``, ``GENERATION_TIMEOUT_S``,
+``SAFETY_GATE_FAIL_CLOSED`` and ``DEBUG``; trust comes from ``SpeakerTrust``
+only. Nothing here is persisted
 beyond what the persistence layer writes. Messages, replies, speaker names and
 tokens are private at runtime; log lines carry step names and counts only.
 """
@@ -62,6 +78,7 @@ tokens are private at runtime; log lines carry step names and counts only.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import re
 import time
@@ -69,7 +86,16 @@ import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Sequence
+from typing import (
+    Any,
+    AsyncIterator,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from mtc.brain.protocol import (
     BrainReply,
@@ -99,7 +125,13 @@ from mtc.pipeline.speaker_trust import SpeakerIdentity, SpeakerTrust
 
 logger = logging.getLogger(__name__)
 
-ERROR_CODES = ("blocked", "no_answer", "brain_unavailable", "generation_timeout")
+ERROR_CODES = (
+    "blocked",
+    "no_answer",
+    "brain_unavailable",
+    "generation_timeout",
+    "safety_unavailable",
+)
 END_SUMMARY_FORMAT = "Conversation with {name} ended. {count} messages exchanged."
 RECENT_MESSAGES = 6
 _ERROR_TEXTS = {
@@ -109,6 +141,8 @@ _ERROR_TEXTS = {
     "generation_timeout": "The generation ran past its time bound; nothing was "
     "stored as a reply.",
     "blocked": "The safety gate declined this message; nothing was stored.",
+    "safety_unavailable": "The safety check could not run; the message was not "
+    "processed and nothing was stored.",
 }
 
 Clock = Callable[[], datetime]
@@ -120,7 +154,11 @@ def _utc_now() -> datetime:
 
 @dataclass(frozen=True)
 class PipelineConfig:
-    """Session, summary and rehydration limits of the facade."""
+    """Session, summary, rehydration and post-turn limits of the facade.
+
+    ``post_turn_timeout_s`` bounds the post-turn integrator of one turn; the
+    reply is stored before it runs and stands when the bound fires.
+    """
 
     max_history: int = 100
     summarize_threshold: int = 40
@@ -128,6 +166,7 @@ class PipelineConfig:
     end_summary_importance: float = 6.0
     rehydrate_hours: float = 24.0
     rehydrate_limit: int = 40
+    post_turn_timeout_s: float = 300.0
 
     def __post_init__(self) -> None:
         if int(self.max_history) < 1:
@@ -138,6 +177,8 @@ class PipelineConfig:
             raise ValueError("end_summary_importance must be within [0, 10]")
         if float(self.rehydrate_hours) <= 0 or int(self.rehydrate_limit) < 0:
             raise ValueError("rehydrate_hours must be > 0 and rehydrate_limit >= 0")
+        if not float(self.post_turn_timeout_s) > 0.0:
+            raise ValueError("post_turn_timeout_s must be > 0")
 
 
 class LLMFlight:
@@ -292,6 +333,21 @@ class GatedBrain:
         if name.startswith("_"):
             raise AttributeError(name)
         return getattr(self._brain, name)
+
+
+def _compass_record(check: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """What the safety check did with the trust compass this turn: its status
+    (``not_needed``, ``consulted``, ``absent``, ``failed``, ``suspended``) and
+    the method of a consulted reflection (``keyword`` or ``deep``); None when
+    no check result came back."""
+    assessment = check.get("assessment") if isinstance(check, dict) else None
+    if not isinstance(assessment, dict):
+        return None
+    method = assessment.get("compass_method")
+    return {
+        "status": assessment.get("compass_status"),
+        "method": None if method is None else str(method),
+    }
 
 
 def _plain_coherence(package: Dict[str, Any]) -> Optional[str]:
@@ -463,6 +519,7 @@ class ConversationPipeline:
         cycle_ok: Optional[bool] = None,
         provider_id: Optional[str] = None,
         blocked: bool = False,
+        safety_decision: Optional[str] = None,
     ) -> TurnResult:
         if error_code is not None:
             self._errors[error_code] = self._errors.get(error_code, 0) + 1
@@ -479,6 +536,8 @@ class ConversationPipeline:
             speaker_label=self._stored_name(identity),
             provider_id=provider_id,
             blocked=blocked,
+            safety_gate=self._last_turn.get("safety_gate"),
+            safety_decision=safety_decision,
         )
 
     # ------------------------------------------------------------------
@@ -495,14 +554,18 @@ class ConversationPipeline:
             identity.authenticated or identity.is_default
         ):
             try:
-                # Rows come back with their stored role; a plugin's reply is a
-                # tool row and joins the window as a labelled tool turn.
+                # Two reads under the session key: the speaker's turns
+                # (addressed to the system) and the replies and tool rows
+                # (addressed to the speaker's stored name). Rows come back
+                # with their stored role; a plugin's reply is a tool row and
+                # joins the window as a labelled tool turn.
                 history = await rehydrate_recent_history(
                     self.repository,
                     key,
                     hours=float(self.config.rehydrate_hours),
                     limit=int(self.config.rehydrate_limit),
                     settings=self._cfg(),
+                    reply_addressee=self._stored_name(identity),
                 )
             except Exception as exc:  # noqa: BLE001 - counted, session starts empty
                 self._count_failure("rehydrate", exc)
@@ -512,13 +575,25 @@ class ConversationPipeline:
             history,
             speaker_label=self._stored_name(identity),
         )
+        return session
+
+    async def _record_start(self, session: Session) -> None:
+        """Write the conversation start once, after the gate let a turn in.
+
+        A turn the safety gate refuses (blocked or safety_unavailable) stores
+        nothing, so a session whose first turns were refused has no
+        conversation-start rows until a turn passes the gate. One attempt per
+        session: a failure is counted and not retried.
+        """
+        if session.start_recorded:
+            return
+        session.start_recorded = True
         try:
             await self.persistence.store_conversation_start(
-                session.conversation_id, key
+                session.conversation_id, session.key
             )
         except Exception as exc:  # noqa: BLE001 - counted
             self._count_failure("conversation_start", exc)
-        return session
 
     # ------------------------------------------------------------------
     # The turn
@@ -533,8 +608,15 @@ class ConversationPipeline:
         stream_callback: Optional[Callable[[str], Any]] = None,
         request_id: Optional[str] = None,
         timeout_s: Optional[float] = None,
+        on_generated: Optional[Callable[[], Any]] = None,
     ) -> TurnResult:
-        """Run one turn; see the module docstring for the order of steps."""
+        """Run one turn; see the module docstring for the order of steps.
+
+        ``on_generated`` is called once, with no argument, after the reply
+        (or a turn plugin's tool row) is stored and before the post-turn
+        work; a coroutine it returns is awaited. It is not called for a turn
+        that stored no reply.
+        """
         async with self._lock():
             self._turns += 1
             identity = self.speaker_trust.verify(speaker, speaker_token)
@@ -546,21 +628,35 @@ class ConversationPipeline:
                         stream_callback=stream_callback,
                         request_id=request_id,
                         timeout_s=timeout_s,
+                        on_generated=on_generated,
                     )
                 except asyncio.CancelledError:
                     self._count_cancelled()
                     raise
 
     def _count_cancelled(self) -> None:
-        """Count a turn its caller cancelled (a generation bound of the API, a
-        client that left); the cancellation itself propagates. Logged the
-        first time and every hundredth."""
+        """Count a turn its caller cancelled (the API's first-token and stall
+        bounds, or server shutdown); the cancellation itself propagates. A
+        client that disconnects does not cancel its turn: the turn completes
+        and is stored. Logged the first time and every hundredth."""
         self._cancelled += 1
         self._last_turn["error"] = "cancelled"
         if self._cancelled == 1 or self._cancelled % 100 == 0:
             logger.warning(
                 "pipeline turn cancelled by its caller (%d so far)", self._cancelled
             )
+
+    async def _mark_generated(self, on_generated: Optional[Callable[[], Any]]) -> None:
+        """Tell the caller the reply is stored; a failing callback is counted
+        under ``on_generated`` and never undoes the reply."""
+        if on_generated is None:
+            return
+        try:
+            outcome = on_generated()
+            if inspect.isawaitable(outcome):
+                await outcome
+        except Exception as exc:  # noqa: BLE001 - counted, the reply stands
+            self._count_failure("on_generated", exc)
 
     def _notify_turn_started(self) -> None:
         scheduler = self.sleep_scheduler
@@ -584,26 +680,45 @@ class ConversationPipeline:
             except Exception as exc:  # noqa: BLE001 - counted
                 self._count_failure("autonomous_life", exc)
 
-    async def _gate(self, message: str, identity: SpeakerIdentity) -> Optional[str]:
-        """Run the safety gate; the decision string when it denied, else None."""
-        if self.safety is None or identity.trusted:
-            return None
+    async def _gate(
+        self, message: str, identity: SpeakerIdentity
+    ) -> Tuple[str, Optional[str], Optional[Dict[str, Any]]]:
+        """Run the safety gate.
+
+        Returns the gate state for the turn record (``absent`` without a
+        safety stack, ``bypassed`` for a trusted identity, ``applied`` only
+        when the check reports ``checked`` True, ``unchecked`` when it raised
+        or reported that it did not run), the decision string when the check
+        denied the message (else None), and the check's result (None when it
+        returned none). A check that did not run is counted under
+        ``safety_gate``.
+        """
+        if self.safety is None:
+            return "absent", None, None
+        if identity.trusted:
+            return "bypassed", None, None
         try:
             result = await self.safety.pre_message_check(
                 message,
                 self._stored_name(identity),
                 speaker_role=self.speaker_trust.safety_role(identity),
             )
-        except Exception as exc:  # noqa: BLE001 - counted; the turn goes on
+        except Exception as exc:  # noqa: BLE001 - counted; reported unchecked
             self._count_failure("safety_gate", exc)
-            return None
+            return "unchecked", None, None
+        if not isinstance(result, dict):
+            self._count_failure(
+                "safety_gate", TypeError("the safety check returned no result")
+            )
+            return "unchecked", None, None
+        state = "applied" if result.get("checked") is True else "unchecked"
         if result.get("safe") is False:
-            return str(result.get("decision") or "deny")
-        if not result.get("checked"):
+            return state, str(result.get("decision") or "deny"), result
+        if state == "unchecked":
             self._count_failure(
                 "safety_gate", RuntimeError("the safety check did not run")
             )
-        return None
+        return state, None, result
 
     async def _persist_turn(
         self,
@@ -713,6 +828,7 @@ class ConversationPipeline:
         window_notes: Sequence[str],
         stream_callback: Optional[Callable[[str], Any]],
         timeout_s: float,
+        last_turn_at: Optional[datetime] = None,
     ) -> BrainReply:
         sections = modulated.theory_sections.as_dict()
         async with self.flight.foreground():
@@ -738,6 +854,7 @@ class ConversationPipeline:
                     window_notes=list(window_notes),
                     speaker=identity.view(),
                     stream_callback=stream_callback,
+                    last_turn_at=last_turn_at,
                     **sections,
                 ),
                 timeout=timeout_s,
@@ -751,6 +868,7 @@ class ConversationPipeline:
         stream_callback: Optional[Callable[[str], Any]],
         request_id: Optional[str],
         timeout_s: Optional[float],
+        on_generated: Optional[Callable[[], Any]] = None,
     ) -> TurnResult:
         cfg = self._cfg()
         system = str(cfg.SYSTEM_NAME)
@@ -764,20 +882,35 @@ class ConversationPipeline:
             # caller reads it from the runtime instead of inferring it.
             "authenticated": bool(identity.authenticated),
             "trusted": bool(identity.trusted),
+            # Unchecked until the gate reports otherwise, so a gate that
+            # raises out of the turn (under DEBUG) never reads applied.
             "safety_gate": (
                 "absent"
                 if self.safety is None
-                else "bypassed" if identity.trusted else "applied"
+                else "bypassed" if identity.trusted else "unchecked"
             ),
         }
         self.last_modulated = None
         try:
-            decision = await self._gate(message, identity)
+            gate, decision, check = await self._gate(message, identity)
+            self._last_turn["safety_gate"] = gate
+            self._last_turn["safety_compass"] = _compass_record(check)
             if decision is not None:
                 self._last_turn["blocked"] = decision
                 return self._result(
-                    identity, session, success=False, error_code="blocked", blocked=True
+                    identity,
+                    session,
+                    success=False,
+                    error_code="blocked",
+                    blocked=True,
+                    safety_decision=decision,
                 )
+            if gate == "unchecked" and bool(cfg.SAFETY_GATE_FAIL_CLOSED):
+                self._last_turn["error"] = "safety_unavailable"
+                return self._result(
+                    identity, session, success=False, error_code="safety_unavailable"
+                )
+            await self._record_start(session)
 
             now = self._now()
             session.history.append(
@@ -800,7 +933,12 @@ class ConversationPipeline:
                 )
                 if outcome is not None and outcome.kind == "reply":
                     return await self._plugin_reply(
-                        identity, session, outcome.tool_name, outcome.content, system
+                        identity,
+                        session,
+                        outcome.tool_name,
+                        outcome.content,
+                        system,
+                        on_generated=on_generated,
                     )
                 if outcome is not None:
                     entry = tool_turn(
@@ -871,6 +1009,7 @@ class ConversationPipeline:
                     window_notes=window.window_notes,
                     stream_callback=stream_callback,
                     timeout_s=bound,
+                    last_turn_at=window.last_turn_at,
                 )
                 if not self.plugins.is_empty:
                     ctx = self._plugin_context(identity, message, session)
@@ -886,6 +1025,7 @@ class ConversationPipeline:
                             window_notes=window.window_notes,
                             stream_callback=stream_callback,
                             timeout_s=bound,
+                            last_turn_at=window.last_turn_at,
                         )
                         return hop.text
 
@@ -961,6 +1101,7 @@ class ConversationPipeline:
                 topics=topics or None,
             )
             turn_number = self.sessions.advance(session.key)
+            await self._mark_generated(on_generated)
 
             if self.post_turn is not None:
                 record = TurnRecord(
@@ -976,11 +1117,18 @@ class ConversationPipeline:
                     history=tuple(history),
                     provider_id=reply.provider_id,
                 )
+                bound_s = float(self.config.post_turn_timeout_s)
                 try:
-                    report = await self.post_turn.run(record)
+                    report = await asyncio.wait_for(
+                        self.post_turn.run(record), timeout=bound_s
+                    )
                     self._last_turn["post_turn"] = dict(
                         getattr(report, "steps", {}) or {}
                     )
+                except asyncio.TimeoutError as exc:
+                    # The reply is stored; the unfinished hooks are cancelled.
+                    self._last_turn["post_turn_error"] = "timeout"
+                    self._count_failure("post_turn", exc)
                 except Exception as exc:  # noqa: BLE001 - the reply stands
                     self._count_failure("post_turn", exc)
             self.sessions.trim(session.key)
@@ -1011,6 +1159,8 @@ class ConversationPipeline:
         tool_name: str,
         content: str,
         system: str,
+        *,
+        on_generated: Optional[Callable[[], Any]] = None,
     ) -> TurnResult:
         """A turn plugin answered: stored under its name, never as the system."""
         now = self._now()
@@ -1031,6 +1181,7 @@ class ConversationPipeline:
             to_speaker=self._stored_name(identity),
         )
         self.sessions.advance(session.key)
+        await self._mark_generated(on_generated)
         self._plugin_replies += 1
         self._last_turn["plugin_reply"] = tool_name
         return self._result(
@@ -1055,7 +1206,14 @@ class ConversationPipeline:
         return f"[{session.key.split(':', 1)[-1]}]"
 
     async def _end_session(self, session: Session) -> bool:
-        """Write the boilerplate summary memory and close the stores."""
+        """Write the boilerplate summary memory and close the stores.
+
+        A session whose every turn the safety gate refused never opened a
+        stored conversation (see ``_record_start``): ending it writes no
+        conversation end and no summary memory, so nothing is stored for it.
+        """
+        if not session.start_recorded:
+            return True
         name = self._summary_name(session)
         count = len(session.history)
         ok = True
@@ -1146,6 +1304,7 @@ class ConversationPipeline:
                 "end_summary_importance": self.config.end_summary_importance,
                 "rehydrate_hours": self.config.rehydrate_hours,
                 "rehydrate_limit": self.config.rehydrate_limit,
+                "post_turn_timeout_s": self.config.post_turn_timeout_s,
             },
         }
 

@@ -475,6 +475,100 @@ async def test_learning_record_turn_with_state_metrics(trust, cfg):
 
 
 @pytest.mark.asyncio
+async def test_learning_receives_the_turn_affect_when_the_pad_is_complete(trust, cfg):
+    source, _ = trust
+    order = []
+    fakes = _fakes(order)
+    integrator = PostTurnIntegrator(
+        speaker_trust=source,
+        emotion_extractor=fakes["emotion_extractor"],
+        learning=fakes["learning"],
+        settings=cfg,
+        config=PostTurnConfig(affect_shadow=False),
+    )
+    await integrator.run(_record(source.verify("Alice", None)))
+    ((_, kwargs),) = fakes["learning"].record_turn.calls
+    # The emotion step ran first: its label rides with this turn's PAD
+    assert kwargs["emotion_after"] == {
+        "label": "curious",
+        "valence": pytest.approx(0.4),
+        "arousal": pytest.approx(0.6),
+    }
+    # An incomplete PAD gives the learning system no affect to classify
+    partial = _record(source.verify("Alice", None), state=_state(pad_dominance=None))
+    await integrator.run(partial)
+    _, kwargs = fakes["learning"].record_turn.calls[-1]
+    assert kwargs.get("emotion_after") is None
+
+
+@pytest.mark.asyncio
+async def test_real_learning_system_records_a_valence_shift_on_the_second_turn(
+    trust, cfg
+):
+    from mtc.consciousness.learning import LearningSystem
+
+    source, _ = trust
+    learning = LearningSystem(settings=cfg, clock=lambda: T0)
+    integrator = PostTurnIntegrator(
+        speaker_trust=source,
+        learning=learning,
+        settings=cfg,
+        config=PostTurnConfig(affect_shadow=False),
+    )
+    conversation = str(uuid.uuid4())
+    for turn, pleasure in ((1, 0.0), (2, 0.4)):
+        record = _record(
+            source.verify("Alice", None),
+            turn=turn,
+            state=_state(pad_pleasure=pleasure),
+            conversation_id=conversation,
+        )
+        report = await integrator.run(record)
+        assert report.steps["learning"] == "ok"
+    first, second = learning.tracker.get_recent(2)
+    assert first.valence_shift is None
+    assert second.valence_shift == pytest.approx(0.4)
+
+    # The PAD of this cycle may come from the PAD model's reading when the
+    # state carries none; the learning system still sees the turn's affect
+    readings = iter(
+        [
+            PADState(pleasure=0.1, arousal=0.5, dominance=0.5),
+            PADState(pleasure=-0.3, arousal=0.5, dominance=0.5),
+        ]
+    )
+    latest = {}
+
+    def get_latest():
+        return latest["pad"]
+
+    model_learning = LearningSystem(settings=cfg, clock=lambda: T0)
+    from_model = PostTurnIntegrator(
+        speaker_trust=source,
+        learning=model_learning,
+        pad_model=SimpleNamespace(get_latest=get_latest),
+        settings=cfg,
+        config=PostTurnConfig(affect_shadow=False),
+    )
+    conversation = str(uuid.uuid4())
+    for turn in (1, 2):
+        state = _state(pad_pleasure=None, pad_arousal=None, pad_dominance=None)
+        latest["pad"] = next(readings)
+        latest["pad"].timestamp = state.timestamp + 1.0
+        await from_model.run(
+            _record(
+                source.verify("Alice", None),
+                turn=turn,
+                state=state,
+                conversation_id=conversation,
+            )
+        )
+    first, second = model_learning.tracker.get_recent(2)
+    assert first.valence_shift is None
+    assert second.valence_shift == pytest.approx(-0.4)
+
+
+@pytest.mark.asyncio
 async def test_tom_updated_under_current_identity(trust, cfg):
     source, token = trust
     tom = TheoryOfMind(trust_lookup=source.trust_lookup)

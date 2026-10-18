@@ -112,3 +112,21 @@ def test_list_available_infos(settings):
 def test_no_module_singleton():
     assert not hasattr(registry_module, "get_registry")
     assert not hasattr(registry_module, "_registry")
+
+
+def test_unreadable_state_file_is_logged_by_name_only(tmp_path, caplog):
+    state_dir = tmp_path / "private-home" / "data"
+    state_dir.mkdir(parents=True)
+    path = state_dir / "provider_state.json"
+    path.write_text("{not json", encoding="utf-8")
+    registry = ProviderRegistry(state_path=path)
+    registry.register(MockProvider())
+    with caplog.at_level(logging.WARNING, logger=registry_module.logger.name):
+        assert registry.load() is None
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages, "the unreadable file was not reported"
+    text = "\n".join(messages)
+    assert "provider_state.json" in text
+    assert "PROVIDER_STATE_PATH" in text
+    assert str(tmp_path) not in text
+    assert "private-home" not in text

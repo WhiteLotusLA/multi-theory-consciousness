@@ -326,3 +326,66 @@ async def test_recalled_memories_keep_their_date_and_no_age_label():
         created = datetime.fromisoformat(created)
     assert created == T0
     assert not any("ago" in str(key) or "age" == key for key in memory)
+
+
+async def _pipeline_shaped_rows(clock):
+    """Rows as the pipeline writes them: the speaker's turns to the system,
+    the replies and a plugin's tool row to the speaker's stored name."""
+    repo = InMemoryConversationRepository(clock=clock)
+    cid = str(uuid.uuid4())
+    await repo.add_conversation(cid, ["Testagent", "verified:Alice"], T0)
+    rows = [
+        ("Alice", "user", "q1", "Testagent"),
+        ("Testagent", "assistant", "a1", "Alice"),
+        ("Alice", "user", "q2", "Testagent"),
+        ("echo", "tool", "tool says", "Alice"),
+        ("Alice", "user", "aside to a guest", "Guest"),
+        ("Testagent", "assistant", "a2", "Alice"),
+        ("Testagent", "assistant", "old-style row", None),
+    ]
+    for offset, (speaker, role, content, to) in enumerate(rows):
+        await repo.add_message(
+            cid, speaker, role, content, T0 + timedelta(minutes=offset), to_speaker=to
+        )
+    return repo
+
+
+@pytest.mark.asyncio
+async def test_rehydrate_returns_replies_addressed_to_the_speaker():
+    clock = Clock(T0 + timedelta(hours=1))
+    repo = await _pipeline_shaped_rows(clock)
+    history = await rehydrate_recent_history(
+        repo, "verified:Alice", settings=CFG, reply_addressee="Alice"
+    )
+    assert [(h["role"], h["content"]) for h in history] == [
+        ("user", "q1"),
+        ("assistant", "a1"),
+        ("user", "q2"),
+        ("tool", "tool says"),
+        ("assistant", "a2"),
+        ("assistant", "old-style row"),
+    ]
+    assert set(history[0]) == {
+        "role",
+        "speaker",
+        "content",
+        "timestamp",
+        "conversation_id",
+    }
+    timestamps = [h["timestamp"] for h in history]
+    assert timestamps == sorted(timestamps)
+    # the newest rows of the merged set are kept, oldest first
+    newest = await rehydrate_recent_history(
+        repo, "verified:Alice", limit=3, settings=CFG, reply_addressee="Alice"
+    )
+    assert [h["content"] for h in newest] == ["tool says", "a2", "old-style row"]
+    # without a reply addressee the read is the system-addressed one alone
+    alone = await rehydrate_recent_history(repo, "verified:Alice", settings=CFG)
+    assert [h["content"] for h in alone] == ["q1", "q2", "old-style row"]
+    # the participant scoping holds for the second read too
+    assert (
+        await rehydrate_recent_history(
+            repo, "claimed:Alice", settings=CFG, reply_addressee="[Alice]"
+        )
+        == []
+    )

@@ -14,9 +14,13 @@ framework's implementation of Global Workspace Theory.
 
 The state's ``is_conscious`` field is the workspace's name for "content
 ignited this cycle"; it is a flag of the data structure, not a claim about
-experience.
+experience. The integration level needs neural signals from at least two
+sources and the broadcast coverage needs a registered receiver; this example
+passes neither, so both print as not measured rather than as a number.
 
-Needs only the core install. Opens no network connection.
+Needs the ``fep`` extra (pymdp), because the workspace builds the active
+inference module; without it the example prints one line that names the
+extra and exits 2. Opens no network connection.
 
 Usage:
     python examples/single_theory.py
@@ -24,7 +28,9 @@ Usage:
 
 import asyncio
 import logging
+import sys
 
+from mtc.cli.missing_extra import explain_missing_extra
 from mtc.consciousness.enhanced_global_workspace import (
     EnhancedGlobalWorkspace,
     WorkspaceCandidate,
@@ -34,7 +40,7 @@ from mtc.consciousness.enhanced_global_workspace import (
 logging.basicConfig(level=logging.WARNING)
 
 
-async def main():
+async def run():
     # 1. A workspace with the default capacity and ignition threshold.
     workspace = EnhancedGlobalWorkspace(
         capacity=7,  # items the workspace holds at once
@@ -92,8 +98,24 @@ async def main():
     print(f"  Candidates offered:   {len(candidates)}")
     print(f"  Ignited this cycle:   {state.is_conscious} (the is_conscious field)")
     print(f"  Ignition events:      {state.ignition_events}")
-    print(f"  Integration level:    {state.integration_level:.3f}")
-    print(f"  Broadcast coverage:   {state.broadcast_coverage:.1%}")
+    integration = state.integration_level
+    coverage = state.broadcast_coverage
+    print(
+        "  Integration level:    "
+        + (
+            "not measured (no neural signals were passed)"
+            if integration is None
+            else f"{integration:.3f}"
+        )
+    )
+    print(
+        "  Broadcast coverage:   "
+        + (
+            "unmeasured (no receiver is registered)"
+            if coverage is None
+            else f"{coverage:.1%}"
+        )
+    )
     print(f"  Attention focus:      {state.attention_focus}")
 
     if state.primary_content:
@@ -115,5 +137,20 @@ async def main():
     print("\n" + "=" * 60)
 
 
+def main() -> int:
+    """Run the example; on an install without the ``fep`` extra print the one
+    line that names it to stderr and return 2 (any other ImportError is
+    raised)."""
+    try:
+        asyncio.run(run())
+    except ImportError as exc:
+        line = explain_missing_extra(exc)
+        if line is None:
+            raise
+        print(line, file=sys.stderr)
+        return 2
+    return 0
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(main())

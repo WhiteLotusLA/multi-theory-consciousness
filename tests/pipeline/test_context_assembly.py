@@ -380,3 +380,29 @@ def test_newest_tool_turn_after_earlier_turns_keeps_the_latest_message(cfg, trus
     # the session keeps the tool entry as stored
     assert session.history[-1]["role"] == "tool"
     assert session.history[-1]["speaker"] == "clock"
+
+
+def test_last_turn_at_ignores_entries_of_this_turn(cfg, trust):
+    source, _token = trust
+    identity = source.verify("Alice", None)
+    now = T0 + timedelta(minutes=5)
+    history = [
+        _entry("user", "earlier question", at=T0),
+        _entry("assistant", "earlier answer", at=T0 + timedelta(minutes=1)),
+        _entry("user", "the current message", at=now),
+        # a turn plugin's result, appended after the message with its time
+        _entry("tool", "12:05", speaker="clock_tool", at=now),
+    ]
+    window = build_brain_window(
+        _session(history), identity, source, settings=cfg, now=now
+    )
+    assert window.current_prompt == "the current message"
+    assert window.last_turn_at == T0 + timedelta(minutes=1)
+    # nothing earlier than now: the session's own record is the fallback
+    fresh = _session([_entry("user", "first words", at=now)])
+    fresh.last_turn_at = T0
+    window = build_brain_window(fresh, identity, source, settings=cfg, now=now)
+    assert window.last_turn_at == T0
+    # without now the newest entry of the window stands, as before
+    window = build_brain_window(_session(history[:3]), identity, source, settings=cfg)
+    assert window.last_turn_at == T0 + timedelta(minutes=1)

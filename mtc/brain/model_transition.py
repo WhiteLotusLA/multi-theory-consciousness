@@ -5,8 +5,8 @@ Model Transition Protocol
 Checkpoints for a model change. Before the switch, ``ModelTransitionProtocol``
 captures a baseline: the assessment summary (through an injected ``assess``
 callable returning a ``ConsciousnessReport``), the identity markers an
-injected ``identity_source`` supplies (Phase 4's identity continuity manager
-can supply its latest marker; nothing here reaches into it), and the answers
+injected ``identity_source`` supplies (the identity continuity manager can
+supply its latest marker; nothing here reaches into it), and the answers
 the brain gives to the generic probes in ``config/transition_prompts.json``.
 After the switch, ``evaluate_post_transition`` repeats the three and compares:
 
@@ -14,7 +14,11 @@ After the switch, ``evaluate_post_transition`` repeats the three and compares:
   (``core_values``, ``personality_traits``, ``emotional_fingerprint``), each
   compared key by key with a missing key read as 0;
 - personality drift: the same over ``personality_traits`` alone;
-- score drift: the absolute change of the assessment's ``overall_score``;
+- score drift: the absolute change of the assessment's ``overall_score``
+  (the summary of a report whose status is ``insufficient_data`` stores the
+  overall as None, whatever number the report carries, and a restored
+  baseline file is read under the same rule, so no drift is ever computed
+  from a stand-in);
 - response similarity: the mean Jaccard overlap of lowercased word sets over
   the probes answered on both sides.
 
@@ -69,6 +73,8 @@ DEFAULT_PROMPTS_PATH = (
 )
 BASELINE_FILE = "latest_baseline.json"
 TRANSITION_FILE_PREFIX = "transition_"
+# The report status that means no indicator was measured.
+INSUFFICIENT_STATUS = "insufficient_data"
 RECOMMENDATIONS: Tuple[str, ...] = (
     "proceed",
     "review",
@@ -126,7 +132,7 @@ class TransitionBaseline:
     def from_dict(cls, data: Mapping[str, Any]) -> "TransitionBaseline":
         return cls(
             captured_at=_parse_instant(data.get("captured_at")),
-            assessment=dict(data.get("assessment") or {}),
+            assessment=_without_stand_in(data.get("assessment")),
             identity_markers=dict(data.get("identity_markers") or {}),
             responses={
                 str(k): str(v) for k, v in (data.get("responses") or {}).items()
@@ -243,7 +249,22 @@ def jaccard_similarity(first: str, second: str) -> float:
     return len(a & b) / len(union)
 
 
+def _without_stand_in(assessment: Any) -> Dict[str, Any]:
+    """A stored assessment summary under the ``insufficient_data`` rule.
+
+    A summary whose status is ``insufficient_data`` measured nothing, so its
+    overall reads None whatever number it carries (a baseline file written
+    before the rule may still hold the report's 0.0).
+    """
+    summary = dict(assessment or {})
+    if str(summary.get("status") or "") == INSUFFICIENT_STATUS:
+        summary["overall_score"] = None
+    return summary
+
+
 def _summarize_report(report: Any) -> Dict[str, Any]:
+    """The assessment fields the protocol keeps; an ``insufficient_data``
+    report measured nothing, so its overall is stored as None."""
     summary: Dict[str, Any] = {}
     for name in ASSESSMENT_FIELDS:
         value = getattr(report, name, None)
@@ -252,6 +273,8 @@ def _summarize_report(report: Any) -> Dict[str, Any]:
         elif name == "insufficient_indicators":
             value = list(value or [])
         summary[name] = value
+    if str(getattr(report, "status", None) or "") == INSUFFICIENT_STATUS:
+        summary["overall_score"] = None
     return summary
 
 
@@ -513,8 +536,8 @@ class ModelTransitionProtocol:
                 "reason": "no_personality_traits",
             }
 
-        pre_score = baseline.assessment.get("overall_score")
-        post_score = post_assessment.get("overall_score")
+        pre_score = _without_stand_in(baseline.assessment).get("overall_score")
+        post_score = _without_stand_in(post_assessment).get("overall_score")
         score_drift: Optional[float] = None
         if pre_score is not None and post_score is not None:
             score_drift = abs(float(post_score) - float(pre_score))

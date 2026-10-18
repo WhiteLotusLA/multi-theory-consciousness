@@ -106,12 +106,15 @@ class FakePipeline:
         stream_callback=None,
         request_id=None,
         timeout_s=None,
+        on_generated=None,
     ) -> TurnResult:
         self.calls.append(
             {"message": message, "speaker": speaker, "speaker_token": speaker_token}
         )
         if stream_callback is not None:
             await stream_callback("[fake] reply")
+        if on_generated is not None:
+            on_generated()
         return TurnResult(
             success=True,
             response="[fake] reply",

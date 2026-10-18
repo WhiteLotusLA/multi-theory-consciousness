@@ -203,6 +203,60 @@ def test_gist_candidate_reads_thought_gist_fields():
     assert stale.activation_level == pytest.approx(0.5)
 
 
+def test_gist_without_importance_or_retention_is_flagged_unmeasured():
+    orchestrator = _orchestrator()
+    # A gist stored without scores (the loader leaves the three fields None)
+    gist = ThoughtGist.from_document(
+        {
+            "gist_id": "gist_3",
+            "created_at": T0,
+            "summary": "a pattern without scores",
+            "source_count": 3,
+            "source_thought_ids": ["a", "b", "c"],
+        }
+    )
+    assert gist.importance_score is None and gist.retention_strength is None
+    for item in (
+        gist,
+        {"summary": "a mapping", "importance_score": None, "retention_strength": None},
+    ):
+        candidate = orchestrator._gist_to_candidate(item)
+        # The neutral competition inputs stay; the flags say they are not
+        # measurements
+        assert candidate.activation_level == pytest.approx(0.5)
+        assert candidate.metadata["importance_measured"] is False
+        assert candidate.metadata["retention_measured"] is False
+    measured = orchestrator._gist_to_candidate(
+        {"summary": "scored", "importance_score": 0.8, "retention_strength": 0.5}
+    )
+    assert measured.activation_level == pytest.approx(0.4)
+    assert measured.metadata["importance_measured"] is True
+    assert measured.metadata["retention_measured"] is True
+
+
+def test_memory_without_emotional_weight_is_flagged():
+    orchestrator = _orchestrator()
+    for memory in (
+        {"content": "no weight key", "score": 0.7},
+        {"content": "a None weight", "score": 0.7, "emotional_weight": None},
+        {"content": "a NaN weight", "score": 0.7, "emotional_weight": float("nan")},
+    ):
+        candidate = orchestrator._memory_to_candidate(memory)
+        assert candidate.emotional_salience == 0.0
+        assert candidate.metadata["emotional_weight_measured"] is False
+    weighted = orchestrator._memory_to_candidate(
+        {"content": "weighted", "score": 0.7, "emotional_weight": 0.0}
+    )
+    # A measured zero is a measurement
+    assert weighted.emotional_salience == 0.0
+    assert weighted.metadata["emotional_weight_measured"] is True
+    strong = orchestrator._memory_to_candidate(
+        {"content": "strong", "emotional_weight": 0.6}
+    )
+    assert strong.emotional_salience == pytest.approx(0.6)
+    assert strong.metadata["emotional_weight_measured"] is True
+
+
 def test_self_assessment_candidate_injected_once():
     orchestrator = _orchestrator()
     raw = _raw(orchestrator, "hello")

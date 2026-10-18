@@ -30,6 +30,7 @@ Settings key that is missing or invalid.
 import hashlib
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import (
     Any,
     AsyncIterator,
@@ -129,10 +130,12 @@ class ConversationalBrain(Protocol):
     """The conversation pipeline's brain: one-shot, streamed and in-context turns.
 
     ``think_with_context`` assembles the system prompt from the keyword slots
-    (each None slot renders nothing) and returns the reply; ``generate`` returns
-    the spoken text only, with reasoning removed. Every method raises
-    ``NoAnswerError`` when there is no answer and ``BrainUnavailableError``
-    when the configured provider cannot answer.
+    (each None slot renders nothing) and returns the reply; ``last_turn_at``,
+    when given, is the time of the last exchange the clock section measures
+    the gap from (otherwise the brain reads it from the history tail);
+    ``generate`` returns the spoken text only, with reasoning removed. Every
+    method raises ``NoAnswerError`` when there is no answer and
+    ``BrainUnavailableError`` when the configured provider cannot answer.
     """
 
     async def think(
@@ -183,6 +186,7 @@ class ConversationalBrain(Protocol):
         active_inference_context: Optional[Any] = None,
         global_workspace_context: Optional[Any] = None,
         max_tokens: Optional[int] = None,
+        last_turn_at: Optional[datetime] = None,
     ) -> BrainReply:
         """Return the in-context reply, or raise NoAnswerError."""
         ...

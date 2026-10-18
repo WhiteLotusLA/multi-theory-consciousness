@@ -20,13 +20,14 @@ shipped (narration off: the narrative holds the ungated workspace lines only)
 and the trust outcome, then the first-run report, the assessment status and
 coverage, the surfaced thoughts with the machine's quiet reason and the status
 counters, stops the runtime, runs the privacy audit over its own log directory
-and prints one ``DEMO_SUMMARY {json}`` line. The audit's hits on records of
-frozen modules known to log an absolute module path are reported by name under
-``log_audit.known_frozen_module_log_hits`` (they are not filtered out of the
-log); any other hit is unexplained and makes ``ok`` false.
+and prints one ``DEMO_SUMMARY {json}`` line. Every audit hit is reported by
+file, line and kind under ``log_audit.unexplained_hits`` (nothing is filtered
+out of the log) and makes ``ok`` false.
 
 Nothing is written into the repository: every directory sits under
-``--state-dir`` (a temporary directory by default). The texts here come from the
+``--state-dir`` (a temporary directory by default). Needs the ``fep`` extra
+(pymdp), because the workspace builds the active inference module; without it
+the demo prints one line that names the extra and exits 2. The texts here come from the
 shipped neutral seed packs and the mock provider.
 
 Usage:
@@ -46,6 +47,7 @@ from dataclasses import fields
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from mtc.cli.missing_extra import explain_missing_extra, workspace_extra_line
 from mtc.consciousness.continuous.surfacing import get_surfaced_thoughts
 from mtc.consciousness.enhanced_global_workspace import ConsciousnessState
 from mtc.core.config import Settings
@@ -56,16 +58,25 @@ ROOT = Path(__file__).resolve().parents[1]
 TOKEN_ENV = "MTC_DEMO_OPERATOR_TOKEN"
 DENYLIST = ROOT / "config" / "privacy" / "denylist.txt"
 LOCAL_EXTRA_DENYLIST = ROOT / "config" / "privacy" / "denylist.local.txt"
-# Log records (logger, source line) of modules closed to edits until Phase 9
-# that put an absolute module path into their text: the assessment framework's
-# warning that the native HTM interface is absent quotes the ImportError, which
-# names the file of the package it imported from. Their audit hits are
-# reported under known_frozen_module_log_hits; any other hit fails the run.
-KNOWN_FROZEN_LOG_SOURCES: Tuple[Tuple[str, int], ...] = (
-    ("mtc.assessment.framework", 147),
+# State fields that may be None after a cycle: those whose default is None,
+# and the measured fields that read None when their inputs are missing
+# (integration_level is a required field and the others keep a number as
+# their default, so the default scan does not find them). A None in any of
+# them must be named in the turn's absent_signals.
+MEASURED_OPTIONAL_FIELDS: Tuple[str, ...] = (
+    "integration_level",
+    "broadcast_coverage",
+    "binding_quality",
+    "protoself_stability",
+    "feeling_of_knowing",
+    "autobiographic_continuity",
 )
 OPTIONAL_FIELDS = tuple(
     item.name for item in fields(ConsciousnessState) if item.default is None
+) + tuple(
+    name
+    for name in MEASURED_OPTIONAL_FIELDS
+    if name in {item.name for item in fields(ConsciousnessState)}
 )
 TURNS: Tuple[Tuple[str, str, bool], ...] = (
     ("Alice", "Hello. What do you notice when a conversation begins?", False),
@@ -127,34 +138,17 @@ def _extra_denylist() -> List[str]:
     return []
 
 
-def _log_record(path: Path, line: int) -> Optional[Dict[str, Any]]:
-    """The JSON log record on ``line`` (1-based) of ``path``; None otherwise."""
-    with path.open(encoding="utf-8", errors="replace") as handle:
-        for number, text in enumerate(handle, start=1):
-            if number == line:
-                try:
-                    record = json.loads(text)
-                except ValueError:
-                    return None
-                return record if isinstance(record, dict) else None
-    return None
-
-
 def audit_logs(log_dir: Path) -> Dict[str, Any]:
     """The privacy audit over the run's log directory (the exit criterion).
 
     Every file is scanned as a text copy with the public denylist and the
-    private extra list the audit script reads, and no allowlist. A hit on a
-    record from a frozen module known to log an absolute module path
-    (``KNOWN_FROZEN_LOG_SOURCES``) is reported under
-    ``known_frozen_module_log_hits``; every other hit is unexplained and fails
-    the run. Hits are reported by file, line and kind; the matched text is
-    never printed.
+    private extra list the audit script reads, and no allowlist. Every hit is
+    unexplained and fails the run. Hits are reported by file, line and kind;
+    the matched text is never printed.
     """
     from mtc.devtools.privacy_audit import load_denylist, run_audit
 
     files = sorted(p for p in log_dir.rglob("*") if p.is_file())
-    known: List[Dict[str, Any]] = []
     unexplained: List[Dict[str, Any]] = []
     with tempfile.TemporaryDirectory(prefix="mtc_demo_log_audit_") as scratch:
         root = Path(scratch)
@@ -172,26 +166,17 @@ def audit_logs(log_dir: Path) -> Dict[str, Any]:
         )
         for hit in hits:
             source = sources.get(Path(hit.path).name)
-            entry: Dict[str, Any] = {
-                "file": source.name if source is not None else hit.path,
-                "line": hit.line,
-                "kind": hit.kind,
-            }
-            record = _log_record(source, hit.line) if source is not None else None
-            site = (
-                (record.get("logger"), record.get("line"))
-                if record is not None
-                else None
+            unexplained.append(
+                {
+                    "file": source.name if source is not None else hit.path,
+                    "line": hit.line,
+                    "kind": hit.kind,
+                }
             )
-            if site in KNOWN_FROZEN_LOG_SOURCES:
-                known.append({**entry, "logger": site[0], "source_line": site[1]})
-            else:
-                unexplained.append(entry)
     return {
         "files": len(files),
-        "hits": len(known) + len(unexplained),
+        "hits": len(unexplained),
         "unexplained_hits": unexplained,
-        "known_frozen_module_log_hits": known,
     }
 
 
@@ -390,17 +375,7 @@ async def run_demo(base: Path, ticks: int) -> Dict[str, Any]:
     print(f"runtime stopped: {runtime.last_stop_order}")
 
     log_audit = audit_logs(Path(cfg.LOG_DIRECTORY))
-    known = log_audit["known_frozen_module_log_hits"]
-    print(
-        f"log audit: {log_audit['files']} file(s), {log_audit['hits']} hit(s): "
-        f"{len(known)} from frozen modules (known, reported for Phase 9), "
-        f"{len(log_audit['unexplained_hits'])} unexplained"
-    )
-    for entry in known:
-        print(
-            f"  known: {entry['file']} line {entry['line']} ({entry['kind']}), "
-            f"logged by {entry['logger']} at line {entry['source_line']}"
-        )
+    print(f"log audit: {log_audit['files']} file(s), {log_audit['hits']} hit(s)")
     for entry in log_audit["unexplained_hits"]:
         print(f"  UNEXPLAINED: {entry['file']} line {entry['line']} ({entry['kind']})")
 
@@ -454,12 +429,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
     if args.ticks < 1:
         parser.error("--ticks must be at least 1")
-    if args.state_dir is not None:
-        args.state_dir.mkdir(parents=True, exist_ok=True)
-        summary = asyncio.run(run_demo(args.state_dir, args.ticks))
-    else:
-        with tempfile.TemporaryDirectory(prefix="mtc_pipeline_demo_") as tmp:
-            summary = asyncio.run(run_demo(Path(tmp), args.ticks))
+    # Before anything starts (and logs): without the fep extra the runtime
+    # cannot build its workspace.
+    missing = workspace_extra_line()
+    if missing is not None:
+        print(missing, file=sys.stderr)
+        return 2
+    try:
+        if args.state_dir is not None:
+            args.state_dir.mkdir(parents=True, exist_ok=True)
+            summary = asyncio.run(run_demo(args.state_dir, args.ticks))
+        else:
+            with tempfile.TemporaryDirectory(prefix="mtc_pipeline_demo_") as tmp:
+                summary = asyncio.run(run_demo(Path(tmp), args.ticks))
+    except ImportError as exc:
+        line = explain_missing_extra(exc)
+        if line is None:
+            raise
+        print(line, file=sys.stderr)
+        return 2
     print("DEMO_SUMMARY " + json.dumps(summary, sort_keys=True))
     return 0 if summary["ok"] else 1
 

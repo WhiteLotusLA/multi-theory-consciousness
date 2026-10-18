@@ -879,3 +879,95 @@ def test_lazily_built_pad_model_receives_the_flags():
     assert pad.narrate_affect_line is False
     assert pad.generate_context() == ""
     assert orchestrator.status()["narration_applied"]["pad.affect_line"] is False
+
+
+TEMPLATE_SENTENCE = "A synthetic authored sentence about what comes next."
+
+
+def _template_winner(sim_type="anticipatory"):
+    candidate = WorkspaceCandidate(
+        content=TEMPLATE_SENTENCE,
+        content_type="prospective_simulation",
+        summary=TEMPLATE_SENTENCE,
+        source=WorkspaceCandidateSource.INTERNAL,
+        source_module="prospective_simulator",
+        metadata={"sim_type": sim_type, "authored_template": True},
+    )
+    return WorkspaceContent(candidate=candidate, salience=0.9)
+
+
+def test_template_winner_is_named_by_kind():
+    winner = _template_winner()
+    state = _state(primary_content=winner, workspace_contents=[winner])
+    context = _turn(_orchestrator(state=state))
+    assert context.winner_is_message is False
+    assert _lines(context)[0] == (
+        "The workspace is holding a prospective-simulation template (kind: "
+        "anticipatory). It ranks above the incoming message this cycle."
+    )
+    assert TEMPLATE_SENTENCE not in _everything(context)
+    assert context.workspace_winner == (
+        "a prospective-simulation template (kind: anticipatory)"
+    )
+    assert TEMPLATE_SENTENCE not in context.workspace_winner
+
+    # The same candidate without the marker is narrated by its words
+    plain = _template_winner()
+    plain.candidate.metadata = {"sim_type": "anticipatory"}
+    state = _state(primary_content=plain, workspace_contents=[plain])
+    context = _turn(_orchestrator(state=state))
+    assert TEMPLATE_SENTENCE in _lines(context)[0]
+    assert context.workspace_winner == TEMPLATE_SENTENCE
+
+
+def test_truthy_template_flag_is_named_by_kind_like_the_workspace_reads_it():
+    # The workspace skips the higher-order thought for any truthy flag; the
+    # narration treats the same candidate as a template too
+    winner = _template_winner()
+    winner.candidate.metadata = {"sim_type": "anticipatory", "authored_template": 1}
+    state = _state(primary_content=winner, workspace_contents=[winner])
+    context = _turn(_orchestrator(state=state))
+    assert TEMPLATE_SENTENCE not in _everything(context)
+    assert context.workspace_winner == (
+        "a prospective-simulation template (kind: anticipatory)"
+    )
+
+
+def test_template_from_the_prospective_simulator_is_named_by_kind():
+    from mtc.consciousness.prospective_memory import (
+        ProspectiveContext,
+        ProspectiveSimulator,
+    )
+
+    (candidate,) = ProspectiveSimulator().maybe_generate(
+        ProspectiveContext(
+            recent_messages=[{"content": "planning the garden tomorrow"}],
+            goals=["learn more about soil"],
+            now=T0,
+        )
+    )
+    winner = WorkspaceContent(candidate=candidate, salience=0.9)
+    state = _state(primary_content=winner, workspace_contents=[winner])
+    context = _turn(_orchestrator(state=state))
+    kind = candidate.metadata["sim_type"]
+    assert _lines(context)[0].startswith(
+        f"The workspace is holding a prospective-simulation template (kind: {kind})."
+    )
+    assert candidate.summary not in _everything(context)
+
+
+def test_default_workspace_narrates_unmeasured_broadcast_coverage():
+    """A default workspace registers no broadcast receiver, so an igniting
+    turn reports the coverage as unmeasured, never 100%."""
+    workspace = EnhancedGlobalWorkspace(thalamic_gate_enabled=False)
+    orchestrator = _live_orchestrator(workspace, NarrationFlags())
+    contexts = [_turn(orchestrator, f"message number {i}") for i in range(3)]
+    ignited = [c for c in contexts if c.consciousness_state.ignition_events > 0]
+    assert ignited
+    for context in ignited:
+        assert context.consciousness_state.broadcast_coverage is None
+        assert (
+            f"Ignition this cycle: {context.consciousness_state.ignition_events} "
+            "event(s); broadcast coverage unmeasured."
+        ) in _lines(context)
+        assert "broadcast coverage 100%" not in context.prompt_context

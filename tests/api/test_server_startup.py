@@ -132,7 +132,7 @@ def test_shutdown_stops_runtime(clean_env, key):
 class _FakeUvicorn:
     """Records the server configuration; ``run`` binds nothing."""
 
-    def __init__(self) -> None:
+    def __init__(self, starts: bool = True) -> None:
         self.configs: List[Dict[str, Any]] = []
         self.runs = 0
         owner = self
@@ -144,18 +144,25 @@ class _FakeUvicorn:
                 owner.configs.append({"app": app, **kwargs})
 
         class Server:
+            # As the real server: ``started`` is False until the lifespan
+            # startup succeeded, and ``run`` returns either way.
             def __init__(self, config):
                 self.config = config
+                self.started = False
 
             def run(self):
                 owner.runs += 1
+                self.started = starts
 
         self.module = types.SimpleNamespace(Config=Config, Server=Server)
 
 
 def test_main_single_process_and_loopback_default(clean_env, key, monkeypatch):
+    from mtc.cli import missing_extra
+
     fake = _FakeUvicorn()
     monkeypatch.setitem(sys.modules, "uvicorn", fake.module)
+    monkeypatch.setattr(missing_extra, "workspace_extra_line", lambda: None)
     cfg = api_settings(
         clean_env, API_KEY=key, WEBSOCKET_PING_INTERVAL=25, WEBSOCKET_PING_TIMEOUT=7
     )
@@ -171,6 +178,42 @@ def test_main_single_process_and_loopback_default(clean_env, key, monkeypatch):
     assert config["ws_ping_timeout"] == 7.0
     assert config["ws_max_size"] == MAX_FRAME_BYTES
     assert config["app"].state.settings is cfg
+
+
+def test_main_exits_nonzero_when_the_startup_failed(
+    clean_env, key, monkeypatch, capsys
+):
+    """The server library logs a failed lifespan startup and returns from
+    ``run``; the entry point then exits 1, never 0 behind the logged error."""
+    from mtc.cli import missing_extra
+
+    fake = _FakeUvicorn(starts=False)
+    monkeypatch.setitem(sys.modules, "uvicorn", fake.module)
+    monkeypatch.setattr(missing_extra, "workspace_extra_line", lambda: None)
+    cfg = api_settings(clean_env, API_KEY=key)
+    monkeypatch.setattr(server_module, "get_settings", lambda: cfg)
+    assert main([]) == 1
+    assert fake.runs == 1
+    assert "did not start" in capsys.readouterr().err
+
+
+def test_main_prints_the_missing_extra_line_and_exits_2(
+    clean_env, key, monkeypatch, capsys
+):
+    """Without the workspace extra the entry point prints the one missing-extra
+    line on stderr and exits 2 before the server is configured."""
+    from mtc.cli import missing_extra
+
+    fake = _FakeUvicorn()
+    monkeypatch.setitem(sys.modules, "uvicorn", fake.module)
+    monkeypatch.setattr(
+        missing_extra, "workspace_extra_line", lambda: missing_extra.LINE
+    )
+    cfg = api_settings(clean_env, API_KEY=key)
+    monkeypatch.setattr(server_module, "get_settings", lambda: cfg)
+    assert main([]) == 2
+    assert fake.configs == [] and fake.runs == 0
+    assert capsys.readouterr().err.splitlines() == [missing_extra.LINE]
 
 
 def test_main_refuses_unsafe_bind(clean_env, monkeypatch, capsys):

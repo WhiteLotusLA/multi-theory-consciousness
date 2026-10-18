@@ -57,6 +57,10 @@ class Session:
     summary: Optional[str] = None
     pinned_quotes: List[str] = field(default_factory=list)
     speaker_label: Optional[str] = None
+    # True once the conversation start has been written (or its one attempt
+    # failed and was counted); the pipeline writes it only after the safety
+    # gate has let a turn of this session through.
+    start_recorded: bool = False
 
 
 class SessionManager:
