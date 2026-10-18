@@ -58,6 +58,72 @@ def test_cli_warmup_profiles_set_shift_types():
     assert seen["v04"] != seen["v05"]
 
 
+def _run_in_process(tmp_path, monkeypatch, *args: str) -> dict:
+    """mtc assess in this process, through main, returning the JSON report.
+
+    The project root is a scratch directory holding a copy of the tree's
+    experiments directory, so the schema and the presets under test are the
+    tree's own (not the packaged copies) and nothing is written in the tree.
+    """
+    import shutil
+
+    from mtc.cli import assess
+    from mtc.core import config as config_module
+    from mtc.core.config import Settings
+
+    project = tmp_path / "project"
+    if not project.exists():
+        shutil.copytree(ROOT / "experiments", project / "experiments")
+    settings = Settings(_env_file=None, PROJECT_ROOT=str(project))
+    monkeypatch.setattr(config_module, "_settings", settings)
+    out = tmp_path / "report.json"
+    assert assess.main([*args, "--json-path", str(out)]) == 0
+    return json.loads(out.read_text())
+
+
+def test_quick_mode_reports_tracker_as_insufficient(tmp_path, monkeypatch):
+    """The standalone path hands the assessment the workspace's PhiTracker in
+    every mode (R1-13 part a): with no cycles run the tracker is present and
+    warming up, so integrated_information is insufficient_data, not absent."""
+    report = _run_in_process(tmp_path, monkeypatch, "--quick", "--seed", "3")
+    result = report["indicator_results"]["integrated_information"]
+    assert result["status"] == "insufficient_data"
+    assert result["score"] is None
+    assert "phi_tracker" in result["evidence"]["missing"]
+
+
+def test_full_mode_reads_the_loop_that_ran(tmp_path, monkeypatch):
+    """Under the default runner.assess_blt_source (workspace) the BLT indicators
+    read the workspace's own loop, which the warmup drove for five cycles;
+    under standalone they read the separate loop nothing drove (R1-13 part b,
+    decision D21)."""
+    report = _run_in_process(
+        tmp_path, monkeypatch, "--full", "--warmup-cycles", "5", "--seed", "3"
+    )
+    binding = report["indicator_results"]["bayesian_binding_quality"]
+    assert binding["evidence"].get("missing") != "beautiful_loop.cycle_count"
+    depth = report["indicator_results"]["epistemic_depth"]
+    assert depth["evidence"].get("missing") != "beautiful_loop.cycle_count"
+
+    params = tmp_path / "standalone.toml"
+    params.write_text('[runner]\nassess_blt_source = "standalone"\n')
+    standalone = _run_in_process(
+        tmp_path,
+        monkeypatch,
+        "--full",
+        "--warmup-cycles",
+        "5",
+        "--seed",
+        "3",
+        "--params",
+        str(params),
+    )
+    for name in ("bayesian_binding_quality", "epistemic_depth"):
+        result = standalone["indicator_results"][name]
+        assert result["status"] == "insufficient_data", name
+        assert result["evidence"]["missing"] == "beautiful_loop.cycle_count", name
+
+
 @pytest.mark.slow
 def test_seeded_assessment_is_reproducible(tmp_path):
     """Two runs of one seed agree in every field of the report.
@@ -119,7 +185,8 @@ def test_state_dir_restores_and_assesses(tmp_path):
     fresh = _run_cli(tmp_path, "--state-dir", str(empty), "--json-path", str(fresh_out))
     assert fresh.returncode == 0, fresh.stderr[-2000:]
     fresh_status = json.loads(fresh_out.read_text())["indicator_results"]
-    assert fresh_status["global_broadcast"]["status"] == "insufficient_data"
+    for name in ("higher_order_representations", "algorithmic_recurrence"):
+        assert fresh_status[name]["status"] == "insufficient_data", name
 
     out = tmp_path / "report.json"
     result = _run_cli(
@@ -144,11 +211,26 @@ def test_state_dir_restores_and_assesses(tmp_path):
     # affect coherence needs ten recorded affect states, so three cycles leave
     # it reporting insufficient_data rather than a number
     for name in (
-        "global_broadcast",
-        "ignition_dynamics",
-        "recurrent_processing",
+        "higher_order_representations",
+        "sequential_module_querying",
+        "algorithmic_recurrence",
+        "local_recurrence",
     ):
         assert indicators[name]["status"] == "measured", name
         assert indicators[name]["score"] is not None
     assert indicators["affect_coherence"]["status"] == "insufficient_data"
     assert indicators["affect_coherence"]["score"] is None
+    # Under the defaults the workspace registers no acknowledgement-only
+    # receiver and runs no sustain check (decision D9), so the coverage and
+    # sustain indicators stay insufficient_data after a restore too, each
+    # naming the statistic it lacks
+    for name in ("global_broadcast", "recurrent_processing"):
+        assert indicators[name]["status"] == "insufficient_data", name
+        assert indicators[name]["evidence"]["missing"] == (
+            "global_workspace.broadcast.coverage_ratio"
+        )
+    for name in ("ignition_dynamics", "global_ignition_nuanced"):
+        assert indicators[name]["status"] == "insufficient_data", name
+        assert indicators[name]["evidence"]["missing"] == (
+            "global_workspace.ignition.sustain_rate"
+        )

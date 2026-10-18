@@ -19,6 +19,9 @@ competition_mode = "flat"
 thalamic_gate_enabled = false
 theory_interactions_enabled = false
 legacy_coverage_ratio = true
+legacy_broadcast_receivers = true
+legacy_sustain_rate = true
+refractory_clock = "per_cycle"
 body_metrics_enabled = false
 precision_feedback_enabled = false
 self_prediction_enabled = false
@@ -31,15 +34,24 @@ capture_salience_threshold = 0.8
 
 [runner]
 warmup_profile = "v04"
+assess_blt_source = "standalone"
+
+[hot]
+overall_confidence_source = "v04_constant"
+introspection_counting = "v04_per_hot"
+introspection_cooldown = 1.0
 
 [blt]
 loop_quality_formula = "v04"
 precision_floor_enabled = false
 require_recursive_confidence = false
 field_evidencing_threshold = 0.3
+binding_evidence = "v04_salience_posterior"
+strange_loop_test = "v04_confidence_match"
 
 [damasio]
 circadian = "v04_sawtooth"
+first_delta = "v04_zero"
 
 [assessment]
 saturated_baseline_min_range = 0.0
@@ -48,6 +60,7 @@ missing_signal_policy = "v04_constants"
 irreducibility_method = "spectral_entropy"
 causal_emergence_threshold = 0.0
 phi_source = "calculator"
+noise_baseline_matching = "v04_any"
 
 [pad]
 coherence_method = "v04_variance"

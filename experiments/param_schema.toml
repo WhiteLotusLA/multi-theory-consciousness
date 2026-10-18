@@ -54,6 +54,16 @@ type = "bool"
 default = false
 description = "Report a broadcast coverage ratio of 1.0 before any broadcast (v0.4.0); the default reports 0.0"
 
+[gwt.legacy_broadcast_receivers]
+type = "bool"
+default = false
+description = "Register the three acknowledgement-only receivers, which makes broadcast coverage 1.0 by construction (v0.4.0); the default registers none and reports coverage only for receivers a caller registers"
+
+[gwt.legacy_sustain_rate]
+type = "bool"
+default = false
+description = "Report an ignition sustain rate of 1.0 although no sustain check runs (v0.4.0); the default reports none until a sustain check has run"
+
 [gwt.body_metrics_enabled]
 type = "bool"
 default = true
@@ -106,6 +116,12 @@ min = 1.0
 max = 50.0
 description = "Simulation timestep for the temporal workspace dynamics (ms)"
 
+[gwt.refractory_clock]
+type = "str"
+default = "per_cycle"
+choices = ["per_cycle", "elapsed"]
+description = "per_cycle advances the simulated clock by the competition duration per cycle, machine independent (v0.4.0 and the default); elapsed also adds the real time between cycles (the live runtime sets it)"
+
 # -----------------------------------------------------------------------------
 # AST: AttentionSchemaModule
 # -----------------------------------------------------------------------------
@@ -115,7 +131,7 @@ type = "float"
 default = 0.2
 min = 0.0
 max = 1.0
-description = "Additive boost applied to voluntarily attended items"
+description = "Stored on the attention schema and has no effect in v0.5.0: a voluntary request does not enter the workspace competition (kept so that presets and callers that set it still validate)"
 
 [ast.focus_threshold]
 type = "float"
@@ -186,14 +202,26 @@ description = "Maximum number of higher-order thoughts held in buffer"
 [hot.introspection_cooldown]
 type = "float"
 default = 1.0
-min = 0.1
+min = 0.0
 max = 10.0
-description = "Minimum seconds between introspection cycles"
+description = "Minimum seconds between introspection episodes (a wall-clock gate; both runners pin it at 0.0 unless set, so a seeded run does not follow the speed of the machine)"
 
 [hot.enable_third_order]
 type = "bool"
 default = true
 description = "Whether to generate third-order thoughts (thoughts about thoughts about thoughts)"
+
+[hot.overall_confidence_source]
+type = "str"
+default = "hot_mean"
+choices = ["hot_mean", "v04_constant"]
+description = "hot_mean reports the mean confidence of the buffered higher-order thoughts and none before the first; v04_constant keeps the v0.4.0 constants 0.5 and doubt 0.0"
+
+[hot.introspection_counting]
+type = "str"
+default = "episodes"
+choices = ["episodes", "v04_per_hot"]
+description = "episodes counts completed introspection episodes; v04_per_hot also adds one per higher-order thought after the third (v0.4.0)"
 
 # -----------------------------------------------------------------------------
 # FEP: ActiveInferenceConfig
@@ -482,9 +510,9 @@ description = "Relative weight of safety in drive arbitration (highest priority)
 [blt.num_levels]
 type = "int"
 default = 3
-min = 1
+min = 2
 max = 10
-description = "Number of hierarchical levels in the Beautiful Loop"
+description = "Number of hierarchical levels in the Beautiful Loop (at least 2: precision balance is undefined for a single level)"
 
 [blt.precision_learning_rate]
 type = "float"
@@ -518,7 +546,7 @@ description = "Threshold for field-evidencing to contribute to consciousness det
 type = "str"
 default = "recursive"
 choices = ["recursive", "v04"]
-description = "Loop quality formula (recursive adds recursive confidence and a momentum boost; v04 is the v0.4.0 weighting)"
+description = "Loop quality formula (recursive adds recursive confidence and a momentum boost; v04 is the v0.4.0 weighting and requires blt.binding_evidence = v04_salience_posterior, the binding quality it reads)"
 
 [blt.precision_floor_enabled]
 type = "bool"
@@ -529,6 +557,18 @@ description = "Uniformly high precision across levels earns a 0.4 precision-bala
 type = "bool"
 default = true
 description = "Field evidencing also needs the hyper-model recursive confidence above 0.3"
+
+[blt.binding_evidence]
+type = "str"
+default = "candidate_vectors"
+choices = ["candidate_vectors", "v04_salience_posterior"]
+description = "candidate_vectors binds only winners that carry their own numeric vector and reports no quality otherwise; v04_salience_posterior builds belief vectors from salience and a shared posterior (v0.4.0), which binds at about 1 for any input"
+
+[blt.strange_loop_test]
+type = "str"
+default = "independent_calibration"
+choices = ["independent_calibration", "v04_confidence_match"]
+description = "independent_calibration compares the self-model's scored self-prediction accuracy with the inference ledger's forecast accuracy; v04_confidence_match compares the self-model's confidence with the value it was copied from (v0.4.0)"
 
 # -----------------------------------------------------------------------------
 # Damasio: DamasioLayers
@@ -546,6 +586,12 @@ type = "str"
 default = "sinusoid"
 choices = ["sinusoid", "v04_sawtooth", "wall_clock"]
 description = "Protoself circadian model (smooth sinusoid, the v0.4.0 sawtooth, or the wall clock in the configured timezone)"
+
+[damasio.first_delta]
+type = "str"
+default = "unmeasured"
+choices = ["unmeasured", "v04_zero"]
+description = "unmeasured reports no body delta, stability or arousal on the first update, which has no previous body state; v04_zero records 0.0, 1.0 and 0.0 (v0.4.0)"
 
 # -----------------------------------------------------------------------------
 # IIT: PhiTracker
@@ -574,6 +620,12 @@ type = "str"
 default = "v05"
 choices = ["v05", "v04"]
 description = "Warmup attention feed: v05 alternates voluntary and captured shifts with goal-driven ones so typed provenance has chosen shifts to count; v04 feeds captured shifts only"
+
+[runner.assess_blt_source]
+type = "str"
+default = "workspace"
+choices = ["workspace", "standalone"]
+description = "Which beautiful loop the assessment CLI's standalone path hands the assessment: the workspace's own loop, which the warmup drives (workspace), or the separate loop nothing drives (standalone, the behaviour before v0.5.0)"
 
 # -----------------------------------------------------------------------------
 # PAD: PADAffectModel
@@ -735,6 +787,12 @@ default = 5.0
 min = 0.1
 max = 50.0
 description = "Phi value that maps to 1.0 under fixed normalization (a display calibration, not a measurement)"
+
+[assessment.noise_baseline_matching]
+type = "str"
+default = "producer"
+choices = ["producer", "v04_any"]
+description = "producer leaves a Phi value un-normalised when the noise baseline was made by a different producer; v04_any normalises against whatever baseline the stub pass made (v0.4.0)"
 
 # -----------------------------------------------------------------------------
 # PAD coherence, causal emergence, RPT plasticity

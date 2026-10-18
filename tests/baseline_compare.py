@@ -53,6 +53,12 @@ REPORT_RUN_FIELDS = ("session_id", "timestamp", "processing_time_ms")
 INDICATOR_TIMING_FIELD = "measurement_time_ms"
 PHI_TIMING_FIELD = "computation_time_ms"
 
+# Top-level mappings the report gained after a fixture was captured: absent on
+# the expected side they read as an empty mapping, so an older fixture equals
+# a report that holds no entry under them, while any entry is still reported.
+# ``failures`` holds the per-run failure counts by step.
+LATER_TOP_LEVEL_MAPPINGS = ("failures",)
+
 # The evidence keys of a seeded assessment report whose value depends on how
 # much wall-clock time passes between warmup cycles, as (indicator, key).
 # Reason: MetacognitionModule.introspect returns early while its wall-clock
@@ -192,7 +198,8 @@ def assessment_diff(
 
     ``ignore_evidence`` names evidence keys, as ``(indicator, key)``, whose
     values are not compared; each must still be present in both reports with
-    the same type.
+    the same type. A top-level mapping of ``LATER_TOP_LEVEL_MAPPINGS`` that
+    the expected report lacks is compared as an empty mapping.
     """
     for label, report in (("expected", expected), ("actual", actual)):
         if not isinstance(report, Mapping):
@@ -263,6 +270,13 @@ def _walk(
             if _is_timing(child):
                 continue
             if key not in want:
+                if (
+                    not parts
+                    and key in LATER_TOP_LEVEL_MAPPINGS
+                    and isinstance(got[key], Mapping)
+                ):
+                    _walk(child, {}, got[key], ignored, out)
+                    continue
                 out.append((_path(child), MISSING, got[key]))
             elif key not in got:
                 out.append((_path(child), want[key], MISSING))

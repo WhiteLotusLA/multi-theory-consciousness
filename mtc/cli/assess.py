@@ -23,12 +23,31 @@ assessed, using the workspace's own attention schema, metacognition, active
 inference and beautiful loop as the AST, HOT, FEP and BLT inputs (gwt, rpt,
 phi, causal_emergence, pad_affect, oscillatory_binding).
 
+Without --state-dir (the standalone path) the workspace's PhiTracker reaches
+the assessment in every mode, so a tracker that has not reported yet reads
+insufficient_data rather than absent. The beautiful loop it assesses is
+chosen by ``runner.assess_blt_source``: the workspace's own loop, which the
+warmup drives (workspace, the default), or the separate loop nothing drives
+(standalone, the behaviour before v0.5.0). The introspection cooldown of
+every metacognition module built here is pinned at 0.0 unless
+``hot.introspection_cooldown`` is set, because it is a wall-clock gate and a
+seeded run must not follow the speed of the machine.
+
+Noise baselines: this runner passes none, so the assessment normalises
+against its own stub pass; ``assessment.noise_baseline_matching`` says what
+happens when that baseline was made by a different Phi producer than the
+result. scripts/run_experiment.py computes its baselines from real modules.
+
 Overrides are optional: with neither --preset nor --params the modules run on
 their defaults. --preset NAME loads experiments/presets/NAME.toml on top of
 the defaults, and --params PATH loads on top of the preset. The preset
 directory and experiments/param_schema.toml resolve through
 ``mtc.core.resources.resolve_shipped``: the project copy under PROJECT_ROOT,
 else the packaged copy.
+
+On an install without the fep extra the workspace cannot be built; the
+command prints one line naming the extra on standard error, with no
+traceback, and exits with the usage code 2.
 
 Config keys read: ``ASSESSMENT_OUTPUT_DIR`` (the default JSON directory,
 resolved under ``PROJECT_ROOT``) and ``PROJECT_ROOT``. Files written: the JSON
@@ -73,6 +92,7 @@ from mtc.neural.oscillatory_binding import OscillatoryBinding
 from mtc.assessment.assessment import ConsciousnessAssessment
 from mtc.assessment.causal_emergence import CausalEmergenceAnalyzer
 from mtc.assessment.rpt_measurement import RPTMeasurement
+from mtc.cli.missing_extra import explain_missing_extra
 from mtc.core.config import get_settings
 from mtc.core.param_overrides import deep_merge, load_overrides, preset_path
 from mtc.core.paths import resolve_path
@@ -92,6 +112,21 @@ PRESETS_SOURCE = "experiments/presets"
 
 _DEFAULT_WARMUP_PROFILE = WARMUP_PROFILE_V05
 _DEFAULT_SEED = 42
+
+# runner.assess_blt_source: which beautiful loop the standalone path assesses
+BLT_SOURCE_WORKSPACE = "workspace"
+BLT_SOURCE_STANDALONE = "standalone"
+BLT_SOURCES = (BLT_SOURCE_WORKSPACE, BLT_SOURCE_STANDALONE)
+_DEFAULT_BLT_SOURCE = BLT_SOURCE_WORKSPACE
+
+# The introspection cooldown is a wall-clock gate; the seeded CLI pins it at
+# 0.0 on every metacognition module it builds unless hot.introspection_cooldown
+# is set (the legacy preset sets 1.0), so two runs of one seed agree.
+_INTROSPECTION_COOLDOWN_PIN = 0.0
+
+# The exit code of a configuration error, shared by the mtc commands
+# (mtc.cli.main.EXIT_USAGE); a missing extra is one.
+EXIT_USAGE = 2
 
 # The PhiTracker reports no Phi before this many transitions. The CLI keeps the
 # tracker's own default: a short warmup leaves it warming up, and only a
@@ -374,7 +409,23 @@ def _build_workspace(overrides):
     gwt.body_metrics_enabled is set.
     """
     tracker = build_phi_tracker(overrides.get("phi", {}), _PHI_MIN_TRANSITIONS)
-    return build_workspace(overrides, tracker, body_metrics_default=False)
+    return build_workspace(
+        overrides,
+        tracker,
+        body_metrics_default=False,
+        introspection_cooldown_default=_INTROSPECTION_COOLDOWN_PIN,
+    )
+
+
+def _blt_source(overrides) -> str:
+    """The runner.assess_blt_source switch: workspace unless the overrides say
+    standalone."""
+    source = overrides.get("runner", {}).get("assess_blt_source", _DEFAULT_BLT_SOURCE)
+    if source not in BLT_SOURCES:
+        raise ValueError(
+            f"runner.assess_blt_source must be one of {BLT_SOURCES}, got {source!r}"
+        )
+    return source
 
 
 def _build_standalone_modules(overrides):
@@ -382,12 +433,19 @@ def _build_standalone_modules(overrides):
 
     The workspace builds its own inference, beautiful loop, damasio,
     metacognition and attention schema modules; the matching overrides reach
-    them through its constructor so a preset switches every instance.
+    them through its constructor so a preset switches every instance. The
+    separate metacognition module gets the same cooldown pin as the
+    workspace's own.
     """
     fep_ov = {k: v for k, v in overrides.get("fep", {}).items() if k != "drives"}
     workspace = _build_workspace(overrides)
     attention = AttentionSchemaModule(**overrides.get("ast", {}))
-    metacognition = MetacognitionModule(**overrides.get("hot", {}))
+    metacognition = MetacognitionModule(
+        **{
+            "introspection_cooldown": _INTROSPECTION_COOLDOWN_PIN,
+            **overrides.get("hot", {}),
+        }
+    )
     active_inference = ActiveInferenceModule(
         config=ActiveInferenceConfig(**fep_ov) if fep_ov else None
     )
@@ -511,7 +569,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except (ValueError, OSError) as exc:
         print(f"PARAM ERROR: {exc}", file=sys.stderr)
         return 1
-    asyncio.run(_run(args, overrides))
+    try:
+        asyncio.run(_run(args, overrides))
+    except ImportError as exc:
+        # A missing extra is a configuration error: one plain line, no
+        # traceback, the usage exit code. Any other import error propagates.
+        line = explain_missing_extra(exc)
+        if line is None:
+            raise
+        print(line, file=sys.stderr)
+        return EXIT_USAGE
     return 0
 
 
@@ -544,8 +611,14 @@ async def _run(args: argparse.Namespace, overrides: dict) -> None:
             active_inference,
             beautiful_loop,
         ) = _build_standalone_modules(overrides)
-        if args.full:
-            extra_modules = {"phi_tracker": workspace.phi_tracker}
+        # The workspace's tracker reaches the assessment in every mode: with
+        # no cycles run it is warming up and integrated_information reads
+        # insufficient_data, not absent
+        extra_modules = {"phi_tracker": workspace.phi_tracker}
+        # The separate loop is built either way (the seeded stream stays the
+        # same); the switch says which loop the assessment reads
+        if _blt_source(overrides) == BLT_SOURCE_WORKSPACE:
+            beautiful_loop = workspace.beautiful_loop
     profile = overrides.get("runner", {}).get("warmup_profile", _DEFAULT_WARMUP_PROFILE)
     # Every cycle.* switch stays off unless the overrides set it
     augmenter = build_cycle_augmenter(

@@ -899,3 +899,52 @@ def test_runner_environment_is_explicit_about_device_provider_and_stores(
     assert environment["MTC_DATA_DIRECTORY"] == str(tmp_path / "scratch" / "data")
     assert int(environment["MTC_API_PORT"]) > 1024
     assert environment["PATH"] == os.environ["PATH"]
+
+
+# -- a top-level key added after a fixture was captured (amendment A13) ---
+
+
+def test_failures_absent_on_the_expected_side_equals_an_empty_mapping():
+    """``failures`` (the per-run failure counts the report gained later) is
+    read as an empty mapping when the expected report predates it: a report
+    with no failures then equals the older fixture, and a report that holds a
+    failure is still reported, as is a report that lost the key."""
+    older = _sample_report()
+    assert "failures" not in older
+    clean = copy.deepcopy(older)
+    clean["failures"] = {}
+    assert assessment_diff(older, clean) == []
+
+    failed = copy.deepcopy(older)
+    failed["failures"] = {"indicator:metacognition": 1}
+    assert assessment_diff(older, failed) == [
+        ("failures.indicator:metacognition", MISSING, 1)
+    ]
+
+    # The rule is for the expected side only: a report that lost the key
+    # against a fixture that holds it is a difference
+    assert assessment_diff(clean, older) == [("failures", {}, MISSING)]
+    assert assessment_diff(failed, clean) == [
+        ("failures.indicator:metacognition", 1, MISSING)
+    ]
+    # Any other new top-level key is still reported
+    other = copy.deepcopy(older)
+    other["new_field"] = {}
+    assert assessment_diff(older, other) == [("new_field", MISSING, {})]
+
+
+def test_only_the_legacy_assessment_test_uses_the_wall_clock_allowance():
+    """After the runners pin the introspection cooldown, only the legacy seeded
+    assessment (whose preset keeps the 1.0 s gate on purpose) is compared with
+    the wall-clock allowance; the default fixture and the reproducibility test
+    compare the three readouts again."""
+    tests_dir = Path(__file__).resolve().parent
+    users = sorted(
+        path.name
+        for path in tests_dir.glob("test_*.py")
+        if path.name != Path(__file__).name
+        and "WALL_CLOCK_EVIDENCE_KEYS" in path.read_text(encoding="utf-8")
+    )
+    assert users == ["test_legacy_preset.py"]
+    legacy = (tests_dir / "test_legacy_preset.py").read_text(encoding="utf-8")
+    assert legacy.count("ignore_evidence=WALL_CLOCK_EVIDENCE_KEYS") == 1

@@ -63,8 +63,15 @@ def test_results_default_under_assessment_output_dir(tmp_path, monkeypatch):
 
     monkeypatch.setattr(assess, "run_standard", fake_standard)
     monkeypatch.setattr(assess, "print_report", lambda report, markdown=False: None)
+
+    class Workspace:
+        phi_tracker = object()
+        beautiful_loop = object()
+
     monkeypatch.setattr(
-        assess, "_build_standalone_modules", lambda overrides: (None,) * 5
+        assess,
+        "_build_standalone_modules",
+        lambda overrides: (Workspace(),) + (None,) * 4,
     )
     monkeypatch.setattr(assess, "build_cycle_augmenter", lambda *a, **k: None)
     assert assess.main(["--json"]) == 0
@@ -93,6 +100,28 @@ def test_presets_and_schema_resolve_through_resources(tmp_path, monkeypatch, cap
     assert "PARAM ERROR" in err and "no_such_preset" in err
 
 
+def test_assess_cli_pins_introspection_cooldown():
+    """The assessment CLI pins the wall-clock introspection cooldown at 0.0 on
+    every metacognition module it builds (the workspace's own, the standalone
+    one and the workspace of the state-directory path); an explicit
+    hot.introspection_cooldown wins."""
+    workspace, _attention, metacognition, _fep, _loop = (
+        assess._build_standalone_modules({})
+    )
+    assert workspace.metacognition.introspection_cooldown == 0.0
+    assert metacognition.introspection_cooldown == 0.0
+    persisted = assess._build_persisted_modules({})
+    assert persisted["gwt"].metacognition.introspection_cooldown == 0.0
+
+    explicit = {"hot": {"introspection_cooldown": 1.0}}
+    workspace, _attention, metacognition, _fep, _loop = (
+        assess._build_standalone_modules(explicit)
+    )
+    assert workspace.metacognition.introspection_cooldown == 1.0
+    assert metacognition.introspection_cooldown == 1.0
+    assert explicit == {"hot": {"introspection_cooldown": 1.0}}
+
+
 def _record_run(monkeypatch, tmp_path, argv):
     """Run main(argv) through the real parser with recording fakes."""
     settings = Settings(_env_file=None, PROJECT_ROOT=str(tmp_path))
@@ -101,6 +130,7 @@ def _record_run(monkeypatch, tmp_path, argv):
 
     class Workspace:
         phi_tracker = object()
+        beautiful_loop = object()
 
     class Report:
         def to_dict(self):
@@ -136,8 +166,12 @@ def test_quick_flag_is_the_default_mode(tmp_path, monkeypatch, capsys):
     default = _record_run(monkeypatch, tmp_path / "default", [])
     full = _record_run(monkeypatch, tmp_path / "full", ["--full"])
     assert quick[0] == default[0] == 0
-    assert quick[1] == default[1]
-    assert quick[1]["warmup"] == 0 and quick[1]["extra_modules"] == {}
+    assert quick[1]["warmup"] == default[1]["warmup"] == 0
+    # The workspace's tracker reaches the assessment in every mode (R1-13):
+    # quick mode then reports integrated_information as insufficient_data
+    # rather than absent.
+    assert list(quick[1]["extra_modules"]) == ["phi_tracker"]
+    assert list(default[1]["extra_modules"]) == ["phi_tracker"]
     # --full warms up, so the recorder can tell the modes apart.
     assert full[1]["warmup"] == 1 and "phi_tracker" in full[1]["extra_modules"]
 

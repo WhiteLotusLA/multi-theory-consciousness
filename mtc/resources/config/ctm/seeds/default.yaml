@@ -1,11 +1,14 @@
 # Default seed pack for the continuous thought machine.
 #
 # Every line is a short, neutral template. Slot words are written as {name}:
-#   - a word list below (reflection, feeling, emotion, descriptor, assessment,
-#     observation) fills the slot with one entry chosen at random;
+#   - a word list below (reflection, descriptor, assessment, observation)
+#     fills the slot with one entry chosen at random;
 #   - a context slot ({memory}, {current_emotion}, {first}, {second},
 #     {concept}) is filled by the generator with real material and is never
 #     invented here; any other slot name is refused when the pack loads.
+# There is no feeling or emotion slot: a thought names an emotion only through
+# {current_emotion}, the measured one, and a pack that uses either slot or
+# carries either word list is refused when it loads.
 # A user pack in config/ctm/seeds.d/*.yaml (read in name order) extends each
 # list and overrides the description; it may use the same keys and slots.
 
@@ -149,10 +152,7 @@ creative_concepts:
   - a notebook with blank pages
   - a staircase with no top
 
-# Slot words. Each entry fits the sentence frames above. No shipped template
-# uses the feeling or emotion list: a thought never states a feeling at random
-# (an emotion thought names the measured emotion instead, and the generator
-# never puts either list into one). Both lists stay for operator packs.
+# Slot words. Each entry fits the sentence frames above.
 reflection:
   - a pattern
   - a thread
@@ -162,30 +162,6 @@ reflection:
   - a quiet shift
   - a loose end
   - a common thread
-
-feeling:
-  - steady
-  - restless
-  - curious
-  - settled
-  - uncertain
-  - light
-  - heavy
-  - open
-  - still
-  - unhurried
-
-emotion:
-  - calm
-  - curiosity
-  - interest
-  - unease
-  - warmth
-  - tension
-  - relief
-  - wonder
-  - patience
-  - restlessness
 
 descriptor:
   - small

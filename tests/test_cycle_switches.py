@@ -54,6 +54,45 @@ def test_runner_pins_cycle_switches_off_unless_set():
     assert runner.build_augmenter({}, {**modules, "global_workspace": None}) is None
 
 
+def test_runner_pins_introspection_cooldown():
+    """The experiment runner pins the wall-clock introspection cooldown at 0.0
+    on the workspace's metacognition module and on its standalone one, so two
+    runs of one seed agree; an explicit hot.introspection_cooldown wins."""
+    runner = _load_runner()
+    pinned = runner.build_modules({})
+    assert pinned["global_workspace"].metacognition.introspection_cooldown == 0.0
+    assert pinned["metacognition"].introspection_cooldown == 0.0
+
+    explicit = runner.build_modules({"hot": {"introspection_cooldown": 1.0}})
+    assert explicit["global_workspace"].metacognition.introspection_cooldown == 1.0
+    assert explicit["metacognition"].introspection_cooldown == 1.0
+
+    legacy = runner.build_modules(load_overrides(str(LEGACY), str(SCHEMA)))
+    assert legacy["global_workspace"].metacognition.introspection_cooldown == 1.0
+    assert legacy["metacognition"].introspection_cooldown == 1.0
+
+
+def test_runner_forwards_legacy_preset_switches_to_standalone_modules():
+    """The runner's separate HOT and BLT modules take the preset's switch rows
+    the way the workspace's own modules do."""
+    runner = _load_runner()
+    modules = runner.build_modules(load_overrides(str(LEGACY), str(SCHEMA)))
+    hot = modules["metacognition"]
+    assert hot.overall_confidence_source == "v04_constant"
+    assert hot.introspection_counting == "v04_per_hot"
+    loop = modules["beautiful_loop"]
+    assert loop.loop_quality_formula == "v04"
+    assert loop.binding_evidence == "v04_salience_posterior"
+    assert loop.strange_loop_test == "v04_confidence_match"
+    workspace = modules["global_workspace"]
+    assert workspace.legacy_broadcast_receivers is True
+    assert workspace.ignition_detector.legacy_sustain_rate is True
+    assert workspace.temporal_config.refractory_clock == "per_cycle"
+    assert workspace.metacognition.overall_confidence_source == "v04_constant"
+    assert workspace.beautiful_loop.binding_evidence == "v04_salience_posterior"
+    assert workspace.damasio.protoself.first_delta == "v04_zero"
+
+
 def test_legacy_preset_rows_turn_cycle_off():
     overrides = load_overrides(str(LEGACY), str(SCHEMA))
     assert overrides["cycle"] == {

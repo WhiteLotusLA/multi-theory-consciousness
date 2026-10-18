@@ -42,6 +42,22 @@ The Phase 3 part of the preset adds an `[assessment]` block (`indicator_formulas
 v0.4.0 divide-by-5.0 behaviour and the PAD tuning keys are inert under
 `v04_variance`.
 
+The v0.5.0 release added ten switch rows, each with its v0.4.0 value in the
+preset: `assessment.noise_baseline_matching = "v04_any"`,
+`runner.assess_blt_source = "standalone"`, `gwt.legacy_broadcast_receivers =
+true`, `gwt.legacy_sustain_rate = true`, `gwt.refractory_clock = "per_cycle"`
+(also the default), a `[hot]` table (`overall_confidence_source =
+"v04_constant"`, `introspection_counting = "v04_per_hot"` and an explicit
+`introspection_cooldown = 1.0`, the wall-clock gate the runners otherwise pin
+at 0.0), `blt.binding_evidence = "v04_salience_posterior"`,
+`blt.strange_loop_test = "v04_confidence_match"` and `damasio.first_delta =
+"v04_zero"`. One dependency: `blt.loop_quality_formula = "v04"` needs
+`blt.binding_evidence = "v04_salience_posterior"` (the v04 formula reads a
+binding quality only that evidence measures); a params file that sets the
+formula alone fails at construction with a message naming both keys.
+`tests/test_legacy_preset.py` checks that every schema row has a preset
+value, an unchanged v0.4.0 default or a recorded reason.
+
 ## Adding a preset
 
 1. Copy an existing preset to `experiments/presets/<name>.toml`.

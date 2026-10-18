@@ -37,11 +37,15 @@ FEP_BEHAVIOUR_SWITCHES = (
 )
 
 # gwt.* behaviour switches that are EnhancedGlobalWorkspace constructor fields.
+# The refractory clock is not one of them: it is a TemporalWorkspaceConfig
+# field and reaches the workspace through the temporal config below.
 GWT_SWITCHES = (
     "competition_mode",
     "thalamic_gate_enabled",
     "theory_interactions_enabled",
     "legacy_coverage_ratio",
+    "legacy_broadcast_receivers",
+    "legacy_sustain_rate",
     "body_metrics_enabled",
     "precision_feedback_enabled",
     "self_prediction_enabled",
@@ -133,6 +137,7 @@ def build_workspace(
     phi_tracker: Optional[PhiTracker],
     *,
     body_metrics_default: bool = True,
+    introspection_cooldown_default: Optional[float] = None,
 ) -> EnhancedGlobalWorkspace:
     """The workspace both runners use, built from the layered overrides.
 
@@ -140,11 +145,18 @@ def build_workspace(
     metacognition and attention schema modules; the fep, blt, damasio, hot and
     ast overrides reach them through its constructor so a preset switches every
     instance in the run. The gwt keys fill the workspace's own fields, its
-    behaviour switches and its temporal config.
+    behaviour switches and its temporal config (``gwt.refractory_clock``
+    among the temporal fields).
 
     ``body_metrics_default`` is the value of ``body_metrics_enabled`` when the
     overrides do not set it. Machine metrics and the previous cycle's duration
     reach the protoself when it is on, so a seeded run passes False.
+
+    ``introspection_cooldown_default`` is the metacognition module's
+    ``introspection_cooldown`` when the overrides do not set
+    ``hot.introspection_cooldown``; None keeps the module's own default. The
+    cooldown is a wall-clock gate, so a seeded run passes 0.0 and the live
+    runtime passes nothing.
     """
     gwt_ov = dict(overrides.get("gwt", {}))
 
@@ -165,6 +177,9 @@ def build_workspace(
     ast_forward = {
         k: v for k, v in overrides.get("ast", {}).items() if k in AST_SWITCHES
     }
+    hot_kwargs = dict(overrides.get("hot", {}))
+    if introspection_cooldown_default is not None:
+        hot_kwargs.setdefault("introspection_cooldown", introspection_cooldown_default)
 
     return EnhancedGlobalWorkspace(
         capacity=gwt_ov.get("capacity", 7),
@@ -176,7 +191,7 @@ def build_workspace(
         ),
         beautiful_loop_kwargs=dict(overrides.get("blt", {})),
         damasio_kwargs=dict(overrides.get("damasio", {})),
-        metacognition_kwargs=dict(overrides.get("hot", {})),
+        metacognition_kwargs=hot_kwargs,
         attention_schema_kwargs=ast_forward,
         phi_tracker=phi_tracker,
         **switches,

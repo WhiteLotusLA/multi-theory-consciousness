@@ -135,6 +135,13 @@ class _WarmupMetaState:
 # analysis has always needed here.
 _PHI_MIN_TRANSITIONS = 10
 
+# The metacognition introspection cooldown is a wall-clock gate: with the
+# module's 1.0 s the number of introspection passes a warmup completes follows
+# the speed of the machine. The runner pins it at 0.0 on every metacognition
+# module it builds unless hot.introspection_cooldown is set, so two runs of
+# one seed agree (the legacy preset sets 1.0 explicitly).
+_INTROSPECTION_COOLDOWN_PIN = 0.0
+
 _DEFAULT_WARMUP_PROFILE = WARMUP_PROFILE_V05
 
 
@@ -153,12 +160,21 @@ def build_modules(overrides: dict) -> dict:
     # them through its constructor so a preset switches every instance in the
     # run.
     phi_tracker = build_phi_tracker(overrides.get("phi", {}), _PHI_MIN_TRANSITIONS)
-    workspace = build_workspace(overrides, phi_tracker, body_metrics_default=False)
+    workspace = build_workspace(
+        overrides,
+        phi_tracker,
+        body_metrics_default=False,
+        introspection_cooldown_default=_INTROSPECTION_COOLDOWN_PIN,
+    )
 
     ast_ov = overrides.get("ast", {})
     attention = AttentionSchemaModule(**ast_ov)
 
-    hot_ov = overrides.get("hot", {})
+    # The standalone module gets the same cooldown pin as the workspace's own
+    hot_ov = {
+        "introspection_cooldown": _INTROSPECTION_COOLDOWN_PIN,
+        **overrides.get("hot", {}),
+    }
     metacognition = MetacognitionModule(**hot_ov)
 
     fep_ov = overrides.get("fep", {}).copy()
@@ -542,13 +558,18 @@ def print_report(report, t_total: float, ablation_results: dict = None):
         print("ablation_results:")
         all_pass = True
         for module_name, result in sorted(ablation_results.items()):
-            status = "GENUINE" if result["genuine"] else "COSMETIC"
+            genuine = result["genuine"]
+            if genuine is None:
+                # The ablated run measured nothing: no drop to judge
+                status = "INSUFFICIENT"
+            else:
+                status = "GENUINE" if genuine else "COSMETIC"
             print(
-                f" {module_name}: score_with={result['score_with']:.6f} "
-                f"score_without={result['score_without']:.6f} "
-                f"drop={result['drop']:.6f} {status}"
+                f" {module_name}: score_with={_format_score(result['score_with'])} "
+                f"score_without={_format_score(result['score_without'])} "
+                f"drop={_format_score(result['drop'])} {status}"
             )
-            if not result["genuine"]:
+            if not genuine:
                 all_pass = False
         print(f"ablation_passed:   {'true' if all_pass else 'false'}")
 
@@ -574,6 +595,9 @@ async def run_ablation(
 
     Returns dict of {module_name: {score_with, score_without, drop, genuine}}.
     A change is 'genuine' if disabling the module causes a score drop > 0.001.
+    When the ablated run measures nothing (its overall score is None) there is
+    no number to subtract: score_without, drop and genuine are None and the
+    printer reports insufficient_data.
     """
     results = {}
     for module_name in modules_to_check:
@@ -613,13 +637,21 @@ async def run_ablation(
             noise_baselines=noise_baselines,
         )
 
-        # A None overall means nothing was measured or absent; the module
-        # contributed everything, so that counts as a full drop
         without = ablated_report.overall_score
-        drop = baseline_score - (without if without is not None else 0.0)
+        if without is None:
+            # Nothing was measured without the module: no number to subtract,
+            # so the drop and the verdict are unmeasured, not a full drop
+            results[module_name] = {
+                "score_with": baseline_score,
+                "score_without": None,
+                "drop": None,
+                "genuine": None,
+            }
+            continue
+        drop = baseline_score - without
         results[module_name] = {
             "score_with": baseline_score,
-            "score_without": without if without is not None else 0.0,
+            "score_without": without,
             "drop": drop,
             "genuine": drop > 0.001,  # Must cause measurable score drop
         }
@@ -699,12 +731,18 @@ async def run():
 
     # Run ablation validation if requested
     ablation_results = None
-    if args.validate:
+    if args.validate and report.overall_score is None:
+        print(
+            "ablation skipped: the baseline overall score is insufficient_data "
+            "(nothing measured to compare an ablated run against)",
+            file=sys.stderr,
+        )
+    elif args.validate:
         modules_to_check = [m.strip() for m in args.validate.split(",")]
         ablation_results = await run_ablation(
             overrides,
             modules_to_check,
-            report.overall_score if report.overall_score is not None else 0.0,
+            report.overall_score,
             noise_baselines,
         )
 

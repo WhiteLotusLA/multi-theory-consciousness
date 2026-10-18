@@ -15,9 +15,9 @@ What each test compares and needs:
   ``phi_source_used`` line changes.
 - The assessment test holds every field of the report (statuses, counts,
   keys and booleans exactly, floats within 1e-9). Left out: the session id,
-  the timestamp, the timing fields, and the three counter readouts of
-  ``WALL_CLOCK_EVIDENCE_KEYS``, which follow the wall clock while the
-  introspection cooldown does. It needs pymdp only: a five-cycle warmup
+  the timestamp and the timing fields. Nothing follows the wall clock: the
+  seeded CLI pins the introspection cooldown at 0.0, so the three counter
+  readouts are compared too. It needs pymdp only: a five-cycle warmup
   leaves the tracker warming up, so the report is the same with and without
   PyPhi.
 
@@ -45,7 +45,6 @@ from pathlib import Path
 import pytest
 
 from tests.baseline_compare import (
-    WALL_CLOCK_EVIDENCE_KEYS,
     assessment_diff,
     current_environment,
     diff_blocks,
@@ -123,9 +122,7 @@ def test_v050_assessment_fixture_reproduces(tmp_path):
     )
     assert result.returncode == 0, result.stderr[-2000:]
     report = json.loads(json_path.read_text())
-    # The seeded CLI runs with the module's wall-clock introspection
-    # cooldown, so the three counter readouts that follow it are not compared
-    differences = assessment_diff(
-        baseline, report, ignore_evidence=WALL_CLOCK_EVIDENCE_KEYS
-    )
+    # The seeded CLI pins the introspection cooldown at 0.0, so no field of
+    # the report follows the wall clock and every field is compared
+    differences = assessment_diff(baseline, report)
     assert differences == [], _failure_message(differences)
