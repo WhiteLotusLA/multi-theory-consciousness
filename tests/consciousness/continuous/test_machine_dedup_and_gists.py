@@ -1,7 +1,10 @@
 """Dedup-on-write, thought ids and child links, burst ids, gists with one
 count key, memory associations, and blocking work kept off the event loop."""
 
+import asyncio
 import threading
+
+import pytest
 
 from mtc.brain.prompt import PromptAssembler, PromptInputs
 from mtc.consciousness.continuous.store import InMemoryThoughtStore
@@ -76,6 +79,130 @@ def test_parent_child_link_resolves_by_thought_id():
     assert counters.get("links_unresolved", 0) == 0
 
 
+class SlowStore(InMemoryThoughtStore):
+    """An insert that announces itself and then takes a while."""
+
+    def __init__(self, delay: float = 0.05):
+        super().__init__()
+        self.delay = delay
+        self.entered = None
+
+    async def insert(self, record):
+        if self.entered is not None:
+            self.entered.set()
+        await asyncio.sleep(self.delay)
+        return await super().insert(record)
+
+
+def test_injection_during_a_tick_does_not_fork_the_chain():
+    store = SlowStore()
+    machine = make_machine(["river", "garden"], store=store, config=cfg_with(**FAST))
+
+    async def scenario():
+        first = await machine.tick()
+        store.entered = asyncio.Event()
+
+        async def inject_while_the_tick_inserts():
+            await store.entered.wait()
+            return await machine.inject_thought("A loose dream.", "dream", "")
+
+        tick, injected = await asyncio.gather(
+            machine.tick(), inject_while_the_tick_inserts()
+        )
+        return first, tick, injected
+
+    first, tick, injected = run(scenario())
+    assert tick.persisted is True
+    docs = run(_docs(store))
+    assert set(docs) == {first.thought_id, tick.thought_id, injected.thought_id}
+    ticked = docs[tick.thought_id]
+    dream = docs[injected.thought_id]
+    assert ticked.previous_thought_id != dream.previous_thought_id
+    # one chain: the tick's thought follows the first, the dream follows it
+    assert ticked.previous_thought_id == first.thought_id
+    assert dream.previous_thought_id == tick.thought_id
+    assert raw_children(docs, first.thought_id) == [tick.thought_id]
+    assert raw_children(docs, tick.thought_id) == [injected.thought_id]
+    counters = machine.get_status()["counters"]
+    assert counters["links_resolved"] == 2
+    assert counters.get("links_unresolved", 0) == 0
+
+
+def test_concurrent_injections_form_one_chain():
+    store = SlowStore()
+    machine = make_machine(store=store)
+
+    async def scenario():
+        return await asyncio.gather(
+            *(machine.inject_thought(f"Dream {n}.", "dream", "") for n in range(4))
+        )
+
+    records = run(scenario())
+    docs = run(_docs(store))
+    assert set(docs) == {r.thought_id for r in records}
+    parents = [docs[r.thought_id].previous_thought_id for r in records]
+    assert parents.count(None) == 1  # one head
+    assert len(set(parents)) == 4  # no two thoughts share a parent
+    children = {}
+    for record in records:
+        parent = docs[record.thought_id].previous_thought_id
+        if parent is not None:
+            assert parent in docs
+            children[parent] = record.thought_id
+    head = records[parents.index(None)].thought_id
+    chain = [head]
+    while chain[-1] in children:
+        chain.append(children[chain[-1]])
+    assert len(chain) == 4  # every stored thought is on the one chain
+    assert machine.get_status()["counters"]["links_resolved"] == 3
+
+
+def test_persisted_hook_may_inject():
+    injected = []
+
+    async def on_persisted(thought):
+        if thought.processing_context.get("form") != "injected":
+            record = await machine.inject_thought("A follow-up.", "dream", "")
+            injected.append(record)
+
+    store = InMemoryThoughtStore()
+    machine = make_machine(["river"], store=store, on_thought_persisted=on_persisted)
+
+    async def scenario():
+        return await asyncio.wait_for(machine.tick(), timeout=5)
+
+    result = run(scenario())
+    assert result.persisted is True
+    (record,) = injected
+    docs = run(_docs(store))
+    assert docs[record.thought_id].previous_thought_id == result.thought_id
+
+
+def test_unstored_thought_names_no_parent():
+    generated = []
+    store = InMemoryThoughtStore()
+    machine = make_machine(
+        ["river", "the river"],
+        store=store,
+        config=cfg_with(**FAST),
+        on_thought_generated=generated.append,
+    )
+    first = run(machine.tick())
+    duplicate = run(machine.tick())
+    assert first.persisted is True and duplicate.duplicate is True
+    assert generated[1].previous_thought_id is None  # never stored, no link
+
+    class BrokenStore(InMemoryThoughtStore):
+        async def insert(self, record):
+            raise RuntimeError("store down")
+
+    broken = make_machine(store=BrokenStore())
+    broken._last_persisted_id = first.thought_id
+    record = run(broken.inject_thought("A loose dream.", "dream", ""))
+    assert record.previous_thought_id is None
+    assert broken.get_status()["failures"] == {"persist": 1}
+
+
 def test_burst_stream_id_rotates_on_gap_and_state_change():
     clock = Clock()
     store = InMemoryThoughtStore()
@@ -116,6 +243,37 @@ def test_gist_every_n_with_source_count():
     assert gist.dominant_emotion is None  # no thought carried an emotion
     assert "source_count" in gist.to_document()
     assert "thought_count" not in gist.to_document()
+
+
+def test_gist_importance_is_measured_or_none():
+    constant = make_machine(WORDS[:5], config=cfg_with(gist={"every": 5}, **FAST))
+    for _ in range(5):
+        run(constant.tick())
+    (gist,) = run(constant.gist_store.active_gists(min_retention=0.0))
+    # every thought's salience was a design constant: nothing was measured
+    assert gist.avg_salience is None
+    assert gist.importance_score is None
+    assert gist.retention_strength == 0.8  # the configured starting retention
+
+    # the measured mean (0.8) differs from the mean over every thought (0.62),
+    # so averaging the design constants in as well cannot pass
+    measured = {WORDS[6]: 0.9, WORDS[8]: 0.7}
+
+    def tag(thought):
+        if thought.content in measured:
+            thought.salience_score = measured[thought.content]
+            thought.processing_context["salience_basis"] = "memory_importance"
+
+    mixed = make_machine(
+        WORDS[5:10],
+        config=cfg_with(gist={"every": 5}, **FAST),
+        on_thought_generated=tag,
+    )
+    for _ in range(5):
+        run(mixed.tick())
+    (gist,) = run(mixed.gist_store.active_gists(min_retention=0.0))
+    assert gist.avg_salience == pytest.approx(0.8)
+    assert gist.importance_score == pytest.approx(0.8)
 
 
 def test_gist_mood_is_measured_or_none_and_none_renders_no_mood():

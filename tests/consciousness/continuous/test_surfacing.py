@@ -157,3 +157,36 @@ def test_item_keys_match_prompt_assembler():
     loud = PromptAssembler(narrate_thought_mood=True).render(inputs).text
     assert "a thought text [mood: calm]" in loud
     assert "(from 1 thought) [mood: calm]" in loud
+
+
+@pytest.mark.asyncio
+async def test_thought_items_carry_form_and_salience_basis():
+    store = InMemoryThoughtStore()
+    await store.insert(
+        _record(
+            "m",
+            0,
+            text="a model line",
+            processing_context={
+                "form": "model",
+                "salience_basis": "llm_design_constant",
+            },
+        )
+    )
+    await store.insert(
+        _record(
+            "t",
+            1,
+            text="a template line",
+            processing_context={"form": "template", "salience_basis": "affect"},
+        )
+    )
+    await store.insert(_record("bare", 2, text="no context"))
+    items = {
+        i["thought_id"]: i for i in thought_items(await get_surfaced_thoughts(store))
+    }
+    assert items["m"]["form"] == "model"
+    assert items["m"]["salience_basis"] == "llm_design_constant"
+    assert items["t"]["form"] == "template"
+    assert items["t"]["salience_basis"] == "affect"
+    assert items["bare"]["form"] is None and items["bare"]["salience_basis"] is None

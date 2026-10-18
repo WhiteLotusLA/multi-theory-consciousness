@@ -76,16 +76,76 @@ class TestProtoself:
         assert 0 <= state.body_state.energy_level <= 1
         assert 0 <= state.body_state.temperature <= 1
         assert state.body_state.interoceptive_state is not None
-        assert isinstance(state.body_delta, float)
-        assert isinstance(state.stability, float)
+        # The first update has no previous body state to measure a delta
+        # against, so the perturbation and the stability are unmeasured
+        assert state.body_delta is None
+        assert state.stability is None
+        second = ps.update(drives)
+        assert isinstance(second.body_delta, float)
+        assert isinstance(second.stability, float)
 
-    def test_body_delta_detects_perturbation(self):
-        """body_delta increases when body state changes significantly."""
+    @staticmethod
+    def _attention_drives(level: float = 0.7, valence: float = 0.0):
+        drives = MagicMock()
+        drives.get_drive_state.return_value = {
+            "attention_budget": {
+                "current_level": level,
+                "optimal_level": 0.7,
+                "deviation": abs(level - 0.7),
+                "urgency": 0.0,
+            },
+        }
+        drives.get_overall_valence.return_value = valence
+        drives.get_free_energy.return_value = 0.1
+        return drives
+
+    def test_first_update_reports_no_delta(self):
+        """The first update has no previous body state. Under the default
+        first_delta ("unmeasured") body_delta, stability and arousal are None
+        and nothing enters the delta history; under "v04_zero" they read
+        0.0, 1.0 and 0.0 as in v0.4.0 and the 0.0 enters the history."""
         from mtc.consciousness.damasio.protoself import Protoself
 
-        ps = Protoself()
+        drives = self._attention_drives()
 
-        # First update -- establishes baseline
+        fresh = Protoself()
+        state = fresh.update(drives)
+        assert state.body_delta is None
+        assert state.stability is None
+        assert state.primordial_feelings["arousal"] is None
+        assert list(fresh._body_delta_history) == []
+        assert list(fresh._stability_history) == []
+        assert state.to_dict()["body_delta"] is None
+        assert state.to_dict()["stability"] is None
+        stats = fresh.get_statistics()
+        assert stats["average_body_delta"] is None
+        assert stats["average_stability"] is None
+
+        legacy = Protoself(first_delta="v04_zero")
+        old = legacy.update(drives)
+        assert old.body_delta == 0.0
+        assert old.stability == 1.0
+        assert old.primordial_feelings["arousal"] == 0.0
+        assert list(legacy._body_delta_history) == [0.0]
+        assert list(legacy._stability_history) == [1.0]
+
+        with pytest.raises(ValueError, match="first_delta"):
+            Protoself(first_delta="other")
+
+        # The second update is a measurement in both modes
+        for ps in (fresh, legacy):
+            second = ps.update(drives)
+            assert isinstance(second.body_delta, float)
+            assert isinstance(second.stability, float)
+            assert isinstance(second.primordial_feelings["arousal"], float)
+
+    def test_body_delta_detects_perturbation(self):
+        """A second update after a large change in the drives has a larger
+        body_delta, a lower stability and a higher arousal than a second
+        update after no change: two measured deltas, neither of them the
+        unmeasured first update."""
+        from mtc.consciousness.damasio.protoself import Protoself
+
         drives_stable = MagicMock()
         drives_stable.get_drive_state.return_value = {
             "attention_budget": {
@@ -121,7 +181,6 @@ class TestProtoself:
         }
         drives_stable.get_overall_valence.return_value = 0.0
         drives_stable.get_free_energy.return_value = 0.0
-        state1 = ps.update(drives_stable)
 
         # Second update -- big change in drives
         drives_perturbed = MagicMock()
@@ -159,9 +218,23 @@ class TestProtoself:
         }
         drives_perturbed.get_overall_valence.return_value = -0.5
         drives_perturbed.get_free_energy.return_value = 0.8
-        state2 = ps.update(drives_perturbed)
 
-        assert state2.body_delta > state1.body_delta
+        steady = Protoself()
+        assert steady.update(drives_stable).body_delta is None  # no baseline yet
+        calm = steady.update(drives_stable)
+
+        shaken = Protoself()
+        shaken.update(drives_stable)
+        perturbed = shaken.update(drives_perturbed)
+
+        assert isinstance(calm.body_delta, float)
+        assert isinstance(perturbed.body_delta, float)
+        assert perturbed.body_delta > calm.body_delta
+        assert perturbed.stability < calm.stability
+        assert (
+            perturbed.primordial_feelings["arousal"]
+            > calm.primordial_feelings["arousal"]
+        )
 
     def test_primordial_feelings_from_trends(self):
         """Primordial feelings reflect body state trends over time."""
@@ -508,6 +581,72 @@ class TestCoreConsciousness:
         assert experience.self_world_binding < 0.3
         assert len(experience.somatic_markers) == 0
 
+    def test_unmeasured_arousal_leaves_intensity_and_here_now_unmeasured(self):
+        """A protoself state whose arousal is unmeasured (None, the update
+        with no previous body state) yields somatic markers with a measured
+        valence and no intensity, and no here-now salience, with or without
+        winners; the dicts carry the None. A measured arousal of 0.0 (the
+        legacy first update) yields the numbers 0.0 and 0.6 x salience."""
+        from mtc.consciousness.damasio.core_consciousness import (
+            CoreConsciousness,
+            CoreExperience,
+        )
+        from mtc.consciousness.damasio.protoself import ProtoSelfState, BodyState
+
+        def state(arousal):
+            return ProtoSelfState(
+                body_state=BodyState(),
+                body_delta=None if arousal is None else 0.0,
+                stability=None if arousal is None else 1.0,
+                primordial_feelings={
+                    "pleasure_pain": 0.3,
+                    "vitality": 0.5,
+                    "arousal": arousal,
+                },
+            )
+
+        w1 = MagicMock()
+        w1.candidate = MagicMock()
+        w1.candidate.summary = "A synthetic thought"
+        w1.candidate.content_type = "thought"
+        w1.salience = 0.8
+        w2 = MagicMock()
+        w2.candidate = MagicMock()
+        w2.candidate.summary = "A synthetic warning"
+        w2.candidate.content_type = "warning"
+        w2.salience = 0.4
+
+        cc = CoreConsciousness()
+        unmeasured = cc.bind(state(None), workspace_winners=[w1, w2])
+        assert len(unmeasured.somatic_markers) == 2
+        for marker in unmeasured.somatic_markers:
+            assert marker.intensity is None
+            assert isinstance(marker.valence, float)
+            assert marker.to_dict()["intensity"] is None
+        assert isinstance(unmeasured.somatic_valence, float)
+        assert unmeasured.here_now_salience is None
+        raw = unmeasured.to_dict()
+        assert raw["here_now_salience"] is None
+        again = CoreExperience.from_dict(raw)
+        assert again.here_now_salience is None
+        assert again.somatic_markers[1].intensity is None
+        assert again.somatic_valence == pytest.approx(unmeasured.somatic_valence)
+
+        quiet = cc.bind(state(None), workspace_winners=[])
+        assert quiet.here_now_salience is None
+        assert quiet.somatic_markers == []
+
+        legacy = cc.bind(state(0.0), workspace_winners=[w1, w2])
+        assert [m.intensity for m in legacy.somatic_markers] == [0.0, 0.0]
+        assert legacy.here_now_salience == pytest.approx(0.6 * 0.6)
+        assert cc.bind(state(0.0), workspace_winners=[]).here_now_salience == 0.0
+
+        measured = cc.bind(state(0.5), workspace_winners=[w1, w2])
+        assert [m.intensity for m in measured.somatic_markers] == pytest.approx(
+            [0.4, 0.2]
+        )
+        assert measured.here_now_salience == pytest.approx(0.5 * 0.4 + 0.6 * 0.6)
+
     def test_self_model_enriches_binding(self):
         """Providing self_model increases feeling_of_knowing."""
         from mtc.consciousness.damasio.core_consciousness import CoreConsciousness
@@ -621,14 +760,31 @@ class TestExtendedConsciousness:
 
         state = ec.extend(core)
 
+        # A first cycle with no history and no markers measures none of the
+        # autobiographic quantities
         assert state.autobiographic_self is not None
-        assert 0 <= state.autobiographic_self.identity_continuity <= 1
-        assert 0 <= state.autobiographic_self.narrative_coherence <= 1
-        assert 0 <= state.episodic_resonance <= 1
+        assert state.autobiographic_self.identity_continuity is None
+        assert state.autobiographic_self.narrative_coherence is None
+        assert state.episodic_resonance is None
         assert isinstance(state.narrative_context, str)
 
+        # With a history and identity markers, a second cycle measures all
+        # three within their ranges
+        history = [
+            {"role": "user", "content": "a synthetic question about patterns"},
+            {"role": "assistant", "content": "a synthetic answer about patterns"},
+        ]
+        markers = {"interests": ["patterns"]}
+        ec.extend(core, conversation_history=history, identity_markers=markers)
+        later = ec.extend(core, conversation_history=history, identity_markers=markers)
+        assert 0 <= later.autobiographic_self.identity_continuity <= 1
+        assert 0 <= later.autobiographic_self.narrative_coherence <= 1
+        assert 0 <= later.autobiographic_self.temporal_horizon <= 1
+        assert 0 <= later.episodic_resonance <= 1
+
     def test_conversation_history_enriches(self):
-        """Conversation history increases episodic resonance."""
+        """Episodic resonance is unmeasured without a history and a positive
+        measurement with one."""
         from mtc.consciousness.damasio.extended_consciousness import (
             ExtendedConsciousness,
         )
@@ -646,6 +802,8 @@ class TestExtendedConsciousness:
 
         # Without history
         state1 = ec.extend(core)
+        assert state1.episodic_resonance is None
+        assert state1.relevant_episodes == []
 
         # With history
         ec2 = ExtendedConsciousness()
@@ -656,7 +814,86 @@ class TestExtendedConsciousness:
         ]
         state2 = ec2.extend(core, conversation_history=history)
 
-        assert state2.episodic_resonance >= state1.episodic_resonance
+        assert isinstance(state2.episodic_resonance, float)
+        assert state2.episodic_resonance > 0.0
+        assert state2.episodic_resonance == pytest.approx(
+            min(1.0, len(history) / 10.0) * 0.6 + 0.7 * 0.4
+        )
+
+    def test_extended_without_history_reports_none(self):
+        """With no conversation history and no identity markers the extended
+        layer has no measured coherence, horizon, resonance or continuity on
+        its first cycles; once the binding trend holds more than three points
+        continuity is measured from that trend alone."""
+        from mtc.consciousness.damasio.extended_consciousness import (
+            AutobiographicSelf,
+            ExtendedConsciousness,
+            ExtendedState,
+        )
+        from mtc.consciousness.damasio.core_consciousness import CoreExperience
+
+        ec = ExtendedConsciousness()
+        core = CoreExperience(
+            self_world_binding=0.6,
+            perturbation_source="internal body state change",
+            feeling_of_knowing=0.5,
+            somatic_markers=[],
+            here_now_salience=0.2,
+        )
+
+        states = [ec.extend(core) for _ in range(3)]
+        for state in states:
+            auto = state.autobiographic_self
+            assert auto.narrative_coherence is None
+            assert auto.temporal_horizon is None
+            assert auto.identity_continuity is None
+            assert state.episodic_resonance is None
+            assert "identity" not in state.narrative_context
+            assert state.to_dict()["autobiographic_self"]["identity_continuity"] is None
+
+        fourth = ec.extend(core)
+        auto = fourth.autobiographic_self
+        assert auto.identity_continuity == pytest.approx(0.3)  # a flat trend
+        assert auto.narrative_coherence is None
+        assert auto.temporal_horizon is None
+        assert fourth.episodic_resonance is None
+
+        stats = ec.get_statistics()
+        assert stats["average_coherence"] is None
+        assert stats["average_continuity"] == pytest.approx(0.3)
+
+        # Round trip keeps the unmeasured values unmeasured
+        restored = ExtendedState.from_dict(states[0].to_dict())
+        assert restored.episodic_resonance is None
+        assert restored.autobiographic_self.identity_continuity is None
+        assert AutobiographicSelf.from_dict({}).narrative_coherence is None
+        assert AutobiographicSelf.from_dict({}).temporal_horizon is None
+
+    def test_identity_markers_alone_measure_continuity_and_horizon(self):
+        """Identity markers measure continuity and horizon on the first
+        cycle, while coherence needs an earlier cycle's themes."""
+        from mtc.consciousness.damasio.extended_consciousness import (
+            ExtendedConsciousness,
+        )
+        from mtc.consciousness.damasio.core_consciousness import CoreExperience
+
+        ec = ExtendedConsciousness()
+        core = CoreExperience(
+            self_world_binding=0.6,
+            perturbation_source="self-reflection",
+            feeling_of_knowing=0.5,
+            somatic_markers=[],
+            here_now_salience=0.4,
+        )
+        markers = {"interests": ["patterns", "data"], "core_values": ["care"]}
+
+        first = ec.extend(core, identity_markers=markers).autobiographic_self
+        assert first.identity_continuity == pytest.approx(0.2)
+        assert first.temporal_horizon == pytest.approx(0.2)
+        assert first.narrative_coherence is None
+
+        second = ec.extend(core, identity_markers=markers).autobiographic_self
+        assert second.narrative_coherence == pytest.approx(1.0)
 
     def test_identity_markers_build_continuity(self):
         """Identity markers increase identity_continuity."""
@@ -882,6 +1119,247 @@ class TestDamasioLayers:
         assert "self_world_binding" in state
         assert "feeling_of_knowing" in state
         assert "autobiographic_continuity" in state
+
+    @pytest.mark.asyncio
+    async def test_no_markers_means_no_somatic_valence(self):
+        """A cycle with no workspace winners has no somatic marker, so the
+        core layer reports no somatic valence rather than a measured 0.0."""
+        from mtc.consciousness.damasio import DamasioLayers
+
+        dl = DamasioLayers()
+        drives = MagicMock()
+        drives.get_drive_state.return_value = {
+            "attention_budget": {
+                "current_level": 0.6,
+                "optimal_level": 0.7,
+                "deviation": 0.1,
+                "urgency": 0.2,
+            },
+        }
+        drives.get_overall_valence.return_value = 0.1
+        drives.get_free_energy.return_value = 0.2
+
+        result = await dl.process(homeostatic_drives=drives, workspace_winners=[])
+        assert result["core"]["somatic_markers"] == []
+        assert result["core"]["somatic_valence"] is None
+
+    @pytest.mark.asyncio
+    async def test_first_layers_cycle_reports_no_stability(self):
+        """On the first cycle the protoself has no previous body state, so
+        the aggregate reports protoself_stability and feeling_of_knowing as
+        None and the context and report say so; the legacy first_delta
+        records the v0.4.0 constants."""
+        from mtc.consciousness.damasio import DamasioLayers
+
+        drives = MagicMock()
+        drives.get_drive_state.return_value = {
+            "attention_budget": {
+                "current_level": 0.6,
+                "optimal_level": 0.7,
+                "deviation": 0.1,
+                "urgency": 0.2,
+            },
+        }
+        drives.get_overall_valence.return_value = 0.1
+        drives.get_free_energy.return_value = 0.2
+
+        dl = DamasioLayers()
+        first = await dl.process(homeostatic_drives=drives, workspace_winners=[])
+        assert first["protoself_stability"] is None
+        assert first["feeling_of_knowing"] is None
+        assert first["protoself"]["body_delta"] is None
+        assert first["protoself"]["stability"] is None
+        assert first["protoself"]["primordial_feelings"]["arousal"] is None
+        assert first["core"]["feeling_of_knowing"] is None
+        assert isinstance(first["self_world_binding"], float)
+        context = dl.generate_context()
+        assert "stability=insufficient_data" in context
+        assert "knowing=insufficient_data" in context
+        report = dl.generate_report()
+        assert "Stability: insufficient_data" in report
+        assert "Body delta: insufficient_data" in report
+        assert "Feeling of knowing: insufficient_data" in report
+
+        second = await dl.process(homeostatic_drives=drives, workspace_winners=[])
+        assert isinstance(second["protoself_stability"], float)
+        assert isinstance(second["feeling_of_knowing"], float)
+
+        legacy = DamasioLayers(first_delta="v04_zero")
+        old = await legacy.process(homeostatic_drives=drives, workspace_winners=[])
+        assert old["protoself_stability"] == 1.0
+        assert old["protoself"]["body_delta"] == 0.0
+        assert old["protoself"]["primordial_feelings"]["arousal"] == 0.0
+        assert old["feeling_of_knowing"] == pytest.approx(0.1)  # 1.0 x 0.1
+        assert legacy.protoself.first_delta == "v04_zero"
+
+    @pytest.mark.asyncio
+    async def test_first_layers_cycle_with_winners_has_no_marker_intensity(self):
+        """On the first cycle the arousal is unmeasured, so the somatic
+        markers carry a valence but no intensity and the here-now salience
+        is None; the context still names the dominant marker (by valence)
+        and the report says insufficient_data. The second cycle measures
+        both; the legacy first_delta records the v0.4.0 numbers."""
+        from mtc.consciousness.damasio import DamasioLayers
+
+        drives = MagicMock()
+        drives.get_drive_state.return_value = {
+            "attention_budget": {
+                "current_level": 0.6,
+                "optimal_level": 0.7,
+                "deviation": 0.1,
+                "urgency": 0.2,
+            },
+        }
+        drives.get_overall_valence.return_value = 0.3
+        drives.get_free_energy.return_value = 0.2
+
+        def winners():
+            w1 = MagicMock()
+            w1.candidate = MagicMock()
+            w1.candidate.summary = "A synthetic discovery"
+            w1.candidate.content_type = "discovery"
+            w1.salience = 0.9
+            w2 = MagicMock()
+            w2.candidate = MagicMock()
+            w2.candidate.summary = "A synthetic error"
+            w2.candidate.content_type = "error"
+            w2.salience = 0.5
+            return [w1, w2]
+
+        dl = DamasioLayers()
+        first = await dl.process(homeostatic_drives=drives, workspace_winners=winners())
+        markers = first["core"]["somatic_markers"]
+        assert len(markers) == 2
+        assert [m["intensity"] for m in markers] == [None, None]
+        assert all(isinstance(m["valence"], float) for m in markers)
+        assert isinstance(first["core"]["somatic_valence"], float)
+        assert first["core"]["here_now_salience"] is None
+        context = dl.generate_context()
+        assert "[Somatic: approach (A synthetic discovery)]" in context
+        report = dl.generate_report()
+        assert "Here-now salience: insufficient_data" in report
+        assert "Somatic markers: 2" in report
+
+        second = await dl.process(
+            homeostatic_drives=drives, workspace_winners=winners()
+        )
+        assert all(
+            isinstance(m["intensity"], float) for m in second["core"]["somatic_markers"]
+        )
+        assert isinstance(second["core"]["here_now_salience"], float)
+        assert "Here-now salience: insufficient_data" not in dl.generate_report()
+
+        legacy = DamasioLayers(first_delta="v04_zero")
+        old = await legacy.process(
+            homeostatic_drives=drives, workspace_winners=winners()
+        )
+        assert [m["intensity"] for m in old["core"]["somatic_markers"]] == [0.0, 0.0]
+        assert old["core"]["here_now_salience"] == pytest.approx(0.6 * 0.7)
+
+    @pytest.mark.asyncio
+    async def test_first_cycle_markers_feed_the_emotion_extractor(self):
+        """The first default cycle's somatic markers are consumable by the
+        post-turn emotion step: the extractor's raw read neither raises nor
+        drops the measured valence, and it reports the somatic intensity as
+        unmeasured (None) because no first-cycle marker carries one. The
+        legacy first delta feeds it the v0.4.0 zero."""
+        from types import SimpleNamespace
+
+        from mtc.consciousness.damasio import DamasioLayers
+        from mtc.consciousness.emotion_extractor import EmotionExtractor
+
+        drives = MagicMock()
+        drives.get_drive_state.return_value = {
+            "attention_budget": {
+                "current_level": 0.6,
+                "optimal_level": 0.7,
+                "deviation": 0.1,
+                "urgency": 0.2,
+            },
+        }
+        drives.get_overall_valence.return_value = 0.3
+        drives.get_free_energy.return_value = 0.2
+
+        def winners():
+            out = []
+            for summary, kind, salience in (
+                ("A synthetic note", "thought", 0.8),
+                ("A synthetic warning", "warning", 0.4),
+            ):
+                w = MagicMock()
+                w.candidate = MagicMock()
+                w.candidate.summary = summary
+                w.candidate.content_type = kind
+                w.salience = salience
+                out.append(w)
+            return out
+
+        async def first_cycle(first_delta):
+            dl = DamasioLayers(first_delta=first_delta)
+            result = await dl.process(
+                homeostatic_drives=drives, workspace_winners=winners()
+            )
+            assert len(result["core"]["somatic_markers"]) == 2
+            return SimpleNamespace(
+                damasio_state=result,
+                protoself_stability=result["protoself_stability"],
+                epistemic_depth=None,
+            )
+
+        state = await first_cycle("unmeasured")
+        raw = EmotionExtractor()._extract_raw(state)
+        assert isinstance(raw["somatic_valence_avg"], float)
+        assert raw["somatic_intensity_avg"] is None
+        emotion = await EmotionExtractor().extract(state, session_id="first")
+        assert isinstance(emotion.label, str) and emotion.label
+
+        legacy = await first_cycle("v04_zero")
+        assert EmotionExtractor()._extract_raw(legacy)["somatic_intensity_avg"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_layers_without_history_report_no_continuity(self):
+        """The aggregate's autobiographic_continuity is None while the
+        extended layer has nothing to measure it from, and the report says
+        so instead of printing a number."""
+        from mtc.consciousness.damasio import DamasioLayers
+
+        dl = DamasioLayers()
+        drives = MagicMock()
+        drives.get_drive_state.return_value = {
+            "attention_budget": {
+                "current_level": 0.6,
+                "optimal_level": 0.7,
+                "deviation": 0.1,
+                "urgency": 0.2,
+            },
+        }
+        drives.get_overall_valence.return_value = 0.1
+        drives.get_free_energy.return_value = 0.2
+
+        result = await dl.process(homeostatic_drives=drives, workspace_winners=[])
+        assert result["autobiographic_continuity"] is None
+        extended = result["extended"]
+        assert extended["episodic_resonance"] is None
+        assert extended["autobiographic_self"]["narrative_coherence"] is None
+        assert extended["autobiographic_self"]["temporal_horizon"] is None
+
+        report = dl.generate_report()
+        assert "Identity continuity: insufficient_data" in report
+        assert "Narrative coherence: insufficient_data" in report
+        assert "Episodic resonance: insufficient_data" in report
+        assert isinstance(dl.generate_context(), str)
+
+        winner = MagicMock()
+        winner.candidate = MagicMock()
+        winner.candidate.summary = "synthetic discovery"
+        winner.candidate.content_type = "discovery"
+        winner.salience = 0.8
+        marked = await dl.process(homeostatic_drives=drives, workspace_winners=[winner])
+        assert len(marked["core"]["somatic_markers"]) == 1
+        assert isinstance(marked["core"]["somatic_valence"], float)
+        assert marked["core"]["somatic_valence"] == pytest.approx(
+            marked["core"]["somatic_markers"][0]["valence"]
+        )
 
     @pytest.mark.asyncio
     async def test_generate_context(self):

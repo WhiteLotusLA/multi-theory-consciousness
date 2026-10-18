@@ -126,6 +126,74 @@ def test_protoself_rejects_wrong_vector_shape():
     fresh = Protoself()
     fresh.from_state_dict(state)
     assert fresh._previous_body_vector is None
+    # With the baseline rejected the next update is a first update again
+    assert fresh.update(_Drives()).body_delta is None
+
+
+def test_first_state_round_trips_as_unmeasured():
+    ps = Protoself()
+    first = ps.update(_Drives())
+    restored = ProtoSelfState.from_dict(json.loads(json.dumps(first.to_dict())))
+    assert restored.body_delta is None
+    assert restored.stability is None
+    assert restored.primordial_feelings["arousal"] is None
+    assert isinstance(restored.primordial_feelings["vitality"], float)
+
+    core = CoreConsciousness()
+    exp = core.bind(
+        first, workspace_winners=[_Winner("synthetic topic", "thought", 0.7)]
+    )
+    assert exp.feeling_of_knowing is None
+    assert isinstance(exp.self_world_binding, float)
+    assert exp.here_now_salience is None
+    assert [m.intensity for m in exp.somatic_markers] == [None]
+    assert isinstance(exp.somatic_valence, float)
+    again = CoreExperience.from_dict(json.loads(json.dumps(exp.to_dict())))
+    assert again.feeling_of_knowing is None
+    assert again.here_now_salience is None
+    assert again.somatic_markers[0].intensity is None
+    assert core.get_statistics()["average_feeling_of_knowing"] is None
+    assert core.get_statistics()["average_binding"] == pytest.approx(
+        exp.self_world_binding
+    )
+
+    second = core.bind(
+        ps.update(_Drives()), workspace_winners=[_Winner("topic", "thought", 0.7)]
+    )
+    assert isinstance(second.feeling_of_knowing, float)
+    assert isinstance(second.here_now_salience, float)
+    assert isinstance(second.somatic_markers[0].intensity, float)
+
+
+def test_unmeasured_marker_intensity_round_trips_through_state_dict():
+    """A first-cycle core experience (marker intensity and here-now salience
+    unmeasured) survives the hub round trip as None, and the legacy
+    first_delta keeps its measured 0.0 values."""
+    ps = Protoself()
+    core = CoreConsciousness()
+    core.bind(ps.update(_Drives()), workspace_winners=[_Winner("a", "thought", 0.6)])
+    restored = CoreConsciousness()
+    restored.from_state_dict(_hub_round_trip(core.to_state_dict()))
+    latest = restored._latest_experience
+    assert isinstance(latest, CoreExperience)
+    assert latest.here_now_salience is None
+    assert latest.somatic_markers[0].intensity is None
+    assert restored.get_statistics() == core.get_statistics()
+
+    marker = SomaticMarker(option="a", valence=0.2, intensity=0.35, body_source="t")
+    assert SomaticMarker.from_dict(json.loads(json.dumps(marker.to_dict()))) == marker
+
+    legacy = CoreConsciousness()
+    old = legacy.bind(
+        Protoself(first_delta="v04_zero").update(_Drives()),
+        workspace_winners=[_Winner("a", "thought", 0.6)],
+    )
+    assert old.somatic_markers[0].intensity == 0.0
+    assert old.here_now_salience == pytest.approx(0.36)
+    kept = CoreConsciousness()
+    kept.from_state_dict(_hub_round_trip(legacy.to_state_dict()))
+    assert kept._latest_experience.somatic_markers[0].intensity == 0.0
+    assert kept._latest_experience.here_now_salience == pytest.approx(0.36)
 
 
 def _core_and_states():
@@ -342,4 +410,6 @@ def test_somatic_valence_mean_of_markers():
         somatic_markers=[],
         here_now_salience=0.0,
     )
-    assert empty.somatic_valence == 0.0
+    assert empty.somatic_valence is None
+    assert empty.to_dict()["somatic_valence"] is None
+    assert CoreExperience.from_dict(empty.to_dict()).somatic_valence is None

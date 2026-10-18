@@ -18,16 +18,19 @@ horizon 1 to 8 and emotional regulation 0.1 to 0.8. Stages are plain numbers.
 ``apply_to_workspace`` sets only what the workspace actually has and reports
 everything else under ``skipped`` with the reason:
 
-- ``bottleneck.threshold`` always; ``bottleneck.capacity`` too, except that
-  under hierarchical competition the per-level capacities cap the workspace
-  at their sum, so a larger capacity has no effect and is reported skipped.
+- ``bottleneck.threshold`` and ``bottleneck.capacity`` whenever the
+  bottleneck has them. The capacity is always applied: under hierarchical
+  competition the final merge is capped at it, so the value matters there as
+  well.
 - ``metacognition.enable_third_order`` for depth 3 and up. The module has no
   separate depth ceiling, so the depth value itself is not applied.
 - ``active_inference.config.planning_horizon``, which takes effect when the
   agent is next rebuilt, and is skipped when the number of enumerated policies
   would exceed the planner budget.
-- Emotional regulation, only on a PAD model that exposes
-  ``regulation_strength``; the shipped PAD model does not yet.
+- Emotional regulation only on a PAD model that exposes
+  ``regulation_strength``. The shipped PAD model has no regulation strength,
+  so with it the regulation value is computed and reported under ``skipped``;
+  nothing applies it.
 """
 
 import logging

@@ -10,7 +10,11 @@ decays with a half-life (``half_life_days``, default 7) when not reinforced.
 New beliefs start weak.
 
 Six pattern families are scanned: speaker, topic, temporal, emotional, depth
-and consciousness-metric patterns. Evidence that is unknown (None) is skipped:
+and consciousness-metric patterns. Consciousness metrics (ignition, loop
+quality, epistemic depth, binding, protoself stability) belong to the system's
+own cycle and are never attributed to a speaker: the consciousness beliefs are
+global, each names its metric, and stored beliefs of the retired per-speaker
+form are skipped on load. Evidence that is unknown (None) is skipped:
 an experience without an outcome or valence shift never counts towards a group
 and never enters an average. ``evidence_count`` counts reinforcing learning
 passes, not distinct experiences, because a periodic pass re-reads an
@@ -37,6 +41,8 @@ from mtc.memory.protocols import LearningStore
 logger = logging.getLogger(__name__)
 
 POSITIVE_OUTCOMES = ("positive", "deepening", "playful")
+# Ids of the retired per-speaker consciousness beliefs, skipped on load.
+RETIRED_SPEAKER_CREDIT_PREFIX = "consciousness_speaker_"
 
 
 @dataclass
@@ -126,20 +132,34 @@ class PatternLearner:
         self._store = store
 
     async def initialize(self) -> None:
-        """Replace the in-memory beliefs with those held by the store."""
+        """Replace the in-memory beliefs with those held by the store.
+
+        A stored belief whose id starts with ``consciousness_speaker_`` (the
+        retired family that credited a speaker with the system's own metrics)
+        is skipped, so an existing store stops crediting anyone.
+        """
         try:
             docs = await self._store.load_beliefs(self.max_beliefs)
         except Exception as exc:
             logger.warning("Could not load beliefs: %s", exc)
             return
         self.beliefs = {}
+        dropped = 0
         for doc in docs:
             try:
                 belief = LearnedBelief.from_dict(doc)
             except TypeError:
                 logger.warning("Skipped a malformed stored belief")
                 continue
+            if belief.belief_id.startswith(RETIRED_SPEAKER_CREDIT_PREFIX):
+                dropped += 1
+                continue
             self.beliefs[belief.belief_id] = belief
+        if dropped:
+            logger.debug(
+                "Skipped %d stored consciousness beliefs that credited a speaker",
+                dropped,
+            )
         logger.info("PatternLearner loaded %d beliefs", len(self.beliefs))
 
     async def learn_from_experiences(
@@ -347,6 +367,8 @@ class PatternLearner:
 
         Only experiences that carry real metric data (a positive ignition count
         or loop quality) are considered; a metric that is None never counts.
+        The metrics are properties of the system's own cycle, so every belief
+        of this family is global: it names its ``metric`` and never a speaker.
         """
         changed: List[LearnedBelief] = []
         rich = [
@@ -458,37 +480,6 @@ class PatternLearner:
             belief.reinforce(self._now(), step * ratio)
             changed.append(belief)
 
-        by_speaker: Dict[str, List[Experience]] = defaultdict(list)
-        for item in rich:
-            by_speaker[item.speaker].append(item)
-        for speaker, group in by_speaker.items():
-            loops = [
-                e.beautiful_loop_quality
-                for e in group
-                if e.beautiful_loop_quality is not None
-            ]
-            depths = [e.epistemic_depth for e in group if e.epistemic_depth is not None]
-            if len(group) < self.min_evidence:
-                continue
-            avg_loop = _mean(loops)
-            avg_depth = _mean(depths)
-            if (avg_loop is not None and avg_loop > 0.3) or (
-                avg_depth is not None and avg_depth > 1.5
-            ):
-                belief = self.make_belief(
-                    f"consciousness_speaker_{speaker}_quality",
-                    "consciousness",
-                    f"Conversations with {speaker} produce high consciousness "
-                    f"quality (loop: {_fmt(avg_loop, 2)}, depth: {_fmt(avg_depth, 1)})",
-                    {
-                        "speaker": speaker,
-                        "avg_beautiful_loop": avg_loop,
-                        "avg_epistemic_depth": avg_depth,
-                    },
-                    {"curiosity": 0.1, "openness": 0.05},
-                )
-                belief.reinforce(self._now(), step)
-                changed.append(belief)
         return changed
 
     # Belief bookkeeping --------------------------------------------------
@@ -604,7 +595,3 @@ class PatternLearner:
             "strongest": strongest.description,
             "total_evidence": sum(b.evidence_count for b in self.beliefs.values()),
         }
-
-
-def _fmt(value: Optional[float], digits: int) -> str:
-    return "n/a" if value is None else f"{value:.{digits}f}"

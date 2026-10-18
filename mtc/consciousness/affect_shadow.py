@@ -20,8 +20,10 @@ explicitly.
 Config: the shadow log directory (``Settings.SHADOW_LOG_DIR``). The module
 holds one lazily created estimator and logger unless they are injected; the
 default estimator needs the ``embeddings`` extra and otherwise records
-nothing. Logged text-derived context is private data. Nothing calls the taps
-yet; the Phase 6 pipeline wires them.
+nothing. Logged text-derived context is private data. The pipeline's
+post-turn step (``mtc.pipeline.post_turn``, step ``affect_shadow``) calls the
+turn tap; the runtime turns that step on when its embedder is a sentence
+embedder. Nothing in the package calls the thought tap.
 """
 
 import logging

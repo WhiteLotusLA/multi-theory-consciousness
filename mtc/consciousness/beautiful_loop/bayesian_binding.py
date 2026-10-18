@@ -34,6 +34,21 @@ A percept's ``unified_summary`` and its inferences' ``content_summary``
 hold workspace content text, so persisted binding state contains
 fragments of whatever the system was processing.
 
+Binding evidence (the ``binding_evidence`` constructor argument, shared with
+BeautifulLoop, which builds the inferences):
+  - "candidate_vectors" (default): an inference's belief vector is the
+    workspace candidate's own numeric evidence. Fewer than two such
+    inferences means binding was not measured: the empty and the single
+    percept carry ``binding_quality`` None and the average over an empty
+    history is None.
+  - "v04_salience_posterior": the v0.4.0 behaviour, kept for the legacy
+    preset: belief vectors built from salience and a shared posterior (which
+    correlate at about 1 for any input), a single percept scored 0.5, an
+    empty percept 0.0 and an empty history averaging 0.0.
+
+The binding quality itself is a correlation proxy for mutual information
+over whatever vectors the inferences carry.
+
 Connection points:
   - Reads from: GWT workspace winners, active inference posterior
   - Produces: BoundPercept - unified conscious content
@@ -43,9 +58,6 @@ Research Foundation:
   - Laukkonen, Friston & Chandaria (2025). "A Beautiful Loop."
   - Friston (2005). "A theory of cortical responses."
   - Tononi (2004). "An information integration theory of consciousness."
-
-Created: 2026-03-08
-Author: Multi-Theory Consciousness Contributors
 """
 
 import logging
@@ -72,6 +84,18 @@ class BindingLevel(Enum):
 
 
 BINDING_LEVELS: Tuple[str, ...] = tuple(level.value for level in BindingLevel)
+
+BINDING_EVIDENCE_MODES = ("candidate_vectors", "v04_salience_posterior")
+
+
+def opt_float(value: Any) -> Optional[float]:
+    """A float for a number, None for None or an unparseable value."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass
@@ -114,7 +138,9 @@ class BoundPercept:
 
     bound_inferences: List[Inference]
     binding_pairs: List[BindingPair]
-    binding_quality: float  # Overall binding quality (0-1)
+    # Overall binding quality (0-1); None when fewer than two inferences
+    # were bound, so nothing measured it (under the default evidence mode)
+    binding_quality: Optional[float]
     total_uncertainty_reduction: float  # How much uncertainty was reduced
     coherence: float  # How coherent are the bound inferences
     dominant_content_type: str  # What type of content dominates
@@ -143,10 +169,17 @@ class BayesianBinding:
         max_bound_inferences: int = 7,
         coherence_threshold: float = 0.3,
         history_window: int = 50,
+        binding_evidence: str = "candidate_vectors",
     ):
+        if binding_evidence not in BINDING_EVIDENCE_MODES:
+            raise ValueError(
+                f"binding_evidence must be one of {BINDING_EVIDENCE_MODES}, "
+                f"got {binding_evidence!r}"
+            )
         self.min_binding_quality = min_binding_quality
         self.max_bound_inferences = max_bound_inferences
         self.coherence_threshold = coherence_threshold
+        self.binding_evidence = binding_evidence
 
         # History
         self._percept_history: deque = deque(maxlen=history_window)
@@ -246,7 +279,7 @@ class BayesianBinding:
         summaries = [inf.content_summary for inf in bound[:3]]
         unified = " + ".join(summaries)
         if len(bound) > 3:
-            unified += f"(+ {len(bound) - 3} more)"
+            unified += f" (+ {len(bound) - 3} more)"
 
         percept = BoundPercept(
             bound_inferences=bound,
@@ -312,7 +345,11 @@ class BayesianBinding:
 
             if level == BindingLevel.GLOBAL.value:
                 for lower_level, lower_percept in results.items():
-                    if lower_percept.binding_quality <= self.min_binding_quality:
+                    lower_quality = lower_percept.binding_quality
+                    if (
+                        lower_quality is None
+                        or lower_quality <= self.min_binding_quality
+                    ):
                         continue
                     level_candidates.append(
                         Inference(
@@ -536,12 +573,20 @@ class BayesianBinding:
         reduction_factor = 1.0 / np.sqrt(len(bound))  # sqrtN reduction
         return float(avg_uncertainty * reduction_factor)
 
+    @property
+    def _legacy_evidence(self) -> bool:
+        return self.binding_evidence == "v04_salience_posterior"
+
     def _empty_percept(self) -> BoundPercept:
-        """Return an empty percept when there are no candidates."""
+        """Return an empty percept when there are no candidates.
+
+        Nothing was bound, so the binding quality is None; the legacy
+        evidence mode keeps its 0.0.
+        """
         return BoundPercept(
             bound_inferences=[],
             binding_pairs=[],
-            binding_quality=0.0,
+            binding_quality=0.0 if self._legacy_evidence else None,
             total_uncertainty_reduction=0.0,
             coherence=0.0,
             dominant_content_type="none",
@@ -549,21 +594,29 @@ class BayesianBinding:
         )
 
     def _single_percept(self, inference: Inference) -> BoundPercept:
-        """Return a percept from a single inference (no binding needed)."""
+        """Return a percept from a single inference.
+
+        One inference has nothing to bind with, so no binding quality was
+        measured; the legacy evidence mode keeps its constant 0.5.
+        """
         return BoundPercept(
             bound_inferences=[inference],
             binding_pairs=[],
-            binding_quality=0.5,  # Single inference = moderate quality
+            binding_quality=0.5 if self._legacy_evidence else None,
             total_uncertainty_reduction=0.0,
             coherence=1.0,  # Trivially coherent
             dominant_content_type=inference.content_type,
             unified_summary=inference.content_summary,
         )
 
-    def get_average_binding_quality(self) -> float:
-        """Get average binding quality over recent history."""
+    def get_average_binding_quality(self) -> Optional[float]:
+        """Average binding quality over the measured history.
+
+        None while nothing was bound; the legacy evidence mode reports 0.0
+        for an empty history.
+        """
         if not self._binding_quality_history:
-            return 0.0
+            return 0.0 if self._legacy_evidence else None
         return float(np.mean(list(self._binding_quality_history)))
 
     def get_binding_trend(self) -> str:
@@ -588,18 +641,21 @@ class BayesianBinding:
         """Generate human-readable binding report."""
         avg_quality = self.get_average_binding_quality()
         trend = self.get_binding_trend()
+        avg_text = "insufficient_data" if avg_quality is None else f"{avg_quality:.3f}"
 
         lines = [
-            f"Bayesian binding: avg quality {avg_quality:.3f} ({trend})",
+            f"Bayesian binding: avg quality {avg_text} ({trend})",
             f" Bindings performed: {self.bind_count}",
             f" Total inferences processed: {self.total_inferences_processed}",
         ]
 
         if self._percept_history:
             latest = self._percept_history[-1]
+            quality = latest.binding_quality
+            quality_text = "insufficient_data" if quality is None else f"{quality:.3f}"
             lines.append(
                 f" Latest: {len(latest.bound_inferences)} bound, "
-                f"quality={latest.binding_quality:.3f}, "
+                f"quality={quality_text}, "
                 f"coherence={latest.coherence:.3f}"
             )
 
@@ -615,6 +671,7 @@ class BayesianBinding:
             "scalars": {
                 "bind_count": self.bind_count,
                 "total_inferences_processed": self.total_inferences_processed,
+                "binding_evidence": self.binding_evidence,
             },
             "arrays": {},
             "histories": {
@@ -708,7 +765,7 @@ def percept_to_dict(percept: BoundPercept) -> Dict[str, Any]:
             }
             for bp in percept.binding_pairs
         ],
-        "binding_quality": float(percept.binding_quality),
+        "binding_quality": opt_float(percept.binding_quality),
         "total_uncertainty_reduction": float(percept.total_uncertainty_reduction),
         "coherence": float(percept.coherence),
         "dominant_content_type": str(percept.dominant_content_type),
@@ -719,7 +776,8 @@ def percept_to_dict(percept: BoundPercept) -> Dict[str, Any]:
 
 
 def percept_from_dict(raw: Dict[str, Any]) -> BoundPercept:
-    """Rebuild a BoundPercept with typed inferences and binding pairs."""
+    """Rebuild a BoundPercept with typed inferences and binding pairs; an
+    unmeasured binding quality (None) restores as None."""
     pairs = [
         BindingPair(
             inference_a=str(bp.get("inference_a", "")),
@@ -741,7 +799,7 @@ def percept_from_dict(raw: Dict[str, Any]) -> BoundPercept:
             if isinstance(i, dict)
         ],
         binding_pairs=pairs,
-        binding_quality=_num(raw.get("binding_quality"), 0.0),
+        binding_quality=opt_float(raw.get("binding_quality")),
         total_uncertainty_reduction=_num(raw.get("total_uncertainty_reduction"), 0.0),
         coherence=_num(raw.get("coherence"), 0.0),
         dominant_content_type=str(raw.get("dominant_content_type", "none")),

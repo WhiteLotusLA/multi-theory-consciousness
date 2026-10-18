@@ -29,9 +29,6 @@ Wiring:
   - Produces DamasioState added to ConsciousnessState
 
 Research: Damasio computational implementation, Frontiers in AI (2025).
-
-Created: 2026-03-08
-Author: Multi-Theory Consciousness Contributors
 """
 
 import logging
@@ -39,7 +36,7 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
-from .protoself import Protoself, ProtoSelfState, BodyState
+from .protoself import Protoself, ProtoSelfState, BodyState, fmt_measure
 from .core_consciousness import CoreConsciousness, CoreExperience, SomaticMarker
 from .extended_consciousness import (
     ExtendedConsciousness,
@@ -61,6 +58,15 @@ __all__ = [
     "ExtendedState",
     "AutobiographicSelf",
 ]
+
+
+def _dominant_marker(markers: List[SomaticMarker]) -> SomaticMarker:
+    """The marker to narrate: the most intense of those with a numeric
+    intensity, else the one with the largest valence magnitude."""
+    measured = [m for m in markers if m.intensity is not None]
+    if measured:
+        return max(measured, key=lambda m: m.intensity)
+    return max(markers, key=lambda m: abs(m.valence))
 
 
 class DamasioLayers:
@@ -87,6 +93,7 @@ class DamasioLayers:
         narrate_somatic: bool = True,
         narrate_narrative_identity: bool = True,
         agent_name: str = "the system",
+        first_delta: str = "unmeasured",
     ):
         """
         Args:
@@ -101,6 +108,10 @@ class DamasioLayers:
             narrate_somatic: Report the somatic segment in generate_context()
             narrate_narrative_identity: Report the narrative segment
             agent_name: How the extended-consciousness narrative names the agent
+            first_delta: Protoself first-update mode ("unmeasured", the
+                default: the first cycle's body delta, stability and arousal
+                are None, and so are protoself_stability and
+                feeling_of_knowing; "v04_zero": the v0.4.0 constants)
         """
         self.protoself = Protoself(
             stability_window=stability_window,
@@ -109,6 +120,7 @@ class DamasioLayers:
             wake_hour=wake_hour,
             sleep_hour=sleep_hour,
             clock=clock,
+            first_delta=first_delta,
         )
         self.core_consciousness = CoreConsciousness()
         self.extended_consciousness = ExtendedConsciousness(agent_name=agent_name)
@@ -181,11 +193,12 @@ class DamasioLayers:
 
         elapsed_ms = (time.time() - start) * 1000
 
+        continuity = extended_state.autobiographic_self.identity_continuity
         logger.debug(
             f"Damasio cycle {self.cycle_count} ({elapsed_ms:.1f}ms): "
-            f"stability={protoself_state.stability:.3f}, "
+            f"stability={fmt_measure(protoself_state.stability)}, "
             f"binding={core_experience.self_world_binding:.3f}, "
-            f"continuity={extended_state.autobiographic_self.identity_continuity:.3f}"
+            f"continuity={fmt_measure(continuity)}"
         )
 
         return {
@@ -227,16 +240,17 @@ class DamasioLayers:
             else:
                 body_label = "low energy"
 
-            parts.append(f"[Body: {body_label}, stability={ps.stability:.2f}]")
+            stability = fmt_measure(ps.stability, ".2f")
+            parts.append(f"[Body: {body_label}, stability={stability}]")
 
         # Core consciousness
         if ce:
             parts.append(
                 f"[Present moment: binding={ce.self_world_binding:.2f}, "
-                f"knowing={ce.feeling_of_knowing:.2f}]"
+                f"knowing={fmt_measure(ce.feeling_of_knowing, '.2f')}]"
             )
             if ce.somatic_markers and self.narrate_somatic:
-                dominant = max(ce.somatic_markers, key=lambda m: m.intensity)
+                dominant = _dominant_marker(ce.somatic_markers)
                 direction = "approach" if dominant.valence > 0 else "caution"
                 parts.append(f"[Somatic: {direction} ({dominant.option[:30]})]")
 
@@ -247,14 +261,17 @@ class DamasioLayers:
         return " ".join(parts)
 
     def generate_report(self) -> str:
-        """Generate comprehensive Damasio layers report."""
+        """Generate comprehensive Damasio layers report.
+
+        An unmeasured value prints as ``insufficient_data``.
+        """
         lines = ["Damasio Three-Layer Consciousness Report:"]
 
         if self._latest_protoself:
             ps = self._latest_protoself
             lines.append(" Protoself:")
-            lines.append(f"   Stability: {ps.stability:.3f}")
-            lines.append(f"   Body delta: {ps.body_delta:.3f}")
+            lines.append(f"   Stability: {fmt_measure(ps.stability)}")
+            lines.append(f"   Body delta: {fmt_measure(ps.body_delta)}")
             lines.append(f"   Energy: {ps.body_state.energy_level:.3f}")
             lines.append(f"   Pain: {ps.body_state.pain_signals:.3f}")
 
@@ -262,18 +279,24 @@ class DamasioLayers:
             ce = self._latest_core
             lines.append(" Core Consciousness:")
             lines.append(f"   Self-world binding: {ce.self_world_binding:.3f}")
-            lines.append(f"   Feeling of knowing: {ce.feeling_of_knowing:.3f}")
-            lines.append(f"   Here-now salience: {ce.here_now_salience:.3f}")
+            lines.append(f"   Feeling of knowing: {fmt_measure(ce.feeling_of_knowing)}")
+            lines.append(f"   Here-now salience: {fmt_measure(ce.here_now_salience)}")
             lines.append(f"   Somatic markers: {len(ce.somatic_markers)}")
 
         if self._latest_extended:
             ext = self._latest_extended
             auto = ext.autobiographic_self
             lines.append(" Extended Consciousness:")
-            lines.append(f"   Identity continuity: {auto.identity_continuity:.3f}")
-            lines.append(f"   Narrative coherence: {auto.narrative_coherence:.3f}")
+            lines.append(
+                f"   Identity continuity: {fmt_measure(auto.identity_continuity)}"
+            )
+            lines.append(
+                f"   Narrative coherence: {fmt_measure(auto.narrative_coherence)}"
+            )
             lines.append(f"   Growth trajectory: {auto.growth_trajectory}")
-            lines.append(f"   Episodic resonance: {ext.episodic_resonance:.3f}")
+            lines.append(
+                f"   Episodic resonance: {fmt_measure(ext.episodic_resonance)}"
+            )
 
         return "\n".join(lines)
 

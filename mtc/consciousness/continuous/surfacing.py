@@ -7,8 +7,11 @@ when its retention is at or above a floor, most important first.
 
 This module returns data; the prompt assembler is the one renderer of the
 thought and gist sections. ``thought_items`` and ``gist_items`` return the
-dicts it reads: a thought item has ``content``, ``timestamp``, ``thought_type``
-and ``emotional_tone`` (the strongest emotion's name, or None), a gist item has
+dicts it reads: a thought item has ``content``, ``timestamp``, ``thought_type``,
+``emotional_tone`` (the strongest emotion's name, or None), ``form``
+(``template``, ``model`` or ``injected``, None when the record names none) and
+``salience_basis`` (what the stored salience is: a measurement or a design
+constant), a gist item has
 ``summary``, ``source_count`` and ``dominant_emotion`` (None when no thought in
 the gist carried a measured emotion). The assembler stamps a mood only when
 ``NARRATE_THOUGHT_MOOD`` is on and the value is not None, so the tone is
@@ -43,6 +46,8 @@ class SurfacedThought:
     thought_type: str
     emotional_tone: Optional[str]
     stream_id: Optional[str]
+    form: Optional[str] = None
+    salience_basis: Optional[str] = None
 
 
 def _tone(emotions: Dict[str, float]) -> Optional[str]:
@@ -65,7 +70,13 @@ def _surfaced(record: ThoughtRecord) -> SurfacedThought:
         thought_type=record.thought_type.value,
         emotional_tone=_tone(record.emotional_context),
         stream_id=record.stream_id,
+        form=_text((record.processing_context or {}).get("form")),
+        salience_basis=_text((record.processing_context or {}).get("salience_basis")),
     )
+
+
+def _text(value: Any) -> Optional[str]:
+    return value if isinstance(value, str) and value else None
 
 
 async def get_surfaced_thoughts(
@@ -107,6 +118,8 @@ def thought_items(thoughts: Sequence[SurfacedThought]) -> List[Dict[str, Any]]:
             "thought_type": t.thought_type,
             "emotional_tone": t.emotional_tone,
             "stream_id": t.stream_id,
+            "form": t.form,
+            "salience_basis": t.salience_basis,
         }
         for t in thoughts
     ]

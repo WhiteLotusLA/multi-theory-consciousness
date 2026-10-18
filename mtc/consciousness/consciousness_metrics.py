@@ -455,7 +455,10 @@ class AdaptiveLearning(ConsciousnessIndicator):
 
 
 def _summary(values: List[float]) -> Dict[str, Any]:
-    """Mean, spread, slope and range of the measured values, None when empty."""
+    """Mean, spread, slope and range of the measured values, None when empty.
+
+    The slope (``trend``) needs two values and is None for a single one.
+    """
     if not values:
         return {
             "mean": None,
@@ -471,7 +474,7 @@ def _summary(values: List[float]) -> Dict[str, Any]:
         "trend": (
             float(np.polyfit(range(len(values)), values, 1)[0])
             if len(values) > 1
-            else 0.0
+            else None
         ),
         "min": min(values),
         "max": max(values),

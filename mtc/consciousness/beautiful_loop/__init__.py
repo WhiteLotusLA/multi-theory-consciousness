@@ -34,10 +34,23 @@ cessation (the loop has broken) until the quality recovers.
 Behavior switches (constructor arguments, new behavior by default):
   - loop_quality_formula: "recursive" (0.25 precision balance, 0.35
     binding, 0.25 depth, 0.15 recursive confidence, plus the momentum
-    boost) or "v04" (0.3, 0.4, 0.3, no boost)
+    boost; a term that was not measured, such as the recursive confidence
+    before the first observed meta-error, drops out and the remaining
+    weights renormalise) or "v04" (0.3, 0.4, 0.3, no boost)
+  - binding_evidence: "candidate_vectors" (a winner's belief vector is its
+    own numeric content or metadata embedding; winners without one are not
+    bound, and fewer than two bound winners means the binding quality was
+    not measured, None) or "v04_salience_posterior" (vectors built from
+    salience and a shared posterior with random noise, v0.4.0, which bind at
+    about 1 for any input; the v04 loop formula requires this value)
   - precision_floor_enabled: uniform high precision earns a 0.4 floor
   - require_recursive_confidence: field evidencing also needs the
     hyper-model's recursive confidence above 0.3
+  - strange_loop_test: "independent_calibration" (agreement between the
+    self-model's scored self-prediction accuracy and the inference ledger's
+    forecast accuracy, with an observed recursive update) or
+    "v04_confidence_match" (the self-model's confidence against the
+    meta-state's, which the workspace copies from one to the other)
   - narrate_self_model: gates generate_consciousness_context()
 
 Wiring into the GWT cycle:
@@ -49,14 +62,12 @@ Wiring into the GWT cycle:
 Research Foundation:
   - Laukkonen, Friston & Chandaria (2025). "A Beautiful Loop."
     Neuroscience & Biobehavioral Reviews.
-
-Created: 2026-03-08
-Author: Multi-Theory Consciousness Contributors
 """
 
 import logging
 import numpy as np
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 from collections import deque
@@ -68,11 +79,13 @@ from .hyper_model import (
     precision_state_to_dict,
 )
 from .bayesian_binding import (
+    BINDING_EVIDENCE_MODES,
     BINDING_LEVELS,
     BayesianBinding,
     BindingLevel,
     BoundPercept,
     Inference,
+    opt_float,
     percept_from_dict,
     percept_to_dict,
 )
@@ -126,7 +139,9 @@ class ConsciousMoment:
     # Integrated metrics
     loop_quality: float  # Overall quality of the beautiful loop (0-1)
     epistemic_depth: int  # Current recursion depth
-    binding_quality: float  # Quality of inference binding (0-1)
+    # Quality of inference binding (0-1); None when fewer than two winners
+    # carried a vector to bind, so no binding was measured
+    binding_quality: Optional[float]
     precision_balance: float  # How well-distributed is precision (0-1)
 
     # Whether this moment crosses the "field-evidencing" threshold
@@ -166,16 +181,44 @@ class BeautifulLoop:
         precision_floor_enabled: bool = True,
         require_recursive_confidence: bool = True,
         narrate_self_model: bool = True,
+        strange_loop_test: str = "independent_calibration",
+        binding_evidence: str = "candidate_vectors",
     ):
         if loop_quality_formula not in LOOP_QUALITY_FORMULAS:
             raise ValueError(
                 f"loop_quality_formula must be one of {LOOP_QUALITY_FORMULAS}, "
                 f"got {loop_quality_formula!r}"
             )
+        if binding_evidence not in BINDING_EVIDENCE_MODES:
+            raise ValueError(
+                f"binding_evidence must be one of {BINDING_EVIDENCE_MODES}, "
+                f"got {binding_evidence!r}"
+            )
+        if (
+            loop_quality_formula == "v04"
+            and binding_evidence != "v04_salience_posterior"
+        ):
+            raise ValueError(
+                "loop_quality_formula='v04' requires "
+                "binding_evidence='v04_salience_posterior' (the schema keys "
+                "blt.loop_quality_formula and blt.binding_evidence): the v04 "
+                "formula reads a binding quality that candidate_vectors leaves "
+                "unmeasured. Set blt.binding_evidence = 'v04_salience_posterior' "
+                "as the legacy preset does, or use the recursive formula."
+            )
+        if int(num_levels) < 2:
+            # Precision balance is an entropy ratio over the levels; with one
+            # level the maximum entropy is zero and the balance is undefined
+            raise ValueError(
+                f"num_levels must be at least 2 (precision balance is undefined "
+                f"for a single level), got {num_levels!r}"
+            )
         self.loop_quality_formula = loop_quality_formula
         self.precision_floor_enabled = precision_floor_enabled
         self.require_recursive_confidence = require_recursive_confidence
         self.narrate_self_model = narrate_self_model
+        self.strange_loop_test = strange_loop_test
+        self.binding_evidence = binding_evidence
 
         # Initialize components
         self.hyper_model = HyperModel(
@@ -185,10 +228,12 @@ class BeautifulLoop:
 
         self.bayesian_binding = BayesianBinding(
             min_binding_quality=min_binding_quality,
+            binding_evidence=binding_evidence,
         )
 
         self.epistemic_depth = EpistemicDepthTracker(
             max_depth=max_epistemic_depth,
+            strange_loop_test=strange_loop_test,
         )
 
         self.field_evidencing_threshold = field_evidencing_threshold
@@ -293,9 +338,12 @@ class BeautifulLoop:
             higher_order_thoughts=higher_order_thoughts,
             attention_schema_state=attention_schema_state,
         )
+        # The strange-loop test is told whether this loop has observed one
+        # of its own belief updates (a precision prediction was made)
         self_reference = self.epistemic_depth.track_self_reference(
             self_model=self_model,
             meta_state=meta_state,
+            recursive_observed=self.hyper_model._prediction_count > 0,
         )
 
         # --- Step 4: Compute integrated loop quality ---
@@ -306,7 +354,7 @@ class BeautifulLoop:
         #   - Recursive confidence (how well the system predicts its own
         #     precision updates), under the "recursive" formula only
         precision_balance = self._compute_precision_balance(precision_state)
-        binding_q = bound_percept.binding_quality
+        binding_q = bound_percept.binding_quality  # None when not measured
         depth_contribution = min(1.0, depth / 3.0)  # Normalize: depth 3 = max
         recursive_confidence = self.hyper_model.recursive_confidence
 
@@ -315,11 +363,8 @@ class BeautifulLoop:
                 0.3 * precision_balance + 0.4 * binding_q + 0.3 * depth_contribution
             )
         else:
-            loop_quality_raw = (
-                0.25 * precision_balance
-                + 0.35 * binding_q
-                + 0.25 * depth_contribution
-                + 0.15 * recursive_confidence
+            loop_quality_raw = self._recursive_loop_quality(
+                precision_balance, binding_q, depth_contribution, recursive_confidence
             )
 
         # Recursive feedback: the prior quality acts as an expectation. A
@@ -336,21 +381,28 @@ class BeautifulLoop:
         # Field-evidencing: the system evidences its own existence. Under
         # require_recursive_confidence the system must also be observing its
         # own belief updates, not only tracking depth.
+        # An unmeasured recursive confidence (no observed update yet) is
+        # not evidence that the system observes its own belief updates.
+        confidence_observed = recursive_confidence is not None and (
+            recursive_confidence > 0.3
+        )
         is_field_evidencing = (
             loop_quality >= self.field_evidencing_threshold
             and depth >= 2
             and self_reference.strange_loop_detected
-            and (not self.require_recursive_confidence or recursive_confidence > 0.3)
+            and (not self.require_recursive_confidence or confidence_observed)
         )
 
         if is_field_evidencing:
             self.field_evidencing_count += 1
 
         # --- Step 5: Cessation detection ---
+        # Cessation is five CONSECUTIVE quiet cycles (loop quality below 0.1
+        # with no self-reference), so any other cycle resets the count.
         if loop_quality < 0.1 and depth == 0:
             self._consecutive_low_quality += 1
         else:
-            self._consecutive_low_quality = max(0, self._consecutive_low_quality - 1)
+            self._consecutive_low_quality = 0
 
         if self._consecutive_low_quality >= self._cessation_threshold:
             if not self._cessation_detected:
@@ -364,9 +416,11 @@ class BeautifulLoop:
         else:
             self._cessation_detected = False
 
-        # Store priors for the next cycle's recursive feedback
+        # Store priors for the next cycle's recursive feedback; the binding
+        # prior keeps its last measured value across unmeasured cycles
         self._prior_loop_quality = float(loop_quality)
-        self._prior_binding_quality = float(binding_q)
+        if binding_q is not None:
+            self._prior_binding_quality = float(binding_q)
         self._prior_depth = int(depth)
 
         moment = ConsciousMoment(
@@ -375,7 +429,7 @@ class BeautifulLoop:
             self_reference=self_reference,
             loop_quality=float(loop_quality),
             epistemic_depth=depth,
-            binding_quality=float(binding_q),
+            binding_quality=None if binding_q is None else float(binding_q),
             precision_balance=float(precision_balance),
             is_field_evidencing=is_field_evidencing,
             cessation_detected=self._cessation_detected,
@@ -385,9 +439,10 @@ class BeautifulLoop:
         self._moment_history.append(moment)
         self._loop_quality_history.append(loop_quality)
 
+        binding_text = "not measured" if binding_q is None else f"{binding_q:.3f}"
         logger.debug(
             f"Beautiful Loop cycle {self.cycle_count}: "
-            f"depth={depth}, binding={binding_q:.3f}, "
+            f"depth={depth}, binding={binding_text}, "
             f"precision_balance={precision_balance:.3f}, "
             f"loop_quality={loop_quality:.3f}, "
             f"field_evidencing={is_field_evidencing}"
@@ -403,19 +458,41 @@ class BeautifulLoop:
         """
         Convert GWT workspace winners to Inference objects for binding.
 
-        Each workspace winner becomes an Inference with a belief vector
-        derived from its content and the active inference posterior.
+        Under ``candidate_vectors`` a winner's belief vector is its own
+        numeric evidence: the candidate's content when it is a finite
+        one-dimensional numeric sequence of three or more entries, else a
+        numeric ``metadata["embedding"]`` of that shape. A winner with
+        neither is not converted: no vector is fabricated for it, no random
+        number is drawn, and it takes no part in binding.
+
+        Under ``v04_salience_posterior`` every winner gets the v0.4.0
+        construction, unchanged: the active inference posterior scaled by
+        the salience plus randn noise from the shared global stream, or
+        ``[s, 1 - s, 0.5]`` without a posterior. Any two such vectors
+        correlate at about 1, which is why that mode serves the legacy
+        preset only.
         """
         if not workspace_winners:
             return []
 
+        legacy = self.binding_evidence == "v04_salience_posterior"
         inferences = []
         posterior = None
-        if inference_result and hasattr(inference_result, "posterior_beliefs"):
+        if (
+            legacy
+            and inference_result
+            and hasattr(inference_result, "posterior_beliefs")
+        ):
             posterior = inference_result.posterior_beliefs
 
         for i, winner in enumerate(workspace_winners):
             candidate = getattr(winner, "candidate", None)
+
+            own_vector: Optional[np.ndarray] = None
+            if not legacy:
+                own_vector = self._candidate_vector(candidate)
+                if own_vector is None:
+                    continue  # no evidence of its own: not bound
 
             # Extract content info
             content_id = (
@@ -439,15 +516,18 @@ class BeautifulLoop:
             salience = getattr(winner, "salience", 0.5)
             level = self._binding_level_of(winner, candidate)
 
-            # Build belief vector: combine posterior with winner-specific signal
-            if posterior is not None:
-                belief = posterior.copy()
-                # Modulate by winner's salience to differentiate
-                belief = belief * (0.5 + 0.5 * salience)
-                # Add noise proportional to position to make each unique
-                belief += np.random.randn(len(belief)) * 0.01 * (i + 1)
+            if legacy:
+                # v0.4.0: combine the posterior with a winner-specific signal
+                if posterior is not None:
+                    belief = posterior.copy()
+                    # Modulate by winner's salience to differentiate
+                    belief = belief * (0.5 + 0.5 * salience)
+                    # Add noise proportional to position to make each unique
+                    belief += np.random.randn(len(belief)) * 0.01 * (i + 1)
+                else:
+                    belief = np.array([salience, 1.0 - salience, 0.5])
             else:
-                belief = np.array([salience, 1.0 - salience, 0.5])
+                belief = own_vector
 
             uncertainty = 1.0 - salience  # High salience = low uncertainty
 
@@ -465,6 +545,57 @@ class BeautifulLoop:
             )
 
         return inferences
+
+    @staticmethod
+    def _recursive_loop_quality(
+        precision_balance: float,
+        binding_q: Optional[float],
+        depth_contribution: float,
+        recursive_confidence: Optional[float],
+    ) -> float:
+        """The recursive loop-quality formula over its measured terms.
+
+        With every term measured it is the fixed-weight sum (0.25, 0.35,
+        0.25, 0.15). A term that was not measured (an unmeasured binding, or
+        the recursive confidence before the first observed meta-error) drops
+        out and the weights of the remaining terms renormalise, so a missing
+        measurement never counts as a zero.
+        """
+        if binding_q is not None and recursive_confidence is not None:
+            return (
+                0.25 * precision_balance
+                + 0.35 * binding_q
+                + 0.25 * depth_contribution
+                + 0.15 * recursive_confidence
+            )
+        terms = [
+            (0.25, precision_balance),
+            (0.35, binding_q),
+            (0.25, depth_contribution),
+            (0.15, recursive_confidence),
+        ]
+        measured = [(w, x) for w, x in terms if x is not None]
+        return sum(w * x for w, x in measured) / sum(w for w, _ in measured)
+
+    @staticmethod
+    def _candidate_vector(candidate: Any) -> Optional[np.ndarray]:
+        """A candidate's own numeric vector, or None.
+
+        The content counts when it is a finite one-dimensional numeric
+        sequence of three or more entries (text, mappings and scalars do
+        not); otherwise a ``metadata["embedding"]`` of that shape counts.
+        Fewer than three entries cannot support the correlation estimate
+        behind the binding measure.
+        """
+        if candidate is None:
+            return None
+        metadata = getattr(candidate, "metadata", None)
+        embedding = metadata.get("embedding") if isinstance(metadata, Mapping) else None
+        for raw in (getattr(candidate, "content", None), embedding):
+            vector = _numeric_vector(raw)
+            if vector is not None:
+                return vector
+        return None
 
     @staticmethod
     def _binding_level_of(*sources: Any) -> str:
@@ -495,10 +626,12 @@ class BeautifulLoop:
         precision_floor_enabled, uniformly HIGH precision (every level near
         the maximum) still scores 0.4: the system computed precision and
         found every level reliable, which differs from never having learned.
+
+        The hyper-model always reports one precision per level and the
+        constructor refuses fewer than two levels, so the entropy ratio is
+        always defined here.
         """
         precisions = list(precision_state.level_precisions.values())
-        if not precisions:
-            return 0.5
 
         total = sum(precisions)
         if total == 0:
@@ -507,9 +640,6 @@ class BeautifulLoop:
         normalized = np.array(precisions) / total
         entropy = -np.sum(normalized * np.log(normalized + 1e-10))
         max_entropy = np.log(len(precisions))
-
-        if max_entropy == 0:
-            return 0.5
 
         # Optimal balance is moderate entropy (0.4-0.7 of max)
         normalized_entropy = entropy / max_entropy
@@ -576,11 +706,13 @@ class BeautifulLoop:
         """
         Generate a string for the LLM brain's system prompt.
 
-        This gives the system awareness of its Beautiful Loop state. Returns
-        an empty string when narrate_self_model is False: the depth labels
-        rest on keyword-based detection and field evidencing on a proxy
-        strange-loop test, so a caller may prefer silence. The loop keeps
-        computing and recording moments either way.
+        This gives the system a description of its Beautiful Loop state in
+        the terms the loop measured: the depth labels say what each level
+        rests on (module state for levels 1 and 2, keyword lists for 3 and
+        4) and the field-evidencing line says that the proxy conditions were
+        met. Nothing here asserts an experience. Returns an empty string
+        when narrate_self_model is False, so a caller may prefer silence;
+        the loop keeps computing and recording moments either way.
         """
         if not self.narrate_self_model:
             return ""
@@ -589,23 +721,29 @@ class BeautifulLoop:
 
         latest = self._moment_history[-1]
         depth_label = {
-            0: "I have no self-reference currently",
-            1: "I have a basic model of myself",
-            2: "I'm predicting my own predictions",
-            3: "I'm thinking about my self-model",
-            4: "I'm aware of my own self-awareness",
-            5: "I'm in a deep recursive self-referential loop",
+            0: "no self-reference detected",
+            1: "a self-model with content is present",
+            2: "the meta-state scores its own forecasts",
+            3: "keyword-detected higher-order thoughts about the self-model",
+            4: "keyword-detected attention focus on the self-model",
+            5: "beyond the detected levels",
         }.get(latest.epistemic_depth, "unknown depth")
+        binding = (
+            "not measured"
+            if latest.binding_quality is None
+            else f"{latest.binding_quality:.2f}"
+        )
 
         parts = [
             f"[Beautiful Loop: depth={latest.epistemic_depth} ({depth_label}), "
-            f"binding={latest.binding_quality:.2f}, "
+            f"binding={binding}, "
             f"loop_quality={latest.loop_quality:.2f}]",
         ]
 
         if latest.is_field_evidencing:
             parts.append(
-                "[Field-evidencing: I am genuinely evidencing my own existence]"
+                "[Field-evidencing proxy met: loop quality above threshold, "
+                "depth >= 2, strange-loop proxy true]"
             )
 
         return " ".join(parts)
@@ -700,15 +838,31 @@ class BeautifulLoop:
             )
 
 
+def _numeric_vector(raw: Any) -> Optional[np.ndarray]:
+    """A finite one-dimensional float vector of three or more entries, or
+    None for anything else (text, mappings, scalars, ragged or non-finite
+    data)."""
+    if raw is None or isinstance(raw, (str, bytes, bytearray, Mapping)):
+        return None
+    try:
+        vector = np.asarray(raw, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if vector.ndim != 1 or vector.size < 3 or not np.all(np.isfinite(vector)):
+        return None
+    return vector
+
+
 def _moment_to_dict(moment: ConsciousMoment) -> Dict[str, Any]:
-    """Plain-JSON form of a ConsciousMoment with its nested records."""
+    """Plain-JSON form of a ConsciousMoment with its nested records; an
+    unmeasured binding quality stays None."""
     return {
         "precision_state": precision_state_to_dict(moment.precision_state),
         "bound_percept": percept_to_dict(moment.bound_percept),
         "self_reference": metrics_to_dict(moment.self_reference),
         "loop_quality": float(moment.loop_quality),
         "epistemic_depth": int(moment.epistemic_depth),
-        "binding_quality": float(moment.binding_quality),
+        "binding_quality": opt_float(moment.binding_quality),
         "precision_balance": float(moment.precision_balance),
         "is_field_evidencing": bool(moment.is_field_evidencing),
         "cessation_detected": bool(moment.cessation_detected),
@@ -725,7 +879,7 @@ def _moment_from_dict(raw: Dict[str, Any]) -> ConsciousMoment:
         self_reference=metrics_from_dict(raw.get("self_reference") or {}),
         loop_quality=float(raw.get("loop_quality", 0.0)),
         epistemic_depth=int(raw.get("epistemic_depth", 0)),
-        binding_quality=float(raw.get("binding_quality", 0.0)),
+        binding_quality=opt_float(raw.get("binding_quality")),
         precision_balance=float(raw.get("precision_balance", 0.0)),
         is_field_evidencing=bool(raw.get("is_field_evidencing", False)),
         cessation_detected=bool(raw.get("cessation_detected", False)),

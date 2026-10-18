@@ -106,7 +106,7 @@ async def test_min_evidence_three():
     assert changed and "speaker_Alice_positive" in learner.beliefs
     # three experiences spread over two speakers give neither speaker evidence
     other, _ = make_learner()
-    mixed = [exp("Alice"), exp("Bob"), exp("Alice")]
+    mixed = [exp("Alice"), exp("Guest"), exp("Alice")]
     await other.learn_from_experiences(mixed)
     assert not any(b.category == "speaker" for b in other.beliefs.values())
 
@@ -251,7 +251,7 @@ async def test_context_lookup_and_stats():
     for belief_args in range(2):
         await learner.learn_from_experiences(batch, rate=0.5)
     alice = learner.get_beliefs_for_context(speaker="Alice")
-    other = learner.get_beliefs_for_context(speaker="Bob")
+    other = learner.get_beliefs_for_context(speaker="Guest")
     assert alice and all(b.pattern.get("speaker") == "Alice" for b in alice)
     assert not any(b.pattern.get("speaker") == "Alice" for b in other)
     stats = learner.get_stats()
@@ -264,3 +264,73 @@ def test_belief_descriptions_are_ascii_and_neutral():
     learner, _ = make_learner()
     belief = learner.make_belief("b", "speaker", "Conversations with Alice", {})
     assert belief.description.isascii()
+
+
+@pytest.mark.asyncio
+async def test_consciousness_beliefs_never_name_a_speaker():
+    learner, store = make_learner()
+    # identical system-side metrics for two speakers: nothing tells them apart
+    batch = [
+        exp(
+            speaker=speaker,
+            outcome="neutral",
+            valence=0.0,
+            gwt_ignition_count=1.0,
+            beautiful_loop_quality=0.35,
+            epistemic_depth=None,
+        )
+        for speaker in ("Alice", "Guest")
+        for _ in range(3)
+    ]
+    await learner.learn_from_experiences(batch, rate=0.1)
+    rich = [
+        exp(
+            speaker=speaker,
+            outcome="deepening",
+            gwt_ignition_count=3,
+            beautiful_loop_quality=0.6,
+            epistemic_depth=3,
+            protoself_stability=0.8,
+        )
+        for speaker in ("Alice", "Guest")
+        for _ in range(3)
+    ]
+    await learner.learn_from_experiences(rich, rate=0.1)
+    consciousness = [
+        b for b in learner.beliefs.values() if b.category == "consciousness"
+    ]
+    assert consciousness  # the global metric beliefs still form
+    for belief in consciousness:
+        assert "speaker" not in belief.pattern, belief.belief_id
+        assert "metric" in belief.pattern, belief.belief_id
+        assert "Alice" not in belief.description
+        assert "Guest" not in belief.description
+        assert not belief.belief_id.startswith("consciousness_speaker_")
+    stored = {doc["belief_id"] for doc in await store.load_beliefs(100)}
+    assert not any(bid.startswith("consciousness_speaker_") for bid in stored)
+
+
+@pytest.mark.asyncio
+async def test_initialize_drops_stored_speaker_consciousness_beliefs():
+    clock = Clock()
+    store = InMemoryLearningStore()
+    writer = PatternLearner(store, clock=clock)
+    credited = writer.make_belief(
+        "consciousness_speaker_Alice_quality",
+        "consciousness",
+        "Conversations with Alice produce high consciousness quality",
+        {"speaker": "Alice", "avg_beautiful_loop": 0.35},
+        {"curiosity": 0.1, "openness": 0.05},
+    )
+    kept = writer.make_belief(
+        "consciousness_ignition_quality",
+        "consciousness",
+        "When workspace ignition is high",
+        {"metric": "gwt_ignition_count", "threshold": 2},
+    )
+    for belief in (credited, kept):
+        await store.upsert_belief(belief.belief_id, belief.to_dict())
+    fresh = PatternLearner(store, clock=clock)
+    await fresh.initialize()
+    assert set(fresh.beliefs) == {"consciousness_ignition_quality"}
+    assert fresh.get_beliefs_for_context(speaker="Alice") == []

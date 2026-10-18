@@ -5,6 +5,7 @@ import random
 import re
 from datetime import datetime, timezone
 
+import numpy as np
 import pytest
 
 from mtc.brain.protocol import FakeBrain, NoAnswerError
@@ -31,6 +32,7 @@ from mtc.consciousness.intrinsic_goals import (
     IntrinsicGoalSystem,
     new_goal,
 )
+from mtc.core.config import Settings
 
 T0 = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -102,6 +104,9 @@ def make_life(source=None, registry=None, brain=None, **kwargs) -> AutonomousLif
         config=config,
         rng=kwargs.pop("rng", random.Random(1)),
         clock=kwargs.pop("clock", Clock()),
+        # DEBUG is pinned off unless a test asks for it, so a handler that
+        # raises under DEBUG never depends on the ambient environment.
+        settings=kwargs.pop("settings", Settings(DEBUG=False)),
         **kwargs,
     )
 
@@ -309,6 +314,111 @@ async def test_drive_update_uses_mapped_activity_type():
     source.homeostatic_drives = FakeDrives({"coherence": 0.8})
     await make_life(source, registry).step()
     assert source.updates == []  # no mapping, no credit
+
+
+@pytest.mark.asyncio
+async def test_activity_mapping_without_intensity_still_credits_the_drive():
+    source = FakeSource()
+    config = AutonomousLifeConfig(
+        exploration_probability=0.0,
+        activity_types={"reflect": {"type": "sensemaking"}},
+    )
+    registry = registry_of(stub("reflect", "curiosity"))
+    life = make_life(source, registry, config=config, settings=Settings(DEBUG=True))
+    await life.step()
+    assert source.updates == [{"type": "sensemaking"}]
+    assert life.get_status()["step_failures"] == {}
+
+    # A non-finite or non-numeric intensity is left out the same way.
+    for bad in (float("nan"), "high", "0.6", True, None):
+        source.updates.clear()
+        config.activity_types["reflect"]["intensity"] = bad
+        await life.step()
+        assert source.updates == [{"type": "sensemaking"}]
+
+    # A real drive model credits the drive at its default event intensity.
+    module = ActiveInferenceModule()
+    drives = module.homeostatic_drives
+    drives.drives["coherence"].current_level = 0.1
+    before = drives.drives["coherence"].current_level
+    config.activity_types["reflect"] = {"type": "sensemaking"}
+    real = make_life(module, registry_of(stub("reflect", "coherence")), config=config)
+    await real.step()
+    assert drives.drives["coherence"].current_level > before
+    assert real.get_status()["step_failures"] == {}
+
+
+@pytest.mark.asyncio
+async def test_finite_numpy_intensity_is_kept():
+    source = FakeSource()
+    config = AutonomousLifeConfig(
+        exploration_probability=0.0,
+        activity_types={"reflect": {"type": "sensemaking"}},
+    )
+    registry = registry_of(stub("reflect", "curiosity"))
+    life = make_life(source, registry, config=config, settings=Settings(DEBUG=True))
+    for good, expected in (
+        (np.float32(0.25), 0.25),
+        (np.float64(0.7), 0.7),
+        (np.int64(1), 1.0),
+    ):
+        source.updates.clear()
+        config.activity_types["reflect"]["intensity"] = good
+        await life.step()
+        assert len(source.updates) == 1
+        assert source.updates[0]["type"] == "sensemaking"
+        assert source.updates[0]["intensity"] == pytest.approx(expected)
+
+    # A non-finite numpy number and a numpy boolean are still left out.
+    for bad in (np.float64("nan"), np.float32("inf"), np.bool_(True)):
+        source.updates.clear()
+        config.activity_types["reflect"]["intensity"] = bad
+        await life.step()
+        assert source.updates == [{"type": "sensemaking"}]
+    assert life.get_status()["step_failures"] == {}
+
+
+@pytest.mark.asyncio
+async def test_drive_update_failure_is_counted_and_raised_under_debug():
+    class _Failing(FakeSource):
+        async def update_homeostasis(self, activity):
+            raise RuntimeError("drive store down")
+
+    registry = registry_of(stub("reflect", "curiosity"))
+    quiet = make_life(_Failing(), registry, settings=Settings(DEBUG=False))
+    result = await quiet.step()
+    # The step completes as before; the failed credit is counted.
+    assert result.success is True
+    assert quiet.completed == 1
+    assert len(quiet.history) == 1
+    assert quiet.get_status()["step_failures"] == {"drive_update": 1}
+    await quiet.step()
+    assert quiet.get_status()["step_failures"] == {"drive_update": 2}
+
+    loud = make_life(_Failing(), registry, settings=Settings(DEBUG=True))
+    with pytest.raises(RuntimeError, match="drive store down"):
+        await loud.step()
+    assert loud.get_status()["step_failures"] == {"drive_update": 1}
+
+
+@pytest.mark.asyncio
+async def test_selection_failure_is_counted_and_raised_under_debug():
+    class _Broken(FakeBrain):
+        async def think(self, *args, **kwargs):
+            raise ConnectionError("brain unavailable")
+
+    options = [stub("first", "curiosity"), stub("second", "curiosity")]
+    context = ActivityContext("curiosity", 0.5)
+    quiet = BrainActivitySelector(_Broken(), settings=Settings(DEBUG=False))
+    picked = await quiet.select(context, options)
+    assert (picked.activity.name, picked.source) == ("first", "drive_fallback")
+    assert quiet.failures == {"selection": 1}
+    life = make_life(registry=registry_of(*options), selector=quiet)
+    assert life.get_status()["step_failures"] == {"selection": 1}
+
+    loud = BrainActivitySelector(_Broken(), settings=Settings(DEBUG=True))
+    with pytest.raises(ConnectionError):
+        await loud.select(context, options)
 
 
 @pytest.mark.asyncio
@@ -875,6 +985,7 @@ async def test_run_loop_survives_a_failing_step():
         registry=registry_of(stub("reflect", "curiosity")),
         config=AutonomousLifeConfig(min_interval_s=7.0, exploration_probability=0.0),
         sleep=fake_sleep,
+        settings=Settings(DEBUG=False),
     )
     life.start()
     await reached.wait()

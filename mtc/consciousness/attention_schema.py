@@ -21,14 +21,19 @@ Key insight: Consciousness IS the brain's model of attention
 """
 
 import asyncio
+import inspect
 import logging
 import time
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
+
+from mtc.brain.protocol import NoAnswerError
+from mtc.core.config import get_settings
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime
     from mtc.consciousness.enhanced_global_workspace import ConsciousnessState
@@ -75,6 +80,9 @@ DEFAULT_FOCUS_THRESHOLD = 0.9
 DEFAULT_HYPERFOCUS_THRESHOLD = 1.35
 DEFAULT_CAPTURE_SALIENCE_THRESHOLD = 1.2
 
+# A failed step is logged the first time and every this many times after.
+FAILURE_LOG_EVERY = 100
+
 # "typed" classifies shifts by type; "legacy_strength" is the v0.4.0 rule
 # (VOLUNTARY or strength at or above 0.6 counts voluntary).
 PROVENANCE_MODES = ("typed", "legacy_strength")
@@ -100,10 +108,20 @@ def provenance_of(shift_type: Optional[AttentionShiftType]) -> str:
     return "uncertain"
 
 
-def _classifiable_ratio(voluntary: int, captured: int) -> float:
-    """Chosen share of classifiable shifts; 0.5 when none is classifiable."""
+def _classifiable_ratio(voluntary: int, captured: int) -> Optional[float]:
+    """Chosen share of classifiable shifts; None when none is classifiable."""
     classifiable = voluntary + captured
-    return voluntary / classifiable if classifiable > 0 else 0.5
+    return voluntary / classifiable if classifiable > 0 else None
+
+
+# The v0.4.0 ratio before any counted shift (legacy_strength mode only).
+_LEGACY_START_RATIO = 0.5
+
+
+def _legacy_ratio(voluntary: int, captured: int) -> float:
+    """The v0.4.0 ratio: voluntary share of counted shifts, 0.5 with none."""
+    counted = voluntary + captured
+    return voluntary / counted if counted > 0 else _LEGACY_START_RATIO
 
 
 def _validate_provenance_mode(mode: str) -> str:
@@ -166,6 +184,24 @@ def _same_target(a: AttentionTarget, b: AttentionTarget) -> bool:
     if a.source_module == b.source_module and a.summary and b.summary:
         return a.summary[:50] == b.summary[:50]
     return False
+
+
+def _target_identifies_focus(target: Any, focus: AttentionTarget) -> bool:
+    """True when a non-string request target names ``focus``.
+
+    A target with a non-empty ``summary`` matches when that summary is
+    contained (ignoring case) in the focus summary; any other object matches
+    only when the focus content is that object or equals it.
+    """
+    summary = getattr(target, "summary", None)
+    if isinstance(summary, str) and summary:
+        return summary.lower() in (focus.summary or "").lower()
+    content = focus.content
+    if content is target:
+        return True
+    equal = content == target
+    # An element-wise comparison (an array) is not an identification.
+    return isinstance(equal, (bool, np.bool_)) and bool(equal)
 
 
 def _focus_changed(
@@ -258,11 +294,16 @@ class AttentionSchemaState:
         previous_state: Optional[AttentionState] = None,
         voluntary_shifts: int = 0,
         captured_shifts: int = 0,
-        voluntary_ratio: float = 0.5,
+        voluntary_ratio: Optional[float] = None,
         timestamp: Optional[float] = None,
         uncertain_shifts: int = 0,
         provenance_mode: str = "typed",
     ):
+        self.provenance_mode = _validate_provenance_mode(provenance_mode)
+        # Typed mode has no ratio until a shift is classifiable; the legacy
+        # mode starts at the v0.4.0 value 0.5.
+        if voluntary_ratio is None and self.provenance_mode == "legacy_strength":
+            voluntary_ratio = _LEGACY_START_RATIO
         self._current_focus = current_focus
         self.attention_state = attention_state
         self.secondary_foci = secondary_foci if secondary_foci is not None else []
@@ -284,7 +325,6 @@ class AttentionSchemaState:
         self.uncertain_shifts = uncertain_shifts
         self.voluntary_ratio = voluntary_ratio
         self.timestamp = timestamp if timestamp is not None else time.time()
-        self.provenance_mode = _validate_provenance_mode(provenance_mode)
         # Back-reference to owning module (set by AttentionSchemaModule.__init__)
         self._owner: Optional["AttentionSchemaModule"] = None
 
@@ -341,7 +381,7 @@ class AttentionSchemaState:
             self.voluntary_shifts += 1
         else:
             self.captured_shifts += 1
-        self.voluntary_ratio = _classifiable_ratio(
+        self.voluntary_ratio = _legacy_ratio(
             self.voluntary_shifts, self.captured_shifts
         )
         if self._owner is not None:
@@ -403,7 +443,7 @@ class AttentionSchemaModule:
 
     def __init__(
         self,
-        voluntary_boost: float = 0.2,  # Boost for voluntary attention
+        voluntary_boost: float = 0.2,  # Stored; no effect in v0.5.0
         focus_threshold: float = DEFAULT_FOCUS_THRESHOLD,
         hyperfocus_threshold: float = DEFAULT_HYPERFOCUS_THRESHOLD,
         prediction_window_seconds: float = 5.0,  # How far ahead to predict
@@ -411,6 +451,8 @@ class AttentionSchemaModule:
         capture_salience_threshold: float = DEFAULT_CAPTURE_SALIENCE_THRESHOLD,
         provenance_mode: str = "typed",
         salience_scale_max: float = SALIENCE_SCALE_MAX,
+        *,
+        settings: Any = None,
     ):
         """
         Initialize the Attention Schema Module.
@@ -419,7 +461,9 @@ class AttentionSchemaModule:
         ``salience_scale_max``), not 0 to 1.
 
         Args:
-            voluntary_boost: Priority boost for voluntary attention shifts
+            voluntary_boost: Stored and reported, with no effect in v0.5.0: a
+                voluntary request does not enter the workspace competition,
+                it only marks the next matching focus as chosen
             focus_threshold: Attention strength threshold for focused state
             hyperfocus_threshold: Threshold for hyperfocused state
             prediction_window_seconds: How far ahead to predict attention
@@ -429,6 +473,14 @@ class AttentionSchemaModule:
             provenance_mode: "typed" (shift type decides) or
                 "legacy_strength" (the v0.4.0 strength rule)
             salience_scale_max: Upper end of the producer's salience scale
+            settings: Settings read for ``DEBUG``; None reads
+                ``get_settings()`` when a step fails
+
+        A failed step (the brain call of ``model_other_attention`` and the
+        focus and state callbacks) keeps its fallback, is counted by step name
+        in ``get_statistics()["failures"]``, is logged the first time and
+        every hundredth time with the exception type only, and is raised when
+        ``Settings.DEBUG`` is true.
         """
         self.provenance_mode = _validate_provenance_mode(provenance_mode)
         thresholds = {
@@ -470,9 +522,6 @@ class AttentionSchemaModule:
         )
         self.schema._owner = self
 
-        # Reference to workspace (set during integration)
-        self.workspace = None
-
         # Pending voluntary shift (if any)
         self._pending_voluntary_shift: Optional[Tuple[Any, str]] = None
 
@@ -488,6 +537,10 @@ class AttentionSchemaModule:
         self._on_focus_change_callbacks: List[Callable] = []
         self._on_state_change_callbacks: List[Callable] = []
 
+        # Failed steps by name (see the constructor docstring)
+        self._settings = settings
+        self.failures: Counter = Counter()
+
         logger.info(
             f"Attention Schema Module initialized\n"
             f"  Voluntary boost: {voluntary_boost}\n"
@@ -496,11 +549,6 @@ class AttentionSchemaModule:
             f"  Capture salience threshold: {capture_salience_threshold}\n"
             f"  Provenance mode: {self.provenance_mode}"
         )
-
-    def set_workspace(self, workspace) -> None:
-        """Set reference to the enhanced global workspace."""
-        self.workspace = workspace
-        logger.info("Attention Schema linked to Global Workspace")
 
     async def update_schema(
         self,
@@ -760,7 +808,15 @@ class AttentionSchemaModule:
         return AttentionState.FOCUSED
 
     def _check_voluntary_shift(self, new_focus: Optional[AttentionTarget]) -> bool:
-        """Check if this focus change was voluntary."""
+        """Check whether the new focus is the one a pending request asked for.
+
+        A string target matches when it is contained (ignoring case) in the
+        focus summary. In typed mode any other target must identify the focus
+        too: its own non-empty ``summary`` contained in the focus summary, or
+        else the focus content is the target or equals it. A request that
+        does not match stays pending. The legacy_strength mode keeps the
+        v0.4.0 acceptance of any focus after a non-string request.
+        """
         if self._pending_voluntary_shift is None:
             return False
 
@@ -769,12 +825,13 @@ class AttentionSchemaModule:
 
         target, reason = self._pending_voluntary_shift
 
-        # Check if the new focus matches the voluntary target
-        # (simplified matching - could be more sophisticated)
         if isinstance(target, str):
-            match = target.lower() in new_focus.summary.lower()
+            match = target.lower() in (new_focus.summary or "").lower()
+        elif self.provenance_mode == "legacy_strength":
+            # legacy_v04 compatibility: any focus after a non-string request
+            match = True
         else:
-            match = True  # Accept if any focus after voluntary request
+            match = _target_identifies_focus(target, new_focus)
 
         if match:
             new_focus.shift_reason = reason
@@ -954,7 +1011,7 @@ class AttentionSchemaModule:
         """
         if self.schema.current_focus is None:
             state_desc = self._describe_state(self.schema.attention_state)
-            return f"{state_desc} I'm not focused on anything specific right now."
+            return f"{state_desc}. I'm not focused on anything specific right now."
 
         target = self.schema.current_focus
         state = self.schema.attention_state
@@ -1037,8 +1094,10 @@ class AttentionSchemaModule:
         """
         Request a voluntary attention shift.
 
-        This doesn't guarantee the shift - the target still must
-        compete in the global workspace. But it gets a boost.
+        The request does not enter the workspace competition and carries no
+        boost: it is kept pending, and the next focus that matches it (see
+        ``_check_voluntary_shift``) is marked as chosen. A later request
+        replaces a pending one.
 
         Args:
             target: What to try to focus on
@@ -1047,20 +1106,6 @@ class AttentionSchemaModule:
         self._pending_voluntary_shift = (target, reason)
 
         logger.info(f"Voluntary attention shift requested: {reason}")
-
-        # If we have workspace access, submit boosted candidate
-        if self.workspace:
-            candidate = await self.workspace.submit_candidate(
-                content=target,
-                content_type="voluntary_attention",
-                summary=f"Voluntary focus: {reason}",
-                source=self.workspace.bottleneck.__class__.__name__,  # Safe import workaround
-                activation_level=0.8,  # High activation
-                emotional_salience=0.5,
-                priority_boost=self.voluntary_boost,
-                metadata={"voluntary_reason": reason},
-            )
-            logger.debug(f"Submitted voluntary candidate: {candidate.id}")
 
     async def model_other_attention(
         self, agent_name: str, context: str, llm_brain=None
@@ -1074,7 +1119,10 @@ class AttentionSchemaModule:
         Args:
             agent_name: Name of the other agent
             context: Situational context for inference
-            llm_brain: Optional LLM for richer inference
+            llm_brain: Optional brain for richer inference. A reply with no
+                text (``NoAnswerError``) keeps the heuristic reading in every
+                mode; any other error counts as ``other_attention_llm`` and
+                is raised when ``Settings.DEBUG`` is true.
 
         Returns:
             OtherAgentAttention model
@@ -1101,8 +1149,12 @@ class AttentionSchemaModule:
                 )
                 reasoning = enhanced_reasoning
                 confidence = min(1.0, confidence + 0.2)
-            except Exception as e:
-                logger.warning(f"LLM inference failed: {e}")
+            except NoAnswerError:
+                # A model that returned no text is a miss, not a code failure:
+                # the brain counts it, and the heuristic reading stands.
+                pass
+            except Exception as exc:
+                self._failure("other_attention_llm", exc)
 
         return OtherAgentAttention(
             agent_name=agent_name,
@@ -1183,12 +1235,12 @@ Response:"""
         """Trigger focus change callbacks."""
         for callback in self._on_focus_change_callbacks:
             try:
-                if asyncio.iscoroutinefunction(callback):
+                if inspect.iscoroutinefunction(callback):
                     await callback(old_focus, new_focus)
                 else:
                     callback(old_focus, new_focus)
-            except Exception as e:
-                logger.warning(f"Focus change callback error: {e}")
+            except Exception as exc:
+                self._failure("focus_callback", exc)
 
     async def _trigger_state_change(
         self, old_state: AttentionState, new_state: AttentionState
@@ -1196,12 +1248,30 @@ Response:"""
         """Trigger state change callbacks."""
         for callback in self._on_state_change_callbacks:
             try:
-                if asyncio.iscoroutinefunction(callback):
+                if inspect.iscoroutinefunction(callback):
                     await callback(old_state, new_state)
                 else:
                     callback(old_state, new_state)
-            except Exception as e:
-                logger.warning(f"State change callback error: {e}")
+            except Exception as exc:
+                self._failure("state_callback", exc)
+
+    def _debug(self) -> bool:
+        settings = self._settings if self._settings is not None else get_settings()
+        return bool(getattr(settings, "DEBUG", False))
+
+    def _failure(self, step: str, exc: BaseException) -> None:
+        """Count a failed step, log the first and every hundredth, raise in DEBUG."""
+        self.failures[step] += 1
+        count = self.failures[step]
+        if count == 1 or count % FAILURE_LOG_EVERY == 0:
+            logger.warning(
+                "attention schema step %s failed (%d so far): %s",
+                step,
+                count,
+                type(exc).__name__,
+            )
+        if self._debug():
+            raise exc
 
     # ========================================================================
     # STATISTICS AND DIAGNOSTICS
@@ -1217,11 +1287,12 @@ Response:"""
             "voluntary_shifts": self.schema.voluntary_shifts,
             "captured_shifts": self.schema.captured_shifts,
             "uncertain_shifts": self.schema.uncertain_shifts,
+            # Mean of the scored predictions; None until one was scored
             "prediction_accuracy": (
                 sum(self.prediction_accuracy_history)
                 / len(self.prediction_accuracy_history)
                 if self.prediction_accuracy_history
-                else 0.0
+                else None
             ),
             "history_length": len(self.schema.attention_history),
             "current_focus_duration": (
@@ -1230,6 +1301,7 @@ Response:"""
                 else 0.0
             ),
             "state_duration": self.schema.state_duration_seconds,
+            "failures": dict(self.failures),
         }
 
     def get_state(self) -> AttentionSchemaState:
@@ -1288,6 +1360,11 @@ Response:"""
         History entries and the current focus come back as typed
         ``AttentionTarget`` objects. The schema is rebuilt through its
         constructor, so restoring never counts a shift a second time.
+
+        In typed mode the voluntary ratio is recomputed from the restored
+        counts (None when nothing is classifiable, so a state saved with the
+        old 0.5 stand-in restores as None); the legacy mode restores the saved
+        value, and 0.5 when it is missing or None.
         """
         s = state.get("scalars", {}) or {}
         h = state.get("histories", {}) or {}
@@ -1305,6 +1382,16 @@ Response:"""
         focus_records = [r for r in h.get("current_focus", []) if isinstance(r, dict)]
         current_focus = _target_from_dict(focus_records[-1]) if focus_records else None
 
+        voluntary_shifts = int(s.get("voluntary_shifts", 0))
+        captured_shifts = int(s.get("captured_shifts", 0))
+        if self.provenance_mode == "typed":
+            voluntary_ratio = _classifiable_ratio(voluntary_shifts, captured_shifts)
+        else:
+            saved_ratio = s.get("voluntary_ratio")
+            voluntary_ratio = (
+                float(saved_ratio) if saved_ratio is not None else _LEGACY_START_RATIO
+            )
+
         self.total_updates = int(s.get("total_updates", 0))
         self.schema = AttentionSchemaState(
             current_focus=current_focus,
@@ -1318,9 +1405,9 @@ Response:"""
             state_duration_seconds=float(s.get("state_duration", 0.0)),
             last_state_change=float(s.get("last_state_change", time.time())),
             previous_state=_state_named(s.get("previous_state"), None),
-            voluntary_shifts=int(s.get("voluntary_shifts", 0)),
-            captured_shifts=int(s.get("captured_shifts", 0)),
-            voluntary_ratio=float(s.get("voluntary_ratio", 0.5)),
+            voluntary_shifts=voluntary_shifts,
+            captured_shifts=captured_shifts,
+            voluntary_ratio=voluntary_ratio,
             timestamp=float(s.get("timestamp", time.time())),
             uncertain_shifts=int(s.get("uncertain_shifts", 0)),
             provenance_mode=self.provenance_mode,

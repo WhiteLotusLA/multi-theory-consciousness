@@ -194,6 +194,23 @@ def test_speaker_beliefs_do_not_create_goals():
     assert proposals == []
 
 
+def test_speaker_consciousness_belief_without_metric_proposes_no_goal():
+    system = make_system()
+    credited = belief(
+        "consciousness",
+        {"speaker": "Alice", "avg_beautiful_loop": 0.35, "avg_epistemic_depth": None},
+        belief_id="consciousness_speaker_Alice_quality",
+    )
+    assert system.propose_from_beliefs([credited]) == []
+    # a metric belief of the same strength does propose, so the gate is the metric
+    metric = belief(
+        "consciousness", {"metric": "gwt_ignition_count"}, belief_id="metric"
+    )
+    (proposal,) = system.propose_from_beliefs([credited, metric])
+    assert proposal.related_beliefs == ["metric"]
+    assert "Alice" not in proposal.description
+
+
 def test_custom_proposers_replace_defaults():
     calls = []
 

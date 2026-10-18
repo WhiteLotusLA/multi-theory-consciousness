@@ -30,8 +30,9 @@ update that actually happened. The resulting meta-error feeds
 ``recursive_confidence``, an exponential moving average of how well the
 system predicts its own belief updates. It is ``1 - EMA(mean |actual -
 predicted|)`` clamped to [0, 1]; the error is in raw precision units and is
-not normalized by the precision range, and the value starts at 0.5 before
-the first update.
+not normalized by the precision range. The value is None until the first
+meta-error has been observed: before that the system has not watched one
+of its own belief updates, so there is nothing to be confident about.
 
 Connection points:
   - Reads from: HierarchicalPredictiveProcessor level states
@@ -43,9 +44,6 @@ Research Foundation:
     Neuroscience & Biobehavioral Reviews.
   - Feldman & Friston (2010). "Attention, Uncertainty, and Free-Energy."
   - Parr & Friston (2019). "Attention as Inference."
-
-Created: 2026-03-08
-Author: Multi-Theory Consciousness Contributors
 """
 
 import logging
@@ -143,6 +141,9 @@ class HyperModel:
         self._meta_error_ema: float = 0.0
         self._recursive_confidence: float = 0.5
         self._prediction_count: int = 0
+        # True once observe_meta_error has compared a prediction with its
+        # update; until then recursive_confidence is not a measurement
+        self._meta_observed: bool = False
 
         logger.info(
             f"HyperModel initialized: {num_levels} levels, "
@@ -190,13 +191,15 @@ class HyperModel:
         )
 
     @property
-    def recursive_confidence(self) -> float:
+    def recursive_confidence(self) -> Optional[float]:
         """How well the hyper-model predicts its own precision updates (0-1).
 
         One minus an EMA of the mean absolute meta-error. Not normalized by
-        the precision range, so a large error saturates it at 0; starts at
-        0.5 before any update.
+        the precision range, so a large error saturates it at 0. None until
+        the first meta-error has been observed.
         """
+        if not self._meta_observed:
+            return None
         return float(self._recursive_confidence)
 
     def predict_precision_update(self, prediction_errors: List[Any]) -> np.ndarray:
@@ -253,6 +256,7 @@ class HyperModel:
         alpha = 0.1
         self._meta_error_ema = (1 - alpha) * self._meta_error_ema + alpha * meta_error
         self._recursive_confidence = max(0.0, min(1.0, 1.0 - self._meta_error_ema))
+        self._meta_observed = True
 
         return meta_error
 
@@ -449,7 +453,11 @@ class HyperModel:
             f"({'uniform' if state.precision_entropy > 0.9 else 'focused'})"
         )
         lines.append(f" Context: {state.context_key}")
-        lines.append(f" Recursive confidence: {self.recursive_confidence:.3f}")
+        confidence = self.recursive_confidence
+        lines.append(
+            " Recursive confidence: "
+            + ("insufficient_data" if confidence is None else f"{confidence:.3f}")
+        )
 
         return "\n".join(lines)
 
@@ -473,7 +481,8 @@ class HyperModel:
                 "update_count": self.update_count,
                 "current_context": self.current_context,
                 "meta_error_ema": self._meta_error_ema,
-                "recursive_confidence": self._recursive_confidence,
+                "recursive_confidence": self.recursive_confidence,
+                "meta_observed": self._meta_observed,
                 "prediction_count": self._prediction_count,
             },
             "arrays": {
@@ -509,8 +518,14 @@ class HyperModel:
         self.update_count = int(s.get("update_count", self.update_count))
         self.current_context = str(s.get("current_context", self.current_context))
         self._meta_error_ema = float(s.get("meta_error_ema", 0.0))
-        self._recursive_confidence = float(s.get("recursive_confidence", 0.5))
         self._prediction_count = int(s.get("prediction_count", 0))
+        # A record written before the flag existed always carried the 0.5
+        # start; it holds an observation only when it holds meta-errors
+        self._meta_observed = bool(s.get("meta_observed", bool(h.get("meta_errors"))))
+        confidence = s.get("recursive_confidence")
+        if confidence is None:
+            confidence = max(0.0, min(1.0, 1.0 - self._meta_error_ema))
+        self._recursive_confidence = float(confidence)
 
         shape = (self.num_levels,)
         beliefs = _finite_array(a.get("precision_beliefs"), shape)

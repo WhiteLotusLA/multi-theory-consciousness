@@ -18,10 +18,6 @@ Research Foundation:
 - Friston, K. (2010). "The Free Energy Principle: A Unified Brain Theory?"
 - Friston, K. (2012). "Active Inference and Free Energy"
 - Butlin et al. (2023). 14 Consciousness Indicators
-
-
-Created: December 5, 2025
-Author: Multi-Theory Consciousness Project
 """
 
 import importlib.util
@@ -33,6 +29,7 @@ import pytest
 import numpy as np
 
 import mtc.consciousness.active_inference as active_inference_module_file
+from mtc.core.config import Settings
 from mtc.consciousness.active_inference import (
     CONVERSATIONAL_OBSERVATION_LABELS,
     MAX_POLICIES,
@@ -227,6 +224,23 @@ class TestHomeostaticDrives:
         # Should be closer to optimal
         new_level = homeostatic_drives.drives["social_connection"].current_level
         assert new_level > 0.3
+
+    @pytest.mark.asyncio
+    async def test_none_intensity_reads_as_the_default_event_intensity(self):
+        assert active_inference_module_file.DEFAULT_ACTIVITY_INTENSITY == 0.5
+        explicit_none = HomeostaticDrives()
+        without_key = HomeostaticDrives()
+        for activity in ("learning", "conversation", "thinking", "sensemaking"):
+            a = await explicit_none.update_drives({"type": activity, "intensity": None})
+            b = await without_key.update_drives({"type": activity})
+            assert a == b
+        assert {n: d.current_level for n, d in explicit_none.drives.items()} == {
+            n: d.current_level for n, d in without_key.drives.items()
+        }
+
+        stated = HomeostaticDrives()
+        signals = await stated.update_drives({"type": "learning", "intensity": 0.5})
+        assert signals == await HomeostaticDrives().update_drives({"type": "learning"})
 
     def test_get_free_energy(self, homeostatic_drives):
         """Test free energy calculation from homeostatic state."""
@@ -712,13 +726,28 @@ class TestEdgeCases:
     """Test edge cases and error handling."""
 
     @pytest.mark.asyncio
-    async def test_zero_observation(self, active_inference_module):
-        """Test handling of zero observation."""
-        observation = np.zeros(5)
-        result = await active_inference_module.infer_and_act(observation)
+    async def test_zero_mass_observation_is_counted_and_read_as_channel_zero(self):
+        """An all-zero observation is counted and inferred as channel 0."""
+        np.random.seed(11)
+        empty = _fast_module()
+        result = await empty.infer_and_act(np.zeros(5))
+        assert empty.get_statistics()["zero_mass_observations"] == 1
+        assert empty.zero_mass_observations == 1
 
-        assert result is not None
-        assert result.posterior_beliefs is not None
+        np.random.seed(11)
+        one_hot = _fast_module()
+        reference = await one_hot.infer_and_act(np.array([1.0, 0.0, 0.0, 0.0, 0.0]))
+        assert one_hot.get_statistics()["zero_mass_observations"] == 0
+        np.testing.assert_array_equal(
+            result.posterior_beliefs, reference.posterior_beliefs
+        )
+
+        # A vector with mass is not counted; the counter persists.
+        await empty.infer_and_act(np.array([0.1, 0.2, 0.3, 0.2, 0.2]))
+        assert empty.get_statistics()["zero_mass_observations"] == 1
+        restored = _fast_module()
+        restored.from_state_dict(empty.to_state_dict())
+        assert restored.zero_mass_observations == 1
 
     @pytest.mark.asyncio
     async def test_wrong_observation_size(self, active_inference_module):
@@ -1035,7 +1064,10 @@ class TestSelfReferentialInference:
     async def test_meta_state_in_get_state(self, meta_module):
         """Test that get_state() includes meta-inference fields."""
         observation = np.array([0.8, 0.1, 0.05, 0.03, 0.02])
-        await meta_module.infer_and_act(observation)
+        # The first cycle only records a forecast; the next ones score it.
+        for _ in range(3):
+            await meta_module.infer_and_act(observation)
+        assert meta_module.meta_state.total_predictions > 0
 
         state = meta_module.get_state()
 
@@ -1057,10 +1089,35 @@ class TestSelfReferentialInference:
 
         state = module.get_state()
 
-        # Should use defaults, not crash
-        assert state.meta_confidence == 0.5
-        assert state.meta_predicted_accuracy == 0.5
+        # No meta-state: nothing was measured, and nothing stands in for it
+        assert state.meta_confidence is None
+        assert state.meta_predicted_accuracy is None
         assert state.meta_cognitive_load == 0.0
+
+    @pytest.mark.asyncio
+    async def test_meta_confidence_is_none_without_a_scored_forecast(self):
+        observation = np.array([0.8, 0.1, 0.05, 0.03, 0.02])
+        disabled = _fast_module(enable_meta_inference=False)
+        await disabled.infer_and_act(observation)
+        assert disabled.get_state().meta_confidence is None
+        assert disabled.get_state().meta_predicted_accuracy is None
+
+        module = _fast_module(enable_meta_inference=True)
+        assert module.get_state().meta_confidence is None
+        await module.infer_and_act(observation)
+        # One cycle records a forecast and scores none.
+        assert module.meta_state.total_predictions == 0
+        assert module.get_state().meta_confidence is None
+        assert module.get_state().meta_predicted_accuracy is None
+
+        for _ in range(2):
+            await module.infer_and_act(observation)
+        assert module.meta_state.total_predictions == 2
+        state = module.get_state()
+        assert isinstance(state.meta_confidence, float)
+        assert 0.0 <= state.meta_confidence <= 1.0
+        assert state.meta_confidence == module.meta_state.model_confidence
+        assert state.meta_predicted_accuracy == module.meta_state.predicted_accuracy
 
     @pytest.mark.asyncio
     async def test_meta_does_not_affect_core_inference(self, meta_module):
@@ -1522,6 +1579,23 @@ class TestWorkspacePrecisionFeedback:
         assert module.workspace_precision_bias[1] == pytest.approx(1.0)
         assert np.all(module.workspace_precision_bias <= 1.0)
 
+    def test_precision_feedback_skips_a_winner_without_activation(
+        self, active_inference_module
+    ):
+        module = active_inference_module
+        unknown = _Winner("sensory")
+        unknown.candidate.activation_level = None
+        not_finite = _Winner("message", float("nan"))
+        module.modulate_precision_from_workspace(
+            [{"content_type": "sensory"}, unknown, not_finite]
+        )
+        assert module.workspace_precision_bias.sum() == 0.0
+
+        module.modulate_precision_from_workspace(
+            [{"content_type": "sensory", "activation_level": 1.0}]
+        )
+        assert module.workspace_precision_bias[3] == pytest.approx(0.3)
+
     def test_winner_shapes(self, active_inference_module):
         module = active_inference_module
         empty = _Winner("emotion")
@@ -1602,7 +1676,9 @@ class TestLedgerNarrationAndSignals:
                     narrate_free_energy=free_energy, narrate_body_drives=body
                 )
                 module.homeostatic_drives.drives["curiosity"].current_level = 0.1
-                await module.infer_and_act(observation)
+                # A trend sentence needs more than ten prediction errors.
+                for _ in range(12):
+                    await module.infer_and_act(observation)
                 reports[(free_energy, body)] = (
                     await module.generate_active_inference_report()
                 )
@@ -1614,6 +1690,62 @@ class TestLedgerNarrationAndSignals:
         assert "free energy" not in reports[(False, True)]
         assert "Most urgent need" in reports[(False, True)]
         assert reports[(False, False)] == ""
+
+    @pytest.mark.asyncio
+    async def test_report_says_nothing_on_a_fresh_module(self):
+        module = _fast_module()
+        assert module.get_state().most_urgent_drive is not None
+        assert await module.generate_active_inference_report() == ""
+
+    @pytest.mark.asyncio
+    async def test_report_trend_needs_more_than_ten_errors(self):
+        module = _fast_module()
+        observation = np.array([0.4, 0.3, 0.1, 0.1, 0.1])
+        for _ in range(3):
+            await module.infer_and_act(observation)
+        assert "prediction error" not in (
+            await module.generate_active_inference_report()
+        )
+        for _ in range(9):
+            await module.infer_and_act(observation)
+        assert len(module.prediction_errors) == 12
+        report = await module.generate_active_inference_report()
+        assert report.startswith("My current active inference state: prediction error")
+
+    @pytest.mark.asyncio
+    async def test_report_makes_no_accuracy_claim(self):
+        module = _fast_module()
+        await module.infer_and_act(np.array([0.4, 0.3, 0.1, 0.1, 0.1]))
+        state = module.get_state()
+        report = await module.generate_active_inference_report()
+        assert "accurate" not in report
+        if state.total_free_energy > 1.0:
+            assert report.endswith("High free energy - seeking to reduce surprise.")
+        else:
+            assert report.endswith("Low free energy.")
+
+        # A low free energy state says so and claims nothing more.
+        module.free_energy_history[-1] = 0.0
+        for drive in module.homeostatic_drives.drives.values():
+            drive.current_level = drive.optimal_level
+        assert module.get_state().total_free_energy <= 1.0
+        assert await module.generate_active_inference_report() == "Low free energy."
+
+    @pytest.mark.asyncio
+    async def test_report_omits_a_need_with_zero_urgency(self):
+        module = _fast_module()
+        await module.infer_and_act(np.array([0.4, 0.3, 0.1, 0.1, 0.1]))
+        state = module.get_state()
+        assert state.urgency_level == 0.0
+        assert "Most urgent need" not in (
+            await module.generate_active_inference_report()
+        )
+
+        module.homeostatic_drives.drives["curiosity"].current_level = 0.1
+        state = module.get_state()
+        assert state.urgency_level > 0.0
+        report = await module.generate_active_inference_report()
+        assert f"Most urgent need: {state.most_urgent_drive} (urgency: " in report
 
     @pytest.mark.asyncio
     async def test_signal_sink_receives_records(self):
@@ -1634,9 +1766,31 @@ class TestLedgerNarrationAndSignals:
         def broken_sink(record):
             raise RuntimeError("sink unavailable")
 
-        module = _fast_module(signal_sink=broken_sink)
+        module = ActiveInferenceModule(
+            ActiveInferenceConfig(**{**FAST, "signal_sink": broken_sink}),
+            settings=Settings(DEBUG=False),
+        )
         result = await module.infer_and_act(np.array([0.4, 0.3, 0.1, 0.1, 0.1]))
         assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_signal_sink_failure_is_counted_and_raised_under_debug(self):
+        def broken_sink(record):
+            raise RuntimeError("sink unavailable")
+
+        config = ActiveInferenceConfig(**{**FAST, "signal_sink": broken_sink})
+        observation = np.array([0.4, 0.3, 0.1, 0.1, 0.1])
+        quiet = ActiveInferenceModule(config, settings=Settings(DEBUG=False))
+        await quiet.infer_and_act(observation)
+        await quiet.infer_and_act(observation)
+        # Both cycles complete; each failed delivery is counted.
+        assert quiet.total_inferences == 2
+        assert quiet.get_statistics()["failures"] == {"signal_sink": 2}
+
+        loud = ActiveInferenceModule(config, settings=Settings(DEBUG=True))
+        with pytest.raises(RuntimeError, match="sink unavailable"):
+            await loud.infer_and_act(observation)
+        assert loud.get_statistics()["failures"] == {"signal_sink": 1}
 
 
 class TestObservationEncoding:

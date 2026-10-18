@@ -17,9 +17,6 @@ The workspace winners are the "objects." The protoself perturbation
 that I-am-experiencing-this-thing.
 
 Research: Damasio (1999) "The Feeling of What Happens."
-
-Created: 2026-03-08
-Author: Multi-Theory Consciousness Contributors
 """
 
 import logging
@@ -28,6 +25,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 from collections import deque
+
+from .protoself import fmt_measure, opt_float
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +37,7 @@ class SomaticMarker:
 
     option: str  # What this marker is about
     valence: float  # -1 (avoid) to +1 (approach)
-    intensity: float  # 0-1 strength of the feeling
+    intensity: Optional[float]  # 0-1 strength; None while the arousal is unmeasured
     body_source: str  # Which body state drove this marker
 
     def to_dict(self) -> Dict[str, Any]:
@@ -54,31 +53,38 @@ class SomaticMarker:
         return cls(
             option=str(raw.get("option", "")),
             valence=float(raw.get("valence", 0.0)),
-            intensity=float(raw.get("intensity", 0.0)),
+            intensity=opt_float(raw.get("intensity")),
             body_source=str(raw.get("body_source", "homeostasis")),
         )
 
 
 @dataclass
 class CoreExperience:
-    """The 'feeling of knowing' -- I am here, now, experiencing this."""
+    """The 'feeling of knowing' -- I am here, now, experiencing this.
+
+    ``feeling_of_knowing`` is None while the protoself's stability is
+    unmeasured (an update with no previous body state), and
+    ``here_now_salience`` is None while its arousal is: both rest on a
+    measured body delta.
+    """
 
     self_world_binding: float  # How tightly self and world are bound (0-1)
     perturbation_source: str  # What object/event perturbed the protoself
-    feeling_of_knowing: float  # Confidence in current conscious experience (0-1)
+    feeling_of_knowing: Optional[float]  # Confidence in current experience (0-1)
     somatic_markers: List[SomaticMarker]  # Emotional tags on workspace contents
-    here_now_salience: float  # Present-moment awareness intensity (0-1)
+    here_now_salience: Optional[float]  # Present-moment awareness (0-1)
     timestamp: float = field(default_factory=time.time)
 
     @property
-    def somatic_valence(self) -> float:
-        """Mean valence across the somatic markers (-1 to +1), 0.0 when none.
+    def somatic_valence(self) -> Optional[float]:
+        """Mean valence across the somatic markers (-1 to +1).
 
-        The aggregate emotional tone downstream consumers read as the
-        Damasio-derived affect signal.
+        None when no marker exists: a cycle without workspace winners
+        produces no somatic marker, so there is no measured valence and
+        downstream consumers must not list one as a measured affect input.
         """
         if not self.somatic_markers:
-            return 0.0
+            return None
         return sum(m.valence for m in self.somatic_markers) / len(self.somatic_markers)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -97,13 +103,13 @@ class CoreExperience:
         return cls(
             self_world_binding=float(raw.get("self_world_binding", 0.0)),
             perturbation_source=str(raw.get("perturbation_source", "")),
-            feeling_of_knowing=float(raw.get("feeling_of_knowing", 0.0)),
+            feeling_of_knowing=opt_float(raw.get("feeling_of_knowing")),
             somatic_markers=[
                 SomaticMarker.from_dict(m)
                 for m in raw.get("somatic_markers", [])
                 if isinstance(m, dict)
             ],
-            here_now_salience=float(raw.get("here_now_salience", 0.0)),
+            here_now_salience=opt_float(raw.get("here_now_salience")),
             timestamp=float(raw.get("timestamp", time.time())),
         )
 
@@ -165,18 +171,21 @@ class CoreConsciousness:
         experience = CoreExperience(
             self_world_binding=float(np.clip(binding, 0.0, 1.0)),
             perturbation_source=perturbation_source,
-            feeling_of_knowing=float(np.clip(fok, 0.0, 1.0)),
+            feeling_of_knowing=(None if fok is None else float(np.clip(fok, 0.0, 1.0))),
             somatic_markers=markers,
-            here_now_salience=float(np.clip(here_now, 0.0, 1.0)),
+            here_now_salience=(
+                None if here_now is None else float(np.clip(here_now, 0.0, 1.0))
+            ),
         )
 
         self._binding_history.append(binding)
-        self._fok_history.append(fok)
+        if fok is not None:
+            self._fok_history.append(fok)
         self._latest_experience = experience
 
         logger.debug(
             f"CoreConsciousness cycle {self.cycle_count}: "
-            f"binding={binding:.3f}, fok={fok:.3f}, "
+            f"binding={binding:.3f}, fok={fmt_measure(fok)}, "
             f"markers={len(markers)}, source={perturbation_source[:30]}"
         )
 
@@ -192,13 +201,17 @@ class CoreConsciousness:
         - The protoself is perturbed (body_delta > 0)
         - There are workspace winners to bind to
         - The self-model is confident (if available)
+
+        An unmeasured body_delta (None, the update with no previous body
+        state) is no evidence of a perturbation: its term is 0.
         """
         if not winners:
             return 0.1  # Minimal background binding
 
         # Perturbation drives binding -- when body state changes,
         # we become more aware of what's causing the change
-        perturbation_factor = min(1.0, protoself_state.body_delta * 3.0)
+        delta = protoself_state.body_delta
+        perturbation_factor = 0.0 if delta is None else min(1.0, delta * 3.0)
 
         # Winner salience contributes
         avg_salience = np.mean([getattr(w, "salience", 0.5) for w in winners])
@@ -232,10 +245,15 @@ class CoreConsciousness:
 
         Somatic markers are emotional tags derived from body state.
         They give the system "gut feelings" about the content it is processing.
+        The valence comes from the pleasure/pain feeling and is measured on
+        every update; the intensity is arousal x salience, and is None while
+        the arousal is unmeasured (None, before any body delta). Readers
+        average only the markers whose intensity is a number.
         """
         markers = []
         feelings = protoself_state.primordial_feelings
         body = protoself_state.body_state
+        arousal = feelings.get("arousal")
 
         for winner in winners:
             candidate = getattr(winner, "candidate", None)
@@ -263,8 +281,12 @@ class CoreConsciousness:
             else:
                 valence = base_valence
 
-            # Intensity from arousal x salience
-            intensity = feelings.get("arousal", 0.3) * salience
+            # Intensity from arousal x salience; unmeasured without an arousal
+            intensity = (
+                None
+                if arousal is None
+                else float(np.clip(arousal * salience, 0.0, 1.0))
+            )
 
             # Body source -- which body signal drove this marker
             if body.pain_signals > 0.5:
@@ -278,7 +300,7 @@ class CoreConsciousness:
                 SomaticMarker(
                     option=summary,
                     valence=float(np.clip(valence, -1.0, 1.0)),
-                    intensity=float(np.clip(intensity, 0.0, 1.0)),
+                    intensity=intensity,
                     body_source=body_source,
                 )
             )
@@ -287,13 +309,18 @@ class CoreConsciousness:
 
     def _compute_feeling_of_knowing(
         self, protoself_state: Any, binding: float, self_model: Optional[Any]
-    ) -> float:
+    ) -> Optional[float]:
         """
         Compute the 'feeling of knowing.'
 
         This is awareness that I am experiencing something -- computed from
-        the convergence of stability, binding strength, and self-model accuracy.
+        the convergence of stability, binding strength, and self-model
+        accuracy. None while the stability is unmeasured: the feeling rests
+        on it, and the self-model term alone is not the feeling.
         """
+        if protoself_state.stability is None:
+            return None
+
         # Base: stability x binding
         fok = protoself_state.stability * binding
 
@@ -305,14 +332,19 @@ class CoreConsciousness:
 
     def _compute_here_now_salience(
         self, protoself_state: Any, winners: List[Any]
-    ) -> float:
+    ) -> Optional[float]:
         """
         Compute present-moment awareness intensity.
 
         High when: body is perturbed AND there's salient content.
         Low when: nothing's happening (low delta, no winners).
+        None while the arousal is unmeasured (before any body delta): the
+        measure rests on the body's side, and the content's salience alone
+        is not it.
         """
-        arousal = protoself_state.primordial_feelings.get("arousal", 0.0)
+        arousal = protoself_state.primordial_feelings.get("arousal")
+        if arousal is None:
+            return None
         winner_count = len(winners)
 
         if winner_count == 0:
@@ -322,15 +354,17 @@ class CoreConsciousness:
         return float(np.clip(arousal * 0.4 + avg_salience * 0.6, 0.0, 1.0))
 
     def get_statistics(self) -> Dict[str, Any]:
+        """Statistics; the averages are None while their history holds no
+        measurement."""
         return {
             "cycle_count": self.cycle_count,
             "average_binding": (
                 float(np.mean(list(self._binding_history)))
                 if self._binding_history
-                else 0.0
+                else None
             ),
             "average_feeling_of_knowing": (
-                float(np.mean(list(self._fok_history))) if self._fok_history else 0.0
+                float(np.mean(list(self._fok_history))) if self._fok_history else None
             ),
             "latest_experience": (
                 self._latest_experience.to_dict() if self._latest_experience else None

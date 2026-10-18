@@ -198,3 +198,20 @@ def test_disabled_apply_is_a_no_op(cfg):
     forced = modulator.apply_to_workspace(workspace, 8, force=True)
     assert forced.applied
     assert workspace.bottleneck.capacity != 7
+
+
+def test_regulation_is_reported_skipped_with_the_shipped_pad_model(cfg):
+    from mtc.consciousness.pad_affect import PADAffectModel
+
+    modulator = DevelopmentalModulator(settings=cfg(COMPANION_TYPE="child"))
+    pad = PADAffectModel()
+    result = modulator.apply_to_workspace(fake_workspace(), 6, pad_model=pad)
+    assert result.skipped["emotional_regulation"] == (
+        "PAD model has no regulation_strength"
+    )
+    assert "emotional_regulation" not in result.applied
+    assert not hasattr(pad, "regulation_strength")
+    # The capacity is applied all the same.
+    assert result.applied["bottleneck_capacity"] == (
+        modulator.parameters_for(6).bottleneck_capacity
+    )

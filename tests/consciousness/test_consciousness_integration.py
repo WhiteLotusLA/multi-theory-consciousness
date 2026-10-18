@@ -19,6 +19,7 @@ from mtc.consciousness.consciousness_integration import (
     ConsciousNeuralOrchestrator,
 )
 from mtc.consciousness.consciousness_metrics import INDICATOR_NAMES
+from mtc.core.config import Settings
 from mtc.neural.orchestrator import NeuralOrchestrator
 
 SUBSTRATES = ("snn", "lsm", "htm", "memory", "thoughts")
@@ -265,6 +266,26 @@ def test_no_fallback_constants_when_substrates_absent():
         assert all(value is None for value in _numbers(data[name])), name
 
 
+def test_legacy_workspace_indicator_is_failed_without_token_attention():
+    signals = {"snn": np.array([0.1, 0.4, 0.2, 0.7])}
+    orchestrator = _FakeOrchestrator()
+    orchestrator.latest_neural_signals = signals
+    integration = _integration(orchestrator)
+    data = integration.collect_neural_data()
+    assert "llm_processing" not in data
+    snapshot = asyncio.run(integration.assess_consciousness(neural_data=data))
+
+    assert snapshot.global_workspace_integration is None
+    assert "global_workspace_integration" in snapshot.failed_indicators
+    assert "llm_processing.token_attention" in (
+        snapshot.failed_indicators["global_workspace_integration"]
+    )
+    # Coverage counts only measured indicators, so the failed one is out.
+    measured = [n for n in INDICATOR_NAMES if getattr(snapshot, n) is not None]
+    assert "global_workspace_integration" not in measured
+    assert snapshot.coverage == pytest.approx(len(measured) / 14)
+
+
 def test_thoughts_only_when_the_machine_runs():
     running = SimpleNamespace(running=True)
     data = _integration(_FakeOrchestrator(machine=running)).collect_neural_data()
@@ -313,7 +334,9 @@ def _has_path(source, path):
 
 
 def test_integration_reads_only_keys_the_orchestrator_emits():
-    orchestrator = NeuralOrchestrator(enable_mongodb=False)
+    orchestrator = NeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+    )
     real = orchestrator.get_system_metrics()
     reads = set()
     orchestrator.get_system_metrics = lambda: _RecordingDict(real, reads)
@@ -521,6 +544,73 @@ def test_persist_snapshot_sync_or_async(manager_cls):
     assert "attention_mechanisms" in doc["failed_indicators"]
     assert isinstance(doc["timestamp"], str)
     assert not [w for w in caught if "never awaited" in str(w.message)]
+
+
+def test_snapshot_persist_failure_is_counted_and_raised_under_debug():
+    class _Failing:
+        def store_consciousness_snapshot(self, doc):
+            raise ConnectionError("snapshot store down")
+
+    indicators = {"global_workspace_integration": _OkIndicator(0.8)}
+    quiet = ConsciousnessIntegration(
+        neural_orchestrator=_FakeOrchestrator(),
+        neural_data_manager=_Failing(),
+        enable_persistence=True,
+        settings=Settings(DEBUG=False),
+    )
+    quiet.metrics.indicators = dict(indicators)
+    snapshot = asyncio.run(quiet.assess_consciousness())
+    # The assessment completes and is kept as before; the write is counted.
+    assert snapshot.overall_consciousness_level == pytest.approx(0.8)
+    assert quiet.snapshot_history == [snapshot]
+    assert quiet.total_assessments == 1
+    assert quiet.get_status()["failures"] == {"persist_snapshot": 1}
+
+    loud = ConsciousnessIntegration(
+        neural_orchestrator=_FakeOrchestrator(),
+        neural_data_manager=_Failing(),
+        enable_persistence=True,
+        settings=Settings(DEBUG=True),
+    )
+    loud.metrics.indicators = dict(indicators)
+    with pytest.raises(ConnectionError, match="snapshot store down"):
+        asyncio.run(loud.assess_consciousness())
+    assert loud.get_status()["failures"] == {"persist_snapshot": 1}
+
+
+def test_monitoring_loop_failure_is_counted_and_raised_under_debug():
+    async def broken_broadcaster(message):
+        raise RuntimeError("broadcaster down")
+
+    async def run(settings):
+        integration = ConsciousnessIntegration(
+            neural_orchestrator=_FakeOrchestrator(),
+            enable_persistence=False,
+            assessment_interval_ms=1,
+            settings=settings,
+        )
+        integration.metrics.indicators = {
+            "global_workspace_integration": _OkIndicator(0.8)
+        }
+        integration.monitoring_active = True
+        task = asyncio.ensure_future(integration._monitoring_loop(broken_broadcaster))
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            if integration.failures or task.done():
+                break
+        integration.monitoring_active = False
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return integration, task
+
+    quiet, task = asyncio.run(run(Settings(DEBUG=False)))
+    assert quiet.get_status()["failures"] == {"monitoring_loop": 1}
+    assert task.cancelled()
+
+    loud, task = asyncio.run(run(Settings(DEBUG=True)))
+    assert loud.get_status()["failures"] == {"monitoring_loop": 1}
+    assert isinstance(task.exception(), RuntimeError)
 
 
 def test_trajectory_window_uses_snapshot_times():

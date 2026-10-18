@@ -12,8 +12,9 @@ readings computed from two snapshots.
 A canon entry carries the prompt, the role the prompt is spoken in
 (``speaker_role``, ``user`` by default; never a person's name), the category,
 behavioral markers the response is expected to show, strings it should not
-contain, and a weight. A ``Snapshot`` records ``model_signature``, a
-caller-supplied identifier of the model that produced the responses.
+contain (matched literally unless the entry quotes its terms), and a weight.
+A ``Snapshot`` records ``model_signature``, a caller-supplied identifier of
+the model that produced the responses.
 
 The real canon file lives at ``config/rsi/canon.json`` and is gitignored; the
 shipped ``config/rsi/canon.example.json`` is generic. Snapshots contain
@@ -125,14 +126,16 @@ class ResponseSample:
     """One response captured during a snapshot.
 
     ``weight`` is copied from the canon entry so a drift comparison needs only
-    the two snapshots. An empty embedding means none was computed.
+    the two snapshots. An empty embedding means none was computed. A hit is
+    True or False when it was checked and None when the marker could not be
+    measured (no term to look for); None round-trips through JSON as null.
     """
 
     entry_id: str
     response_text: str
     response_embedding: List[float]
-    behavioral_marker_hits: List[bool]
-    should_not_contain_hits: List[bool]
+    behavioral_marker_hits: List[Optional[bool]]
+    should_not_contain_hits: List[Optional[bool]]
     token_count: int
     timestamp: str
     weight: float = 1.0

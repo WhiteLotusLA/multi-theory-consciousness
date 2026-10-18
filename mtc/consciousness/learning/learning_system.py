@@ -11,13 +11,23 @@ rate behind one interface:
 - before a reply, ``get_modulation(...)`` returns the bounded modulation from
   relevant beliefs;
 - during consolidation, ``await consolidate()`` runs a full pass over the
-  window.
+  window;
+- with a goal system attached (``goals``, an ``IntrinsicGoalSystem``), every
+  pass that changed beliefs (incremental or consolidation) calls its
+  ``generate_goals`` with the active beliefs of at least
+  ``MIN_PROPOSAL_STRENGTH``.
+
+Outcomes classify the system's own PAD shift between consecutive turns of a
+conversation (see ``record_turn``). A failing step (``goal_generation``) is
+counted by name in ``get_stats()["failures"]``, logged at WARNING the first
+time and every hundredth time with the exception type only, and re-raised
+when ``DEBUG`` is true.
 
 Config keys: ``LEARNING_ENABLED`` (gates ``record_turn``, ``consolidate`` and
 ``get_modulation``), ``LEARNING_RATE`` (the base of the affect-modulated
 reinforcement rate) and ``NOVELTY_THRESHOLD`` (read and reported; no pattern
-family consumes it yet, as in the original design). ``TIMEZONE`` is read by the
-tracker. Settings are read at call time.
+family consumes it yet, as in the original design) and ``DEBUG``. ``TIMEZONE``
+is read by the tracker. Settings are read at call time.
 
 Persisted state: experiences and beliefs, through a ``LearningStore``. With no
 store the system uses an ``InMemoryLearningStore`` and never opens a network
@@ -27,6 +37,8 @@ runtime and are private data. Store failures are logged and never raised.
 """
 
 import logging
+import math
+from collections import Counter, OrderedDict
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
@@ -57,14 +69,24 @@ class LearningSystem:
     INCREMENTAL_WINDOW = 50
     CONSOLIDATION_WINDOW = 200
     MIN_INCREMENTAL_EXPERIENCES = 3
+    # The previous turn's recorded affect is kept, in memory only, for this
+    # many conversations (the least recently used is forgotten first).
+    PREVIOUS_AFFECT_CONVERSATIONS = 100
+    DEFAULT_CONVERSATION = "default"
+    # A failing step is logged at WARNING the first time and every this many.
+    FAILURE_LOG_EVERY = 100
 
     def __init__(
         self,
         store: Optional[LearningStore] = None,
         settings: Any = None,
         clock: Optional[Callable[[], datetime]] = None,
+        goals: Any = None,
     ) -> None:
         self._settings = settings
+        # an IntrinsicGoalSystem (or anything with async generate_goals)
+        self.goals = goals
+        self.failures: Counter = Counter()
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.store: LearningStore = (
             store if store is not None else InMemoryLearningStore()
@@ -72,6 +94,9 @@ class LearningSystem:
         self._build(self.store)
         self.adapter = BehavioralAdapter(clock=self._clock)
         self._pad: Optional[PADState] = None
+        # conversation id -> the affect this system recorded for that
+        # conversation's previous turn (valence, arousal, optional label)
+        self._previous_affect: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._turns_since_learning = 0
         self._loaded = False
 
@@ -91,6 +116,39 @@ class LearningSystem:
 
     def _enabled(self) -> bool:
         return bool(self._cfg().LEARNING_ENABLED)
+
+    def _failure(self, step: str, exc: BaseException) -> None:
+        """Count a failed step, log the first and every hundredth, raise in DEBUG."""
+        self.failures[step] += 1
+        count = self.failures[step]
+        if count == 1 or count % self.FAILURE_LOG_EVERY == 0:
+            logger.warning(
+                "learning step %s failed (%d so far): %s",
+                step,
+                count,
+                type(exc).__name__,
+            )
+        if bool(getattr(self._cfg(), "DEBUG", False)):
+            raise exc
+
+    async def _propose_goals(self, changed: int) -> None:
+        """After a pass that changed beliefs, let the goal system propose."""
+        goals = self.goals
+        if goals is None or not changed:
+            return
+        # imported here: the goals module imports this package
+        from mtc.consciousness.intrinsic_goals import MIN_PROPOSAL_STRENGTH
+
+        try:
+            beliefs = self.learner.get_active_beliefs(
+                min_strength=MIN_PROPOSAL_STRENGTH
+            )
+            adopted = await goals.generate_goals(beliefs)
+        except Exception as exc:
+            self._failure("goal_generation", exc)
+            return
+        if adopted:
+            logger.info("Learning pass adopted %d goals", adopted)
 
     def _rate(self) -> float:
         base = float(self._cfg().LEARNING_RATE)
@@ -148,8 +206,19 @@ class LearningSystem:
 
         ``state`` (a ``ConsciousnessState``) is mapped to metrics with
         ``experience_metrics_from_state``; an explicit ``metrics`` mapping wins
-        for the keys it carries. The affect coordinate for the learning rate is
-        ``pad`` or, when absent, the state's PAD fields if all three are set.
+        for the keys it carries. The turn's PAD is ``pad`` or, when absent, the
+        state's PAD fields if all three are set; it sets the learning rate.
+
+        Outcomes classify the system's own PAD shift between consecutive turns
+        of a conversation. Without an ``emotion_after`` the turn's PAD gives it
+        (``valence`` the pleasure, ``arousal`` the arousal). Without an
+        ``emotion_before`` it is the affect this system recorded for the
+        previous turn of the same ``conversation_id`` (``default`` when None):
+        absent on a conversation's first turn, and after a turn that had none,
+        so that turn's valence shift and outcome stay None. A turn without a
+        complete PAD and without an ``emotion_after`` records no shift. The
+        previous turn's affect is held in memory only, for the most recent
+        ``PREVIOUS_AFFECT_CONVERSATIONS`` conversations.
         """
         if not self._enabled():
             return None
@@ -163,6 +232,13 @@ class LearningSystem:
             merged.update(metrics)
         if pad is not None:
             self._pad = pad
+        if emotion_after is None and pad is not None:
+            emotion_after = {"valence": pad.pleasure, "arousal": pad.arousal}
+        recorded = _affect_reading(emotion_after)
+        key = conversation_id or self.DEFAULT_CONVERSATION
+        if emotion_before is None and recorded is not None:
+            emotion_before = self._previous_affect.get(key)
+        self._remember_affect(key, recorded)
         experience = await self.tracker.record(
             speaker,
             message,
@@ -184,6 +260,15 @@ class LearningSystem:
             await self._run_learning()
             self._turns_since_learning = 0
         return experience
+
+    def _remember_affect(self, key: str, reading: Optional[Dict[str, Any]]) -> None:
+        """Keep this turn's affect as the next turn's ``emotion_before``."""
+        self._previous_affect.pop(key, None)
+        if reading is None:
+            return
+        self._previous_affect[key] = reading
+        while len(self._previous_affect) > self.PREVIOUS_AFFECT_CONVERSATIONS:
+            self._previous_affect.popitem(last=False)
 
     @staticmethod
     def _pad_from_state(state: Any) -> Optional[PADState]:
@@ -232,6 +317,7 @@ class LearningSystem:
             len(experiences),
             len(changed),
         )
+        await self._propose_goals(len(changed))
         return result
 
     async def _run_learning(self) -> None:
@@ -245,6 +331,7 @@ class LearningSystem:
                 len(changed),
                 len(recent),
             )
+        await self._propose_goals(len(changed))
 
     def get_stats(self) -> Dict[str, Any]:
         """Combined statistics of the learning components."""
@@ -255,6 +342,7 @@ class LearningSystem:
             "enabled": bool(cfg.LEARNING_ENABLED),
             "learning_rate": cfg.LEARNING_RATE,
             "novelty_threshold": cfg.NOVELTY_THRESHOLD,
+            "failures": dict(self.failures),
         }
 
     def get_belief_summary(self) -> str:
@@ -271,3 +359,34 @@ class LearningSystem:
                 f"- {belief.description} (confidence: {belief.confidence:.0%})"
             )
         return "\n".join(lines)
+
+
+def _affect_reading(emotion: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The valence, arousal and label of a turn's affect, or None.
+
+    A reading needs a finite numeric valence; an arousal that is not a finite
+    number is left out.
+    """
+    if not emotion:
+        return None
+    valence = _finite(emotion.get("valence"))
+    if valence is None:
+        return None
+    reading: Dict[str, Any] = {"valence": valence}
+    arousal = _finite(emotion.get("arousal"))
+    if arousal is not None:
+        reading["arousal"] = arousal
+    label = emotion.get("label")
+    if isinstance(label, str) and label:
+        reading["label"] = label
+    return reading
+
+
+def _finite(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None

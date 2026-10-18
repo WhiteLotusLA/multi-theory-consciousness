@@ -35,6 +35,7 @@ from mtc.consciousness.enhanced_global_workspace import (
     ConsciousnessState,
     WorkspaceContent,
 )
+from mtc.core.config import Settings
 
 # ============================================================================
 # FIXTURES
@@ -115,6 +116,42 @@ def multiple_candidates():
             emotional_salience=0.5,
         ),
     ]
+
+
+def _content(summary, salience, source_module="ctm"):
+    """A workspace content whose candidate carries ``summary``."""
+    candidate = WorkspaceCandidate(
+        content=summary,
+        content_type="thought",
+        summary=summary,
+        source=WorkspaceCandidateSource.CTM,
+        source_module=source_module,
+    )
+    return WorkspaceContent(candidate=candidate, salience=salience)
+
+
+def _conscious_state(*contents):
+    """A workspace state holding ``contents`` (no contents: nothing conscious)."""
+    contents = list(contents)
+    return ConsciousnessState(
+        is_conscious=bool(contents),
+        primary_content=contents[0] if contents else None,
+        workspace_contents=contents,
+        ignition_events=1 if contents else 0,
+        integration_level=0.5,
+        broadcast_coverage=0.5,
+        attention_focus="ctm",
+        attention_distribution={"ctm": 1.0},
+        stream_position=1,
+    )
+
+
+def _update(module, *contents):
+    return asyncio.run(module.update_schema(_conscious_state(*contents)))
+
+
+async def _aupdate(module, *contents):
+    return await module.update_schema(_conscious_state(*contents))
 
 
 # ============================================================================
@@ -327,8 +364,15 @@ class TestAttentionSchemaModule:
 
         schema = await attention_schema.update_schema(state)
 
-        # Should have secondary foci
-        assert len(schema.secondary_foci) >= 0  # May have none if filtered
+        # Every content after the primary is a secondary focus at 0.7 of its
+        # salience; the primary is not among them.
+        secondary = schema.secondary_foci
+        assert len(secondary) == 2
+        assert [t.summary for t in secondary] == ["Content 1", "Content 2"]
+        assert [t.attention_strength for t in secondary] == pytest.approx([0.42, 0.28])
+        assert [t.salience for t in secondary] == pytest.approx([0.6, 0.4])
+        assert "Content 0" not in [t.summary for t in secondary]
+        assert schema.current_focus.summary == "Content 0"
 
 
 # ============================================================================
@@ -358,6 +402,33 @@ class TestVoluntaryShifts:
         assert pending_target.summary == "I want to focus on this"
         assert pending_reason == "Because I'm curious"
 
+    def test_voluntary_request_submits_no_candidate(self, workspace, monkeypatch):
+        """A request only marks the next matching focus; it never competes."""
+        submitted = []
+
+        async def _record(*args, **kwargs):
+            submitted.append((args, kwargs))
+
+        monkeypatch.setattr(workspace, "submit_candidate", _record)
+        module = workspace.attention_schema
+        # No workspace link exists through which a request could submit.
+        assert not hasattr(module, "workspace")
+        assert not hasattr(module, "set_workspace")
+
+        accepted = asyncio.run(
+            workspace.request_voluntary_attention_shift(
+                target_description="Learning mathematics",
+                reason="The user suggested it",
+            )
+        )
+        assert accepted is True
+        assert submitted == []
+        target, reason = module._pending_voluntary_shift
+        assert target.summary == "Learning mathematics"
+        assert reason == "The user suggested it"
+        assert module.schema.current_focus is None
+        assert module.schema.voluntary_shifts == 0
+
     @pytest.mark.asyncio
     async def test_voluntary_shift_through_workspace(self, workspace):
         """Test voluntary shift through the workspace interface."""
@@ -371,30 +442,36 @@ class TestVoluntaryShifts:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_voluntary_shift_affects_next_cycle(
-        self, workspace, multiple_candidates
-    ):
-        """Test that voluntary shift affects the next consciousness cycle."""
-        # First, run a cycle
-        state1 = await workspace.process_consciousness_cycle(
-            candidates=multiple_candidates[:2]
-        )
+    async def test_voluntary_shift_affects_next_cycle(self, attention_schema):
+        """A request marks the next matching focus as chosen, and only that."""
+        await _aupdate(attention_schema, _content("Neural network thoughts", 0.8))
+        assert attention_schema.schema.voluntary_shifts == 0
 
-        # Request voluntary shift
-        await workspace.request_voluntary_attention_shift(
-            target_description="Memory retrieval",
-            reason="I want to remember",
-            priority=0.9,
+        await attention_schema.request_voluntary_shift(
+            "Memory retrieval", reason="I want to remember"
         )
-
-        # Run another cycle with memory candidate
-        state2 = await workspace.process_consciousness_cycle(
-            candidates=multiple_candidates[2:3]
+        schema = await _aupdate(
+            attention_schema, _content("Memory retrieval of a walk", 0.8)
         )
+        focus = schema.current_focus
+        assert focus.voluntary is True
+        assert focus.shift_type == AttentionShiftType.VOLUNTARY
+        assert focus.shift_reason == "I want to remember"
+        assert schema.voluntary_shifts == 1
+        assert attention_schema._pending_voluntary_shift is None
+        assert "I chose to focus on this" in await attention_schema.report_attention()
 
-        # Both cycles should complete successfully
-        assert state1 is not None
-        assert state2 is not None
+        # A request the next focus does not match changes nothing.
+        await attention_schema.request_voluntary_shift(
+            "Memory retrieval", reason="again"
+        )
+        schema = await _aupdate(attention_schema, _content("Rain on the window", 0.8))
+        assert schema.current_focus.voluntary is False
+        assert schema.current_focus.shift_type == AttentionShiftType.HABITUAL
+        assert schema.voluntary_shifts == 1
+        assert attention_schema._pending_voluntary_shift is not None
+        report = await attention_schema.report_attention()
+        assert "I chose to focus on this" not in report
 
 
 # ============================================================================
@@ -407,37 +484,57 @@ class TestAttentionPrediction:
 
     @pytest.mark.asyncio
     async def test_prediction_generated(self, attention_schema, sample_workspace_state):
-        """Test that predictions are generated."""
-        # Run a few updates to build history
+        """Three updates on one focus give the limited-history prediction."""
         for _ in range(3):
             await attention_schema.update_schema(sample_workspace_state)
 
         schema = attention_schema.schema
-
-        # Should have prediction confidence
-        assert schema.prediction_confidence >= 0.0
+        # The same focus is one history entry: too little for a pattern.
+        assert len(schema.attention_history) == 1
+        assert schema.prediction_confidence == pytest.approx(0.3)
+        assert schema.predicted_next_focus is None
 
     @pytest.mark.asyncio
     async def test_prediction_confidence_increases_with_history(self, attention_schema):
-        """Test that prediction confidence increases with more history."""
-        # Create similar states
+        """Confidence rises once three foci are in the history."""
+        confidences = []
         for i in range(5):
-            state = ConsciousnessState(
-                is_conscious=True,
-                primary_content=None,
-                workspace_contents=[],
-                ignition_events=1,
-                integration_level=0.5,
-                broadcast_coverage=0.5,
-                attention_focus="ctm",
-                attention_distribution={"ctm": 1.0},
-                stream_position=i,
+            schema = await _aupdate(
+                attention_schema, _content(f"Thought {i}", 0.8, "ctm")
             )
-            await attention_schema.update_schema(state)
+            confidences.append(schema.prediction_confidence)
+        # One source throughout: a sustained focus predicts a shift away.
+        assert confidences == pytest.approx([0.3, 0.3, 0.3, 0.6, 0.6])
 
-        # With history, should have some confidence
-        # (even if low due to lack of clear patterns)
-        assert attention_schema.total_updates == 5
+        mixed = AttentionSchemaModule()
+        sources = ["ctm", "memory", "ctm", "sensory", "memory"]
+        confidences = []
+        for i, source in enumerate(sources):
+            schema = await _aupdate(mixed, _content(f"Item {i}", 0.8, source))
+            confidences.append(schema.prediction_confidence)
+        assert confidences == pytest.approx([0.3, 0.3, 0.3, 0.4, 0.4])
+
+
+def test_prediction_accuracy_is_none_until_a_prediction_is_scored():
+    module = AttentionSchemaModule()
+    assert module.get_statistics()["prediction_accuracy"] is None
+
+    # Ordinary salience predicts no target, so nothing is scored.
+    for _ in range(6):
+        _update(module, _content("an ordinary thought", 0.8))
+    assert module.prediction_accuracy_history == []
+    assert module.get_statistics()["prediction_accuracy"] is None
+
+    # A hyperfocus predicts continued focus; each next update scores it.
+    hyper = AttentionSchemaModule()
+    for _ in range(4):
+        _update(hyper, _content("an intense thought", 1.4))
+    assert len(hyper.prediction_accuracy_history) == 3
+    assert hyper.get_statistics()["prediction_accuracy"] == 1.0
+
+    legacy = AttentionSchemaModule(provenance_mode="legacy_strength")
+    _update(legacy, _content("an ordinary thought", 0.8))
+    assert legacy.get_statistics()["prediction_accuracy"] is None
 
 
 # ============================================================================
@@ -469,34 +566,30 @@ class TestIntrospectionReports:
         assert "attention" in report.lower() or "focus" in report.lower()
 
     @pytest.mark.asyncio
-    async def test_report_changes_with_state(self, workspace, multiple_candidates):
-        """Test that reports change based on attention state."""
-        # First state
-        state1 = await workspace.process_consciousness_cycle(
-            candidates=multiple_candidates[:1]
+    async def test_report_changes_with_state(self, attention_schema):
+        """A strong capture and an empty workspace give different reports."""
+        await _aupdate(attention_schema, _content("User conversation", 1.3))
+        captured = await attention_schema.report_attention()
+        assert captured == (
+            "I'm focused. My attention is on: User conversation. "
+            "This captured my attention"
         )
-        report1 = state1.attention_report
 
-        # Second state with different candidates
-        state2 = await workspace.process_consciousness_cycle(
-            candidates=multiple_candidates[1:2]
+        await _aupdate(attention_schema)
+        absent = await attention_schema.report_attention()
+        assert absent == (
+            "My mind is wandering. I'm not focused on anything specific right now."
         )
-        report2 = state2.attention_report
-
-        # Reports should be generated
-        assert report1 is not None
-        assert report2 is not None
+        assert captured != absent
 
     @pytest.mark.asyncio
     async def test_scanning_state_report(self, attention_schema):
-        """Test report when scanning (no focus)."""
+        """The no-focus report is two sentences joined by a full stop."""
         # Don't update - should be in scanning state
         report = await attention_schema.report_attention()
 
-        assert (
-            "scanning" in report.lower()
-            or "looking" in report.lower()
-            or "attention" in report.lower()
+        assert report == (
+            "I'm scanning broadly. I'm not focused on anything specific right now."
         )
 
 
@@ -521,13 +614,18 @@ class TestTheoryOfMind:
 
     @pytest.mark.asyncio
     async def test_other_attention_has_inferred_focus(self, attention_schema):
-        """Test that other's attention has inferred focus."""
+        """A gaze cue is read as a focused other with the context as focus."""
+        context = "Guest is looking at the screen"
         other = await attention_schema.model_other_attention(
-            agent_name="user_b", context="The user is looking at the computer screen"
+            agent_name="Guest", context=context
         )
 
-        # Should have inferred something
-        assert other.inferred_focus is not None or other.confidence > 0
+        assert other.inferred_state == AttentionState.FOCUSED
+        assert other.confidence == pytest.approx(0.7)
+        assert other.inferred_focus is not None
+        assert other.inferred_focus.content == context
+        assert other.inferred_focus.content_type == "inferred_other"
+        assert other.reasoning == "Guest appears visually focused based on gaze"
 
     @pytest.mark.asyncio
     async def test_model_other_through_workspace(self, workspace):
@@ -612,6 +710,53 @@ class TestGlobalWorkspaceIntegration:
         assert isinstance(schema, AttentionSchemaState)
 
 
+def test_callback_failure_is_counted_and_raised_under_debug():
+    def broken(old_focus, new_focus):
+        raise RuntimeError("callback down")
+
+    quiet = AttentionSchemaModule(settings=Settings(DEBUG=False))
+    quiet.on_focus_change(broken)
+    quiet.on_state_change(broken)
+    schema = _update(quiet, _content("Rain on the window", 1.0))
+    # The update completes as before; each failed callback is counted.
+    assert schema.current_focus.summary == "Rain on the window"
+    assert quiet.schema is schema
+    assert quiet.get_statistics()["failures"] == {
+        "state_callback": 1,
+        "focus_callback": 1,
+    }
+    _update(quiet, _content("Birdsong outside", 1.0))
+    assert quiet.get_statistics()["failures"]["focus_callback"] == 2
+
+    loud = AttentionSchemaModule(settings=Settings(DEBUG=True))
+    loud.on_focus_change(broken)
+    with pytest.raises(RuntimeError, match="callback down"):
+        _update(loud, _content("Rain on the window", 1.0))
+    assert loud.get_statistics()["failures"] == {"focus_callback": 1}
+
+
+def test_other_attention_brain_failure_is_counted_and_raised_under_debug():
+    class _BrokenBrain:
+        async def generate(self, prompt, max_tokens=100):
+            raise ConnectionError("brain unavailable")
+
+    quiet = AttentionSchemaModule(settings=Settings(DEBUG=False))
+    context = "Guest is looking at the screen"
+    heuristic = asyncio.run(quiet.model_other_attention("Guest", context))
+    other = asyncio.run(
+        quiet.model_other_attention("Guest", context, llm_brain=_BrokenBrain())
+    )
+    assert other.reasoning == heuristic.reasoning
+    assert other.confidence == pytest.approx(heuristic.confidence)
+    assert quiet.get_statistics()["failures"] == {"other_attention_llm": 1}
+
+    loud = AttentionSchemaModule(settings=Settings(DEBUG=True))
+    with pytest.raises(ConnectionError):
+        asyncio.run(
+            loud.model_other_attention("Guest", context, llm_brain=_BrokenBrain())
+        )
+
+
 # ============================================================================
 # CAPACITY AND LIMITS TESTS
 # ============================================================================
@@ -647,30 +792,27 @@ class TestTemporalContinuity:
 
     @pytest.mark.asyncio
     async def test_duration_tracking(self, attention_schema, sample_workspace_state):
-        """Test that attention duration is tracked."""
-        # First update
+        """A continued focus accumulates time; a new focus starts at zero."""
         await attention_schema.update_schema(sample_workspace_state)
-        (
-            attention_schema.schema.current_focus.entry_time
-            if attention_schema.schema.current_focus
-            else time.time()
-        )
+        first = attention_schema.schema.current_focus
+        assert first.duration_seconds == 0.0
 
-        # Brief pause
         await asyncio.sleep(0.1)
-
-        # Second update with same state
         await attention_schema.update_schema(sample_workspace_state)
+        continued = attention_schema.schema.current_focus
+        assert continued.entry_time == first.entry_time
+        assert continued.duration_seconds >= 0.09
 
-        if attention_schema.schema.current_focus:
-            assert attention_schema.schema.current_focus.duration_seconds >= 0.0
+        await _aupdate(attention_schema, _content("A different thought", 0.8))
+        assert attention_schema.schema.current_focus.duration_seconds == 0.0
 
     @pytest.mark.asyncio
     async def test_state_change_tracking(self, attention_schema):
-        """Test that state changes are tracked."""
+        """A state change moves the stamp; an unchanged state keeps it."""
         initial_change_time = attention_schema.schema.last_state_change
+        assert attention_schema.schema.attention_state == AttentionState.SCANNING
 
-        # Create state that should cause a shift
+        # An empty workspace moves the state from scanning to absent.
         state = ConsciousnessState(
             is_conscious=True,
             primary_content=None,
@@ -683,10 +825,21 @@ class TestTemporalContinuity:
             stream_position=1,
         )
 
+        await asyncio.sleep(0.01)
         await attention_schema.update_schema(state)
+        changed = attention_schema.schema
+        assert changed.attention_state == AttentionState.ABSENT
+        assert changed.previous_state == AttentionState.SCANNING
+        assert changed.last_state_change > initial_change_time
+        assert changed.state_duration_seconds == 0.0
 
-        # Time should be tracked
-        assert attention_schema.schema.last_state_change >= initial_change_time
+        await asyncio.sleep(0.01)
+        await attention_schema.update_schema(state)
+        same = attention_schema.schema
+        assert same.attention_state == AttentionState.ABSENT
+        assert same.last_state_change == changed.last_state_change
+        assert same.previous_state == AttentionState.SCANNING
+        assert same.state_duration_seconds > 0.0
 
 
 # ============================================================================

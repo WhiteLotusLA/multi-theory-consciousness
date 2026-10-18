@@ -12,8 +12,9 @@ which assembles a machine from Settings and the CTM config files.
 ``NeuralDataManager``, which also serves as the gist store), and the sensitive
 memory keys (``MemoryWeightRule.from_settings``). A passed store is used as is.
 A brain, when given, is wrapped in an ``LLMThoughtEnhancer`` with the CTM
-persona (``CTMPersona.load``) and the mood gate read from the passed
-Settings (``NARRATE_THOUGHT_MOOD`` or ``NARRATE_ALL``); without one no thought
+persona (``CTMPersona.load``), the mood gate read from the passed
+Settings (``NARRATE_THOUGHT_MOOD`` or ``NARRATE_ALL``) and the same Settings
+for its ``DEBUG`` read; without one no thought
 gets a model-written form. The novelty filter always exists; without an embedder it reports
 ``none`` and every thought stays quiet, and a non-semantic embedder needs
 ``allow_non_semantic=True`` before its thoughts may surface. Importing the
@@ -137,6 +138,7 @@ def build_thought_machine(
             config,
             now=clock,
             narrate_mood=NarrationFlags.from_settings(cfg).thought_mood,
+            settings=cfg,
         )
     novelty = NoveltyFilter(
         embedder,

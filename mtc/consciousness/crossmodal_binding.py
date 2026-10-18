@@ -11,8 +11,9 @@ compete (feature integration, Treisman and Gelade 1980; organized percepts,
 the recurrent processing indicator of the 2025 update to the consciousness
 indicator review).
 
-The Phase 6 orchestrator calls ``bind`` before the workspace cycle; nothing
-calls it yet.
+The pipeline's cycle augmenter (``mtc.pipeline.cycle_augmenter``) builds a
+binder and calls ``bind`` on the candidate list before each workspace cycle
+when its ``crossmodal_binding`` switch is on (the default).
 
 Modality comes from two registries on ``CrossModalConfig``:
 ``modality_by_source_module`` (checked first, empty by default) and

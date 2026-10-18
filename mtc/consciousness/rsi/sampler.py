@@ -16,10 +16,16 @@ A prompt whose call raises or returns an empty reply is recorded under the
 snapshot's ``failed_entries`` and stores no sample. Nothing is invented.
 
 Marker hits use a keyword heuristic: ``extract_match_terms`` pulls concrete
-substrings out of a natural-language marker (quoted strings, or the list after
-"as"), and the response is searched for them. A marker too abstract to extract
-reports False; consistent misses in baseline and current cancel in the drift
-comparison. A snapshot holds response text and is private runtime data.
+terms out of a natural-language marker (quoted strings, or the list after
+"as"), and the response is searched for them as whole words (a term matches
+only where no letter, digit or underscore adjoins it, so "AI" does not match
+"certain"; a multi-word term matches as a phrase). A behavioral marker too
+abstract to extract a term from is not measured: its hit is None, never False,
+and the drift comparison leaves it out. A should-not-contain entry is a string
+the response should not contain: when it holds no quoted term and no "as"
+list, the entry itself is the term and is matched literally
+(``KeywordMarkerChecker.check_forbidden``). A snapshot holds response text and
+is private runtime data.
 """
 
 import inspect
@@ -27,7 +33,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, List, Optional, Union
+from typing import Any, Awaitable, Callable, List, Optional, Sequence, Union
 
 from mtc.consciousness.rsi.canon_schema import (
     CanonSet,
@@ -69,20 +75,52 @@ def extract_match_terms(marker: str) -> List[str]:
     return []
 
 
-def text_contains_any(text: str, terms: List[str]) -> bool:
-    """Case-insensitive substring check across the terms."""
-    if not terms:
-        return False
+def _term_pattern(term: str) -> "re.Pattern[str]":
+    return re.compile(r"(?<!\w)" + re.escape(term.lower()) + r"(?!\w)")
+
+
+def text_contains_any(text: str, terms: Sequence[str]) -> bool:
+    """Case-insensitive whole-word check across the terms.
+
+    A term matches only where no word character adjoins it on either side;
+    a multi-word term matches as a phrase. No terms gives False.
+    """
     lowered = text.lower()
-    return any(term.lower() in lowered for term in terms)
+    return any(
+        _term_pattern(term).search(lowered) for term in terms if term and term.strip()
+    )
 
 
 @dataclass
 class KeywordMarkerChecker:
-    """Default marker checker: heuristic term extraction plus substring search."""
+    """Default marker checker: heuristic term extraction plus whole-word search."""
 
-    def check(self, response: str, markers: List[str]) -> List[bool]:
-        return [text_contains_any(response, extract_match_terms(m)) for m in markers]
+    def check(self, response: str, markers: List[str]) -> List[Optional[bool]]:
+        """Whether each behavioral marker shows in the response.
+
+        None for a marker with no extractable term: it cannot be measured.
+        """
+        hits: List[Optional[bool]] = []
+        for marker in markers:
+            terms = extract_match_terms(marker)
+            hits.append(text_contains_any(response, terms) if terms else None)
+        return hits
+
+    def check_forbidden(
+        self, response: str, strings: List[str]
+    ) -> List[Optional[bool]]:
+        """Whether the response contains each should-not-contain entry.
+
+        An entry with quoted terms or an "as" list is matched by those terms;
+        any other entry is matched literally, as a whole phrase. None only for
+        an entry with no text.
+        """
+        hits: List[Optional[bool]] = []
+        for entry in strings:
+            literal = entry.strip() if isinstance(entry, str) else ""
+            terms = extract_match_terms(entry) or ([literal] if literal else [])
+            hits.append(text_contains_any(response, terms) if terms else None)
+        return hits
 
 
 class Sampler:
@@ -100,6 +138,13 @@ class Sampler:
         self.invoke_fn = invoke_fn
         self.embedder: Embedder = embedder or SentenceTransformerEmbedder()
         self.marker_checker = marker_checker or KeywordMarkerChecker()
+
+    def _forbidden_hits(self, text: str, strings: List[str]) -> List[Optional[bool]]:
+        # an injected checker without check_forbidden checks entries as markers
+        check = getattr(self.marker_checker, "check_forbidden", None)
+        if callable(check):
+            return check(text, strings)
+        return self.marker_checker.check(text, strings)
 
     async def _invoke(self, prompt: str, speaker_role: str) -> str:
         reply = self.invoke_fn(prompt, speaker_role)
@@ -143,7 +188,7 @@ class Sampler:
                     behavioral_marker_hits=self.marker_checker.check(
                         text, entry.behavioral_markers
                     ),
-                    should_not_contain_hits=self.marker_checker.check(
+                    should_not_contain_hits=self._forbidden_hits(
                         text, entry.should_not_contain
                     ),
                     token_count=len(text.split()),

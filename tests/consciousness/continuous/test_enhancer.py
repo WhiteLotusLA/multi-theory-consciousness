@@ -57,6 +57,9 @@ def test_success_builds_a_record(persona):
     assert record.timestamp == NOW and record.triggered_by == "llm_reflection"
     assert record.should_express is False  # the novelty gate decides later
     assert record.salience_score == 0.8
+    # the 0.8 is a design constant, and the record says so and names its form
+    assert record.processing_context["salience_basis"] == "llm_design_constant"
+    assert record.processing_context["form"] == "model"
     assert isinstance(record.intensity, ThoughtIntensity)
     assert enh.successes == 1 and enh.misses == 0 and enh.last_miss_reason is None
     call = brain.calls[0]
@@ -194,6 +197,38 @@ def test_never_raises(persona):
     none_brain = LLMThoughtEnhancer(None, persona, CTMConfig())
     assert asyncio.run(none_brain.generate("reflection")) is None
     assert none_brain.last_miss_reason == "no_brain"
+
+
+def test_unexpected_error_raises_under_debug(persona):
+    loud = _enhancer(
+        FakeBrain([RuntimeError("boom"), BrainUnavailableError("down")]),
+        persona,
+        settings=Settings(DEBUG=True),
+    )
+    with pytest.raises(RuntimeError):
+        _run(loud)
+    with pytest.raises(BrainUnavailableError):
+        _run(loud)
+    # counted first, then raised
+    assert loud.miss_reasons == {
+        "error_RuntimeError": 1,
+        "error_BrainUnavailableError": 1,
+    }
+    assert loud.misses == 2 and loud.last_miss_reason == "error_BrainUnavailableError"
+    # a NoAnswerError stays a plain miss in every mode
+    quiet = _enhancer(
+        FakeBrain([NoAnswerError("nothing", reason="empty")]),
+        persona,
+        settings=Settings(DEBUG=True),
+    )
+    assert _run(quiet) is None
+    assert quiet.miss_reasons == {"no_answer_empty": 1}
+    # and with DEBUG off the same error is a miss
+    soft = _enhancer(
+        FakeBrain([RuntimeError("boom")]), persona, settings=Settings(DEBUG=False)
+    )
+    assert _run(soft) is None
+    assert soft.miss_reasons == {"error_RuntimeError": 1}
 
 
 def test_cancellation_is_not_swallowed(persona):

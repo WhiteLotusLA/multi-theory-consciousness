@@ -32,10 +32,9 @@ profiles:
       parameters: {temperature: 0.6, max_tokens: 300}
       weights: {drift: 0.5, rest: 0.5}
 templates:
-  drift: "Drift dream about {hypothetical} with {dominant_emotion}."
+  drift: "Drift dream about {hypothetical}."
   rest: "Rest dream."
 fillers:
-  dominant_emotion: "an unnamed feeling"
   hypothetical: "an open question"
   hypothetical_from_topic: "revisit {topic}"
 grounding:
@@ -241,12 +240,13 @@ def test_prompt_grounded_in_context():
     assert prompt.prompt.rstrip().endswith(engine.config.closing_instruction)
 
     bare = engine.build_prompt(
-        DreamContext([], None, None, mode="night"), dream_type="emotional_processing"
+        DreamContext([], None, None, mode="night"), dream_type="exploration"
     )
+    assert "exploration" not in engine.config.emotion_types
     assert "Recent experiences" not in bare.prompt
     assert "Something unresolved" not in bare.prompt
     assert "Emotional undertone" not in bare.prompt
-    assert engine.config.fillers["dominant_emotion"] in bare.prompt
+    assert "feeling that has no name" not in bare.prompt
     assert "{" not in bare.prompt
 
 
@@ -308,3 +308,93 @@ def test_templates_are_neutral():
         assert text.isascii()
     raw = REPO_CONFIG.read_text(encoding="utf-8")
     assert "\u2013" not in raw and "\u2014" not in raw
+
+
+def _profiles(engine: DreamEngine):
+    """Every profile of the config, each as a stage to pass (None: default)."""
+    return [None] + [band.low for band in engine.config.bands]
+
+
+def _emotion_types(engine: DreamEngine) -> set:
+    return {
+        name
+        for name, template in engine.config.templates.items()
+        if "{dominant_emotion}" in template
+    }
+
+
+def test_context_without_emotion_never_draws_an_emotion_type():
+    engine = _engine()
+    needing = _emotion_types(engine)
+    assert needing == {"emotional_echo", "emotional_processing", "emotional_resolution"}
+    assert set(engine.config.emotion_types) == needing
+    for stage in _profiles(engine):
+        for gentle in (None, True):
+            bare = _engine(stage=stage, rng=random.Random(7))
+            drawn = {
+                bare.build_prompt(
+                    DreamContext([], None, None, mode="night"), comfort_bias=gentle
+                ).dream_type
+                for _ in range(2000)
+            }
+            assert not drawn & needing, (stage, gentle, drawn & needing)
+            assert len(drawn) > 1, (stage, gentle)
+    # with a measured emotion they are drawn again
+    seen = set()
+    for stage in _profiles(engine):
+        felt = _engine(stage=stage, rng=random.Random(7))
+        for _ in range(2000):
+            prompt = felt.build_prompt(DreamContext([], "curious", None, mode="night"))
+            seen.add(prompt.dream_type)
+            if prompt.dream_type in needing:
+                assert "curious" in prompt.prompt
+    assert needing <= seen
+
+
+def test_explicit_emotion_type_without_emotion_is_refused():
+    engine = _engine(stage=5)
+    with pytest.raises(ValueError, match="emotional_processing.*measured emotion"):
+        engine.build_prompt(
+            DreamContext([], None, None, mode="night"),
+            dream_type="emotional_processing",
+        )
+    with pytest.raises(ValueError, match="measured emotion"):
+        engine.build_prompt(
+            DreamContext([], "   ", None, mode="night"), dream_type="emotional_echo"
+        )
+    prompt = engine.build_prompt(
+        DreamContext([], "uneasy", None, mode="night"),
+        dream_type="emotional_processing",
+    )
+    assert "an unsettled feeling: uneasy." in prompt.prompt
+
+
+def test_draw_with_no_type_left_is_refused(tmp_path):
+    only_feelings = MINIMAL_YAML.replace(
+        '  drift: "Drift dream about {hypothetical}."',
+        '  drift: "Drift dream through {dominant_emotion}."',
+    ).replace('  rest: "Rest dream."', '  rest: "Rest in {dominant_emotion}."')
+    path = tmp_path / "dreams.yaml"
+    path.write_text(only_feelings, encoding="utf-8")
+    engine = _engine(config_path=path)
+    with pytest.raises(ValueError, match="profiles.default"):
+        engine.build_prompt(DreamContext([], None, None, mode="night"))
+    engine.set_stage(4)
+    with pytest.raises(ValueError, match="stages 1-10"):
+        engine.build_prompt(DreamContext([], None, None, mode="night"))
+    assert engine.recent_types == []  # a refused draw records nothing
+    felt = engine.build_prompt(DreamContext([], "calm", None, mode="night"))
+    assert felt.dream_type in {"drift", "rest"}
+
+
+def test_dominant_emotion_filler_is_refused(tmp_path):
+    raw = REPO_CONFIG.read_text(encoding="utf-8")
+    assert "dominant_emotion:" not in raw  # the shipped file carries no filler
+    assert "feeling that has no name" not in raw
+    filled = MINIMAL_YAML.replace(
+        "fillers:\n", 'fillers:\n  dominant_emotion: "an unnamed feeling"\n'
+    )
+    path = tmp_path / "dreams.yaml"
+    path.write_text(filled, encoding="utf-8")
+    with pytest.raises(ValueError, match="fillers.dominant_emotion"):
+        DreamEngine(config_path=path)

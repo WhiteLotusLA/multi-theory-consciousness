@@ -4,8 +4,11 @@
 # map a stage range (inclusive) to dream-type weights and generation
 # parameters. Every dream type named in a profile or in
 # selection.comforting_types needs a template. Templates may use the
-# placeholders {dominant_emotion} and {hypothetical}; fillers supply them when
-# the dream context has no value. textures scale the profile's token budget
+# placeholders {dominant_emotion} and {hypothetical}. {dominant_emotion} is
+# only ever the measured emotion: a type whose template uses it is not drawn
+# for a dream with no measured emotion, and it has no filler (a file that
+# gives one is refused). fillers supply {hypothetical} when the dream context
+# has no question or topic for it. textures scale the profile's token budget
 # for a nap or a night dream and append a texture line to the prompt; the
 # texture is a qualitative lean, not a sleep-stage claim.
 
@@ -142,7 +145,6 @@ templates:
     The dream is open to you.
 
 fillers:
-  dominant_emotion: a feeling that has no name yet
   hypothetical: see the world from an unfamiliar vantage point
   hypothetical_from_topic: explore {topic} from a completely different angle
 

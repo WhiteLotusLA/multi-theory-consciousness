@@ -20,8 +20,12 @@ checkout). The file holds:
   dream complexity tracking cognitive capacity; the bands encode that as a
   configurable lean, not as a measured fact about the system.
 - ``templates`` hold one neutral prompt per dream type; ``fillers`` stand in
-  for a placeholder only when the context has no value for it, and the
-  matching grounding line is then left out.
+  for ``{hypothetical}`` only when the context has no question or topic for
+  it. ``{dominant_emotion}`` has no filler: a type whose template uses it
+  asserts a feeling, so it is drawn only for a context with a measured emotion
+  (its weight is zero for a draw without one) and an explicit request for it
+  without an emotion raises ValueError. A grounding line is left out when the
+  context has no value for it.
 - ``textures`` scale the token budget for a nap or a night dream. The texture
   is a qualitative lean (naps brief and fragmentary, nights fuller), not a
   sleep-stage claim.
@@ -46,7 +50,7 @@ import string
 from collections import deque
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Deque, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Deque, Dict, FrozenSet, List, Mapping, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +58,10 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "dreams.y
 
 DREAM_MODES = ("night", "nap")
 TEMPLATE_PLACEHOLDERS = frozenset({"dominant_emotion", "hypothetical"})
+# A template using this placeholder asserts a feeling: its dream type needs a
+# measured emotion and has no filler.
+EMOTION_PLACEHOLDER = "dominant_emotion"
 _FILLER_KEYS = {
-    "dominant_emotion": frozenset(),
     "hypothetical": frozenset(),
     "hypothetical_from_topic": frozenset({"topic"}),
 }
@@ -121,6 +127,9 @@ class DreamEngineConfig:
     repeat_penalty: float = 0.5
     comforting_types: Tuple[str, ...] = ()
     comfort_multiplier: float = 12.0
+    # The dream types whose template uses {dominant_emotion}: drawn and built
+    # only for a context with a measured emotion.
+    emotion_types: FrozenSet[str] = frozenset()
     # Where the file came from: configured, file or package; empty when the
     # config was parsed from a mapping.
     source: str = ""
@@ -176,7 +185,9 @@ def parse_dream_config(raw: Mapping[str, Any]) -> DreamEngineConfig:
 
     Raises ValueError naming the first problem: a missing key, a dream type
     without a template, an unknown template placeholder, overlapping stage
-    bands or a missing nap or night texture.
+    bands, a missing nap or night texture, or a ``fillers.dominant_emotion``
+    entry (a dream names an emotion only when one was measured, so nothing
+    stands in for it).
     """
     profiles = _require(raw, "profiles", "the file")
     default_raw = _require(profiles, "default", "profiles")
@@ -238,7 +249,19 @@ def parse_dream_config(raw: Mapping[str, Any]) -> DreamEngineConfig:
     if missing:
         raise ValueError(f"dreams config: no template for dream types {missing}")
 
+    emotion_types = frozenset(
+        name
+        for name, text in templates.items()
+        if EMOTION_PLACEHOLDER in _fields_of(text)
+    )
+
     fillers_raw = _require(raw, "fillers", "the file")
+    if isinstance(fillers_raw, Mapping) and EMOTION_PLACEHOLDER in fillers_raw:
+        raise ValueError(
+            f"dreams config: fillers.{EMOTION_PLACEHOLDER} is not accepted: a "
+            "dream names an emotion only when one was measured, and a type whose "
+            "template uses it is not drawn without one"
+        )
     fillers = {
         key: _check_fields(
             _text(_require(fillers_raw, key, "fillers"), f"fillers.{key}"),
@@ -299,6 +322,7 @@ def parse_dream_config(raw: Mapping[str, Any]) -> DreamEngineConfig:
         repeat_penalty=repeat_penalty,
         comforting_types=comforting,
         comfort_multiplier=multiplier,
+        emotion_types=emotion_types,
     )
 
 
@@ -414,6 +438,18 @@ class DreamEngine:
             raise ValueError(f"no dream profile covers stage {clamped}")
         self._stage = clamped
 
+    def _profile_name(self) -> str:
+        if self._stage is None:
+            return "profiles.default"
+        for index, band in enumerate(self.config.bands):
+            if band.contains(self._stage):
+                return f"profiles.bands[{index}] (stages {band.low}-{band.high})"
+        return f"stage {self._stage}"
+
+    def needs_emotion(self, dream_type: str) -> bool:
+        """Whether the dream type's template asserts a feeling."""
+        return dream_type in self.config.emotion_types
+
     def _profile(self) -> Tuple[Dict[str, float], float, int]:
         if self._stage is None:
             default = self.config.default
@@ -434,10 +470,18 @@ class DreamEngine:
     def recent_types(self) -> List[str]:
         return list(self._history)
 
-    def type_weights(self, comfort_bias: Optional[bool] = None) -> Dict[str, float]:
+    def type_weights(
+        self,
+        comfort_bias: Optional[bool] = None,
+        *,
+        emotion_available: bool = True,
+    ) -> Dict[str, float]:
         """Current selection weights after repeat avoidance and comfort bias.
 
-        ``comfort_bias`` None uses the engine's setting.
+        ``comfort_bias`` None uses the engine's setting. ``emotion_available``
+        False (a context with no measured emotion; ``build_prompt`` passes it)
+        gives every type whose template uses ``{dominant_emotion}`` the weight
+        zero for this draw.
         """
         bias = self.comfort_bias if comfort_bias is None else bool(comfort_bias)
         profile, _, _ = self._profile()
@@ -456,12 +500,31 @@ class DreamEngine:
             for name in comforting:
                 if name in weights:
                     weights[name] *= self.config.comfort_multiplier
+        if not emotion_available:
+            for name in weights:
+                if self.needs_emotion(name):
+                    weights[name] = 0.0
         return weights
 
-    def select_dream_type(self, comfort_bias: Optional[bool] = None) -> str:
-        """Draw one dream type and record it in the repeat-avoidance history."""
-        weights = self.type_weights(comfort_bias)
-        names = list(weights)
+    def select_dream_type(
+        self,
+        comfort_bias: Optional[bool] = None,
+        *,
+        emotion_available: bool = True,
+    ) -> str:
+        """Draw one dream type and record it in the repeat-avoidance history.
+
+        ``emotion_available`` is passed to ``type_weights``. When no type keeps
+        any weight for the draw, ValueError names the profile and nothing is
+        recorded.
+        """
+        weights = self.type_weights(comfort_bias, emotion_available=emotion_available)
+        names = [name for name, weight in weights.items() if weight > 0.0]
+        if not names:
+            raise ValueError(
+                f"no dream type of {self._profile_name()} can be drawn: every "
+                "type left needs a measured emotion and the context has none"
+            )
         chosen = self._rng.choices(names, weights=[weights[n] for n in names], k=1)[0]
         self._history.append(chosen)
         return chosen
@@ -478,14 +541,22 @@ class DreamEngine:
         """Build the prompt and parameters for one dream.
 
         A ``dream_type`` passed in is used as given and does not touch the
-        selection history; otherwise one type is drawn. The token cap is the
-        profile's budget scaled by the context's texture.
+        selection history; otherwise one type is drawn, and a context with no
+        measured emotion never draws a type whose template uses
+        ``{dominant_emotion}``. Such a type passed explicitly without an
+        emotion raises ValueError. The token cap is the profile's budget
+        scaled by the context's texture.
         """
+        emotion = _clean(context.dominant_emotion)
         if dream_type is None:
-            dream_type = self.select_dream_type(comfort_bias)
+            dream_type = self.select_dream_type(
+                comfort_bias, emotion_available=emotion is not None
+            )
         template = self.config.templates.get(dream_type)
         if template is None:
             raise ValueError(f"unknown dream type {dream_type!r}")
+        if emotion is None and self.needs_emotion(dream_type):
+            raise ValueError(f"dream type {dream_type!r} needs a measured emotion")
         fillers = self.config.fillers
         grounding = self.config.grounding
 
@@ -494,7 +565,6 @@ class DreamEngine:
             for topic in (_clean(item) for item in context.recent_topics or [])
             if topic
         ][:MAX_GROUNDING_TOPICS]
-        emotion = _clean(context.dominant_emotion)
         question = _clean(context.unresolved_question)
         if question:
             hypothetical = question
@@ -503,12 +573,7 @@ class DreamEngine:
         else:
             hypothetical = fillers["hypothetical"]
 
-        parts = [
-            template.format(
-                dominant_emotion=emotion or fillers["dominant_emotion"],
-                hypothetical=hypothetical,
-            )
-        ]
+        parts = [template.format(dominant_emotion=emotion, hypothetical=hypothetical)]
         if topics:
             parts.append(grounding["topics"].format(topics=", ".join(topics)))
         if question:

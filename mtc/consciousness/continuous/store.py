@@ -3,7 +3,8 @@
 ``ThoughtStore`` is the async protocol the machine, the surfacing read and the
 runtime use. ``InMemoryThoughtStore`` keeps thoughts in process (the default,
 ``CTM_STORE=memory``); ``MongoThoughtStore`` writes the ``thought_streams``
-collection through Phase 5's ``NeuralDataManager`` (``CTM_STORE=mongo``). Both
+collection through the neural data manager (``NeuralDataManager`` of
+``mtc.neural.mongodb_schemas``, ``CTM_STORE=mongo``). Both
 keep the thought-stream document of ``ThoughtRecord.to_doc()``, so the pruner
 and the consolidation pass read every writer's documents.
 
@@ -221,7 +222,7 @@ class InMemoryThoughtStore:
 class MongoThoughtStore:
     """Thoughts in the ``thought_streams`` collection of the neural database.
 
-    ``data_manager`` is the Phase 5 ``NeuralDataManager`` whose database handle
+    ``data_manager`` is the ``NeuralDataManager`` whose database handle
     and collection are used; None builds one from ``settings`` (which connects
     lazily and raises ``ImportError`` naming the ``mongo`` extra when
     ``pymongo`` is missing). No client is built at import. ``surfacing`` (the

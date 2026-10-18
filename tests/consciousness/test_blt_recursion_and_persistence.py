@@ -56,13 +56,30 @@ def _meta_state() -> Mock:
 
 
 def _winner(idx: int, salience: float, content_type: str = "thought"):
+    # The candidate carries its own numeric content, so binding is measured
+    # under the default binding evidence as well as under the legacy one
     candidate = SimpleNamespace(
         id=f"w{idx}",
         summary=f"synthetic content {idx}",
         content_type=content_type,
         source_module="test",
+        content=np.array([0.2 + 0.1 * idx, 0.5, 0.3 - 0.05 * idx, 0.1]),
     )
     return SimpleNamespace(candidate=candidate, salience=salience)
+
+
+def _recursive_quality_raw(moment: ConsciousMoment, recursive_confidence) -> float:
+    """The recursive loop-quality formula over its measured terms: 0.25
+    precision balance, 0.35 binding, 0.25 depth, 0.15 recursive confidence,
+    renormalised over the weights of the terms that were measured."""
+    terms = [
+        (0.25, moment.precision_balance),
+        (0.35, moment.binding_quality),
+        (0.25, min(1.0, moment.epistemic_depth / 3.0)),
+        (0.15, recursive_confidence),
+    ]
+    measured = [(w, x) for w, x in terms if x is not None]
+    return sum(w * x for w, x in measured) / sum(w for w, _ in measured)
 
 
 async def _full_cycle(loop: BeautifulLoop, step: int) -> ConsciousMoment:
@@ -96,17 +113,120 @@ async def test_momentum_boost_raises_loop_quality():
     first = await loop.process_conscious_moment()
     second = await loop.process_conscious_moment(self_model=_self_model())
 
+    # No precision update was observed, so the recursive confidence is not a
+    # measurement and its term is dropped from the formula
     rc = loop.hyper_model.recursive_confidence
-    raw = (
-        0.25 * second.precision_balance
-        + 0.35 * second.binding_quality
-        + 0.25 * min(1.0, second.epistemic_depth / 3.0)
-        + 0.15 * rc
-    )
+    assert rc is None
+    raw = _recursive_quality_raw(second, rc)
     assert second.epistemic_depth == 1
     assert raw > first.loop_quality
     assert second.loop_quality > raw
     assert second.loop_quality == pytest.approx(raw + 0.1 * (raw - first.loop_quality))
+
+
+@pytest.mark.asyncio
+async def test_recursive_formula_renormalises_without_recursive_confidence():
+    """Before the first observed meta-error the 0.15 term is dropped and the
+    other three weights renormalise over 0.85; after it the full formula
+    applies."""
+    loop = BeautifulLoop(precision_floor_enabled=False)
+    winners = [_winner(1, 0.7), _winner(2, 0.6)]
+    moment = await loop.process_conscious_moment(
+        workspace_winners=winners, self_model=_self_model()
+    )
+    assert loop.hyper_model.recursive_confidence is None
+    assert isinstance(moment.binding_quality, float)
+    expected = (
+        0.25 * moment.precision_balance
+        + 0.35 * moment.binding_quality
+        + 0.25 * min(1.0, moment.epistemic_depth / 3.0)
+    ) / 0.85
+    assert moment.loop_quality == pytest.approx(expected)  # cycle 1: no boost
+
+    observed = await loop.process_conscious_moment(
+        prediction_errors=[0.1, 0.2, 0.3],
+        workspace_winners=winners,
+        self_model=_self_model(),
+    )
+    rc = loop.hyper_model.recursive_confidence
+    assert isinstance(rc, float)
+    full = (
+        0.25 * observed.precision_balance
+        + 0.35 * observed.binding_quality
+        + 0.25 * min(1.0, observed.epistemic_depth / 3.0)
+        + 0.15 * rc
+    )
+    boost = max(0.0, 0.1 * (full - moment.loop_quality))
+    assert observed.loop_quality == pytest.approx(min(1.0, full + boost))
+
+
+@pytest.mark.asyncio
+async def test_field_evidencing_needs_an_observed_update():
+    """require_recursive_confidence demands that the system has observed one
+    of its own belief updates: before the first precision update the
+    recursive confidence is unmeasured and the gate stays shut, although
+    every other condition holds."""
+    gated = BeautifulLoop(
+        field_evidencing_threshold=0.0, strange_loop_test="v04_confidence_match"
+    )
+    control = BeautifulLoop(
+        field_evidencing_threshold=0.0,
+        strange_loop_test="v04_confidence_match",
+        require_recursive_confidence=False,
+    )
+    moment = await gated.process_conscious_moment(
+        self_model=_self_model(), meta_state=_meta_state()
+    )
+    assert gated.hyper_model.update_count == 0
+    assert gated.hyper_model.recursive_confidence is None
+    assert gated.get_loop_statistics()["recursive_confidence"] is None
+    assert moment.is_field_evidencing is False
+
+    witness = await control.process_conscious_moment(
+        self_model=_self_model(), meta_state=_meta_state()
+    )
+    assert witness.is_field_evidencing is True  # only the gate held it back
+
+    after = await gated.process_conscious_moment(
+        prediction_errors=[0.1, 0.1, 0.1],
+        self_model=_self_model(),
+        meta_state=_meta_state(),
+    )
+    rc = gated.hyper_model.recursive_confidence
+    assert isinstance(rc, float) and rc > 0.3
+    assert after.is_field_evidencing is True
+    assert gated.get_loop_statistics()["recursive_confidence"] == pytest.approx(rc)
+
+
+def test_recursive_confidence_round_trips_as_unmeasured():
+    fresh = HyperModel(num_levels=3)
+    assert "Recursive confidence: insufficient_data" in fresh.generate_report()
+    state = _hub_round_trip(fresh.to_state_dict())
+    assert state["scalars"]["recursive_confidence"] is None
+    restored = HyperModel(num_levels=3)
+    restored.from_state_dict(state)
+    assert restored.recursive_confidence is None
+
+    observed = HyperModel(num_levels=3)
+    observed.update_precision_beliefs([0.1, 0.2, 0.3])
+    restored = HyperModel(num_levels=3)
+    restored.from_state_dict(_hub_round_trip(observed.to_state_dict()))
+    assert restored.recursive_confidence == pytest.approx(observed.recursive_confidence)
+
+    # A record written before the observed flag existed always carried the
+    # 0.5 start: it is a measurement only when it holds observed meta-errors
+    older = observed.to_state_dict()
+    older["scalars"].pop("meta_observed")
+    restored = HyperModel(num_levels=3)
+    restored.from_state_dict(_hub_round_trip(older))
+    assert isinstance(restored.recursive_confidence, float)
+
+    older_fresh = fresh.to_state_dict()
+    older_fresh["scalars"].pop("meta_observed")
+    older_fresh["scalars"]["recursive_confidence"] = 0.5
+    restored = HyperModel(num_levels=3)
+    restored.from_state_dict(_hub_round_trip(older_fresh))
+    assert restored.recursive_confidence is None
 
 
 @pytest.mark.asyncio
@@ -124,6 +244,33 @@ async def test_cessation_detected_after_five_quiet_cycles_and_recovers():
     stats = loop.get_loop_statistics()
     assert stats["cessation_detected"] is False
     assert stats["cessation_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_interleaved_cycle_resets_cessation_count():
+    """Cessation means five consecutive quiet cycles: a cycle with
+    self-reference in between resets the count, so four quiet cycles, one
+    with a self model and two quiet ones never register cessation."""
+    loop = BeautifulLoop()
+    for _ in range(4):
+        quiet = await loop.process_conscious_moment()
+        assert quiet.cessation_detected is False
+    assert loop._consecutive_low_quality == 4
+
+    awake = await loop.process_conscious_moment(self_model=_self_model())
+    assert awake.epistemic_depth == 1
+    assert loop._consecutive_low_quality == 0
+
+    for _ in range(2):
+        quiet = await loop.process_conscious_moment()
+        assert quiet.cessation_detected is False
+    assert loop.get_loop_statistics()["cessation_count"] == 0
+
+    # Five consecutive quiet cycles after the reset do register
+    for _ in range(3):
+        last = await loop.process_conscious_moment()
+    assert last.cessation_detected is True
+    assert loop.get_loop_statistics()["cessation_count"] == 1
 
 
 def test_multilevel_dispatch_with_ragged_beliefs_does_not_raise():
@@ -195,6 +342,7 @@ def test_precision_floor_applies_when_all_levels_reliable():
 async def test_v04_formula_matches_old_weights():
     loop = BeautifulLoop(
         loop_quality_formula="v04",
+        binding_evidence="v04_salience_posterior",
         precision_floor_enabled=False,
         require_recursive_confidence=False,
     )
@@ -214,18 +362,38 @@ def test_unknown_formula_is_rejected():
         BeautifulLoop(loop_quality_formula="other")
 
 
+def test_single_level_loop_is_rejected():
+    """Precision balance is undefined for fewer than two levels (the maximum
+    entropy of one level is zero), so such a loop is refused instead of
+    reporting a constant balance."""
+    for levels in (1, 0):
+        with pytest.raises(ValueError, match="num_levels"):
+            BeautifulLoop(num_levels=levels)
+    two = BeautifulLoop(num_levels=2)
+    state = two.hyper_model.get_precision_state()
+    assert two._compute_precision_balance(state) == pytest.approx(0.0, abs=1e-6)
+
+
 def test_field_evidencing_threshold_default():
     assert BeautifulLoop().field_evidencing_threshold == pytest.approx(0.3)
 
 
 @pytest.mark.asyncio
 async def test_require_recursive_confidence_gates_field_evidencing():
-    gated = BeautifulLoop(field_evidencing_threshold=0.0)
+    # The legacy strange-loop rule isolates the recursive-confidence gate:
+    # under it the stand-in self model and meta state agree by construction
+    gated = BeautifulLoop(
+        field_evidencing_threshold=0.0, strange_loop_test="v04_confidence_match"
+    )
     open_loop = BeautifulLoop(
-        field_evidencing_threshold=0.0, require_recursive_confidence=False
+        field_evidencing_threshold=0.0,
+        require_recursive_confidence=False,
+        strange_loop_test="v04_confidence_match",
     )
     for loop in (gated, open_loop):
+        # A low confidence that was observed (not the unmeasured start)
         loop.hyper_model._recursive_confidence = 0.1
+        loop.hyper_model._meta_observed = True
         await loop.process_conscious_moment(
             self_model=_self_model(), meta_state=_meta_state()
         )
@@ -235,8 +403,10 @@ async def test_require_recursive_confidence_gates_field_evidencing():
 
 def test_recursive_confidence_updates_after_observe():
     hm = HyperModel(num_levels=3)
-    assert hm.recursive_confidence == pytest.approx(0.5)
+    assert hm.recursive_confidence is None
     assert hm.observe_meta_error() == 0.0
+    # Nothing was predicted, so nothing was observed: still unmeasured
+    assert hm.recursive_confidence is None
 
     predicted = hm.predict_precision_update([0.2, 0.4, 0.6])
     assert predicted.shape == (3,)
@@ -323,7 +493,10 @@ async def test_state_dict_round_trip():
         "cessation_count",
         "recursive_confidence",
     ):
-        assert stats_b[key] == pytest.approx(stats_a[key])
+        if stats_a[key] is None:
+            assert stats_b[key] is None
+        else:
+            assert stats_b[key] == pytest.approx(stats_a[key])
     np.testing.assert_allclose(
         restored.hyper_model.precision_beliefs, loop.hyper_model.precision_beliefs
     )

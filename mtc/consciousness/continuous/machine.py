@@ -38,7 +38,11 @@ and waits for it. One tick runs at a time. A tick, in order:
    template thought and is counted (``llm_misses``); nothing is composed in the
    model's place. The model's line is measured as well, and a near-duplicate of
    a recent thought is dropped in favour of the novel template thought
-   (``llm_duplicates``).
+   (``llm_duplicates``). An upgraded thought keeps the template's salience and
+   its basis as ``template_salience`` and ``template_salience_basis`` in its
+   processing context, while ``salience_basis`` and ``form`` are the model's
+   (``llm_design_constant``, ``model``). A generated thought's form is
+   ``template`` and an injected one's ``injected``.
 7. Dedup-on-write: the final thought is linked after the last stored thought.
    A near-duplicate is not stored; the store counts one more access of the
    earlier thought instead. A unique thought gets its memory associations
@@ -49,13 +53,17 @@ and waits for it. One tick runs at a time. A tick, in order:
 8. Only a stored thought joins the buffer, so every buffered record and every
    continuity link in the buffer names a thought the store holds (a
    near-duplicate or a failed insert stays out). Then an expressed thought is
-   broadcast (``spontaneous_thought``) with the stream summary.
+   broadcast (``spontaneous_thought``) with the stream summary; the thought
+   dict carries its ``salience_basis`` and ``form`` beside the salience.
 9. Every ``gist.every`` stored thoughts, outside the ``cooldown_s`` and only when
    at least ``min_new_fraction`` of the window is new, a gist is composed from
    the window's own thought texts (no model call) with ``source_count`` and the
    configured starting retention. Its ``dominant_emotion`` is the emotion that
    most often scored above ``GIST_EMOTION_FLOOR`` in the window, or None when
-   no thought in it carried one.
+   no thought in it carried one. Its ``avg_salience`` and ``importance_score``
+   are the mean salience of the window's thoughts whose salience was measured
+   (``salience_basis`` in ``MEASURED_SALIENCE_BASES``: ``affect`` or
+   ``memory_importance``), or None when none was.
 10. Every ``resource.check_every`` thoughts the process CPU is sampled without
     blocking (psutil ``cpu_percent(interval=None)``, optional); above the limit
     the cadence is halved, and it is restored once a later sample is under it.
@@ -89,6 +97,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Tuple
 
 from mtc.consciousness.continuous.config import CTMConfig
+from mtc.consciousness.continuous.generator import MEASURED_SALIENCE_BASES
 from mtc.consciousness.continuous.novelty import NoveltyFilter, NoveltyResult
 from mtc.consciousness.continuous.schemas import (
     CONSCIOUSNESS_STATES,
@@ -241,6 +250,8 @@ class ContinuousThoughtMachine:
         self._running = False
         self._task: Optional[asyncio.Task] = None
         self._tick_lock = asyncio.Lock()
+        # parent assignment, insert and child link of one thought at a time
+        self._chain_lock = asyncio.Lock()
         self.started_at: Optional[datetime] = None
 
         self.consciousness_level: Optional[float] = None
@@ -500,7 +511,6 @@ class ContinuousThoughtMachine:
         if express:
             final.should_express = True
             final.expressed_at = self.clock()
-        final.previous_thought_id = self._last_persisted_id
 
         persisted, duplicate = await self._persist(final, measured, result.upgraded)
         result.persisted = persisted
@@ -582,6 +592,12 @@ class ContinuousThoughtMachine:
             return None
         self.counters["llm_upgrades"] += 1
         merged = dict(thought.processing_context)
+        # the template's own salience and its basis are kept beside the model's;
+        # the model's processing context then names the stored value's basis
+        merged["template_salience"] = thought.salience_score
+        merged["template_salience_basis"] = thought.processing_context.get(
+            "salience_basis"
+        )
         merged.update(upgraded.processing_context or {})
         merged["upgraded_from"] = thought.thought_id
         merged["express_basis"] = "novelty"
@@ -608,7 +624,8 @@ class ContinuousThoughtMachine:
             return
         try:
             summary = self.buffer.get_stream_summary()
-        except Exception:
+        except Exception as exc:
+            self._failure("stream_summary", exc)
             summary = {}
         message = {
             "type": "spontaneous_thought",
@@ -618,6 +635,8 @@ class ContinuousThoughtMachine:
                 "content": thought.content,
                 "intensity": thought.intensity.value,
                 "salience": thought.salience_score,
+                "salience_basis": thought.processing_context.get("salience_basis"),
+                "form": thought.processing_context.get("form"),
                 "timestamp": thought.timestamp.isoformat(),
                 "emotional_context": dict(thought.emotional_context),
             },
@@ -690,22 +709,33 @@ class ContinuousThoughtMachine:
         return await self._insert(thought), False
 
     async def _insert(self, thought: ThoughtRecord) -> bool:
-        self._assign_stream(thought)
-        try:
-            await self.store.insert(thought)
-        except Exception as exc:
-            self._failure("persist", exc)
-            return False
-        self.counters["persisted"] += 1
-        parent = thought.previous_thought_id
-        self._last_persisted_id = thought.thought_id
-        if parent:
+        """Link, insert and record one thought as the next link of the chain.
+
+        Parent assignment, the burst, the insert and the child link happen
+        under the chain lock, so a tick and an injection (or two injections)
+        never give two thoughts the same parent. A thought that is not stored
+        keeps ``previous_thought_id`` None. The persisted hook runs after the
+        lock is released, so a hook may inject.
+        """
+        async with self._chain_lock:
+            thought.previous_thought_id = self._last_persisted_id
+            self._assign_stream(thought)
             try:
-                linked = await self.store.link_child(parent, thought.thought_id)
+                await self.store.insert(thought)
             except Exception as exc:
-                self._failure("link_child", exc)
-                linked = False
-            self.counters["links_resolved" if linked else "links_unresolved"] += 1
+                thought.previous_thought_id = None
+                self._failure("persist", exc)
+                return False
+            self.counters["persisted"] += 1
+            parent = thought.previous_thought_id
+            self._last_persisted_id = thought.thought_id
+            if parent:
+                try:
+                    linked = await self.store.link_child(parent, thought.thought_id)
+                except Exception as exc:
+                    self._failure("link_child", exc)
+                    linked = False
+                self.counters["links_resolved" if linked else "links_unresolved"] += 1
         try:
             await _call_hook(self.on_thought_persisted, thought)
         except Exception as exc:
@@ -768,8 +798,15 @@ class ContinuousThoughtMachine:
         preview = "; ".join(texts[:GIST_PREVIEW_ITEMS])
         if len(preview) > GIST_PREVIEW_CHARS:
             preview = preview[: GIST_PREVIEW_CHARS - 3].rstrip() + "..."
-        salience = [t.salience_score for t in window]
-        average = sum(salience) / len(salience)
+        # only measured saliences enter the importance; a window of design
+        # constants has none
+        salience = [
+            t.salience_score
+            for t in window
+            if (t.processing_context or {}).get("salience_basis")
+            in MEASURED_SALIENCE_BASES
+        ]
+        average: Optional[float] = sum(salience) / len(salience) if salience else None
         stamps = [t.timestamp for t in window]
         return ThoughtGist(
             gist_id=f"gist_{uuid.uuid4().hex}",
@@ -890,13 +927,13 @@ class ContinuousThoughtMachine:
             consciousness_state=self.consciousness_state,
             processing_context={
                 "injected": True,
+                "form": "injected",
                 "emotional_tone": emotional_tone or None,
                 "salience_basis": "injected_default",
                 "express_basis": "injected",
             },
             should_express=False,
         )
-        record.previous_thought_id = self._last_persisted_id
         self.counters["injected"] += 1
         if await self._insert(record):
             await self._add_to_buffer(record)
@@ -905,7 +942,12 @@ class ContinuousThoughtMachine:
     # -- status and persistence ----------------------------------------------
 
     def get_status(self) -> Dict[str, Any]:
-        """Counters, state, frequency, quiet reason, failures and the parts."""
+        """Counters, state, frequency, quiet reason, failures and the parts.
+
+        ``enhancer`` says whether an enhancer is attached; ``enhancer_status``
+        (present when the enhancer reports one) carries its successes, misses
+        and ``miss_reasons``.
+        """
         uptime = None
         if self.started_at is not None:
             uptime = (self.clock() - self.started_at).total_seconds()
@@ -920,10 +962,16 @@ class ContinuousThoughtMachine:
             modulation = "disabled"
         try:
             summary = self.buffer.get_stream_summary()
-        except Exception:
+        except Exception as exc:
+            self._failure("stream_summary", exc)
             summary = {}
         generator_status = getattr(self.generator, "status", None)
         store_status = getattr(self.store, "status", None)
+        enhancer_status = getattr(self.enhancer, "status", None)
+        extra: Dict[str, Any] = {}
+        if callable(enhancer_status):
+            # the enhancer's misses by reason (the boolean key stays as well)
+            extra["enhancer_status"] = enhancer_status()
         return {
             "running": self.running,
             "paused": self.paused,
@@ -954,6 +1002,7 @@ class ContinuousThoughtMachine:
             "generator": generator_status() if callable(generator_status) else {},
             "store": store_status() if callable(store_status) else {},
             "stream_summary": summary,
+            **extra,
         }
 
     def to_state_dict(self) -> Dict[str, Any]:

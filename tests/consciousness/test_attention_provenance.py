@@ -4,9 +4,10 @@ Tests for honest attention provenance.
 A shift is classified by its type, never by its strength: VOLUNTARY and
 GOAL_DRIVEN are chosen, CAPTURED and EMOTIONAL are pulled, HABITUAL and
 unknown are uncertain. voluntary_ratio = chosen / (chosen + pulled), with
-uncertain excluded and 0.5 when nothing is classifiable. The legacy
+uncertain excluded and None when nothing is classifiable. The legacy
 ``legacy_strength`` mode keeps the v0.4.0 rule (VOLUNTARY or strength at or
-above 0.6 counts voluntary) so the published numbers still reproduce.
+above 0.6 counts voluntary, 0.5 with nothing counted) so the published
+numbers still reproduce.
 """
 
 import asyncio
@@ -107,12 +108,15 @@ def test_ratio_excludes_uncertain():
     assert state.voluntary_ratio == pytest.approx(1 / 3)
 
 
-def test_ratio_half_when_nothing_classifiable():
+def test_ratio_none_when_nothing_classifiable():
+    assert AttentionSchemaState().voluntary_ratio is None
+    assert AttentionSchemaModule().get_statistics()["voluntary_ratio"] is None
+
     state = AttentionSchemaState()
     for summary in ("a", "b", "c"):
         state.current_focus = _target(AttentionShiftType.HABITUAL, summary=summary)
     assert state.uncertain_shifts == 3
-    assert state.voluntary_ratio == 0.5
+    assert state.voluntary_ratio is None
 
     module = AttentionSchemaModule()
     _update(module, _content("first", 0.5))
@@ -121,7 +125,41 @@ def test_ratio_half_when_nothing_classifiable():
     assert stats["uncertain_shifts"] == 2
     assert stats["voluntary_shifts"] == 0
     assert stats["captured_shifts"] == 0
-    assert stats["voluntary_ratio"] == 0.5
+    assert stats["voluntary_ratio"] is None
+
+    # The first classifiable shift gives the ratio a measured value.
+    _update(module, _content("a strong pull", 1.3))
+    assert module.get_statistics()["voluntary_ratio"] == 0.0
+
+
+def test_restore_recomputes_ratio_from_counts():
+    def saved(ratio, voluntary, captured):
+        return {
+            "scalars": {
+                "voluntary_ratio": ratio,
+                "voluntary_shifts": voluntary,
+                "captured_shifts": captured,
+                "uncertain_shifts": 4,
+            },
+            "histories": {},
+        }
+
+    # A typed state saved with the old 0.5 stand-in has nothing classifiable.
+    restored = AttentionSchemaModule()
+    restored.from_state_dict(saved(0.5, 0, 0))
+    assert restored.schema.voluntary_ratio is None
+    assert restored.get_statistics()["voluntary_ratio"] is None
+
+    # The ratio comes from the restored counts, not from the saved value.
+    restored = AttentionSchemaModule()
+    restored.from_state_dict(saved(0.9, 1, 3))
+    assert restored.schema.voluntary_ratio == pytest.approx(0.25)
+
+    # A typed None round-trips as None.
+    fresh = AttentionSchemaModule()
+    again = AttentionSchemaModule()
+    again.from_state_dict(fresh.to_state_dict())
+    assert again.schema.voluntary_ratio is None
 
 
 def test_ratio_uses_post_increment_counts():
@@ -171,6 +209,58 @@ def test_voluntary_request_counts_once_as_chosen():
     assert module.schema.voluntary_ratio == 1.0
 
 
+def test_object_target_request_does_not_credit_an_unrelated_focus():
+    module = AttentionSchemaModule()
+    request = AttentionTarget(summary="Learning mathematics")
+    asyncio.run(module.request_voluntary_shift(request, reason="the user asked"))
+
+    schema = _update(module, _content("Rain on the window", 0.5))
+    assert schema.current_focus.voluntary is False
+    assert schema.current_focus.shift_type != AttentionShiftType.VOLUNTARY
+    assert schema.voluntary_shifts == 0
+    assert module._pending_voluntary_shift == (request, "the user asked")
+
+    schema = _update(module, _content("Learning mathematics today", 0.5))
+    assert schema.current_focus.voluntary is True
+    assert schema.current_focus.shift_type == AttentionShiftType.VOLUNTARY
+    assert schema.current_focus.shift_reason == "the user asked"
+    assert schema.voluntary_shifts == 1
+    assert module._pending_voluntary_shift is None
+
+
+def test_object_target_without_summary_matches_by_identity():
+    module = AttentionSchemaModule()
+    marker = object()
+    asyncio.run(module.request_voluntary_shift(marker, reason="test"))
+    schema = _update(module, _content("anything at all", 0.5))
+    assert schema.current_focus.voluntary is False
+    assert module._pending_voluntary_shift is not None
+
+    chosen = _content("the marked content", 0.5)
+    chosen.candidate.content = marker
+    schema = _update(module, chosen)
+    assert schema.current_focus.voluntary is True
+    assert module._pending_voluntary_shift is None
+
+
+def test_legacy_mode_keeps_the_v04_acceptance():
+    module = AttentionSchemaModule(provenance_mode="legacy_strength")
+    request = AttentionTarget(summary="Learning mathematics")
+    asyncio.run(module.request_voluntary_shift(request, reason="the user asked"))
+    schema = _update(module, _content("Rain on the window", 0.5))
+    # v0.4.0 accepted any focus after a non-string request.
+    assert schema.current_focus.voluntary is True
+    assert schema.current_focus.shift_type == AttentionShiftType.VOLUNTARY
+    assert schema.voluntary_shifts == 1
+    assert module._pending_voluntary_shift is None
+
+    # A string request still needs the words in the focus, as before.
+    asyncio.run(module.request_voluntary_shift("mathematics", reason="again"))
+    schema = _update(module, _content("Birdsong outside", 0.5))
+    assert schema.current_focus.voluntary is False
+    assert module._pending_voluntary_shift is not None
+
+
 # ============================================================================
 # Legacy mode
 # ============================================================================
@@ -203,6 +293,38 @@ def test_legacy_mode_counts_by_strength():
     assert schema.voluntary_ratio == 0.5
     schema = _update(module, _content("pull", 0.95))
     assert schema.voluntary_ratio == 0.0
+
+
+def test_legacy_mode_starts_at_half():
+    state = AttentionSchemaState(provenance_mode="legacy_strength")
+    assert state.voluntary_ratio == 0.5
+    module = AttentionSchemaModule(provenance_mode="legacy_strength")
+    assert module.schema.voluntary_ratio == 0.5
+    assert module.get_statistics()["voluntary_ratio"] == 0.5
+
+    # A restore without the key, or with None, keeps the v0.4.0 start value;
+    # a saved legacy value is restored as it was.
+    for scalars in ({}, {"voluntary_ratio": None}):
+        restored = AttentionSchemaModule(provenance_mode="legacy_strength")
+        restored.from_state_dict({"scalars": scalars, "histories": {}})
+        assert restored.schema.voluntary_ratio == 0.5
+    restored = AttentionSchemaModule(provenance_mode="legacy_strength")
+    restored.from_state_dict(
+        {
+            "scalars": {
+                "voluntary_ratio": 0.75,
+                "voluntary_shifts": 0,
+                "captured_shifts": 0,
+            },
+            "histories": {},
+        }
+    )
+    assert restored.schema.voluntary_ratio == 0.75
+
+    # Nothing counted through the setter still reads 0.5 in legacy mode.
+    state = AttentionSchemaState(provenance_mode="legacy_strength")
+    state.current_focus = None
+    assert state.voluntary_ratio == 0.5
 
 
 def test_legacy_mode_counts_lost_focus_as_capture():

@@ -30,27 +30,40 @@ Connection to MetaState (active_inference.py):
   - This IS epistemic depth 1: the system predicting its own predictions
   - EpistemicDepthTracker measures whether it goes deeper
 
-Limits: depth detection is keyword-based and the strange-loop test compares
-two values that may share a source, so treat the measure as a proxy for
-recursive self-reference, not a direct observation of it.
+Limits: depth detection is keyword-based, and the strange-loop test is a
+proxy for recursive self-reference, not an observation of it. The
+``strange_loop_test`` constructor argument selects the proxy:
+  - "independent_calibration" (default): a strange loop is agreement,
+    within ``strange_loop_threshold``, between the self-model's scored
+    self-prediction accuracy (``self_calibration_score``) and the inference
+    ledger's forecast accuracy (``prediction_accuracy``), two quantities that
+    different modules compute from different evidence; it needs at least
+    five meta predictions, three scored self-predictions and, when the
+    caller reports it, an observed recursive update. It never reads the
+    self-model's ``model_confidence``.
+  - "v04_confidence_match": the v0.4.0 rule, agreement between the
+    self-model's ``model_confidence`` and the meta-state's
+    ``model_confidence``. In the workspace the first is copied from the
+    second every cycle, so the rule is met by construction.
 
 Research Foundation:
   - Laukkonen, Friston & Chandaria (2025). "A Beautiful Loop."
   - Hofstadter, D. (1979). "Goedel, Escher, Bach" - strange loops
   - Seth, A. K. (2021). "Being You" - meta-representation depth
-
-Created: 2026-03-08
-Author: Multi-Theory Consciousness Contributors
 """
 
 import logging
+import math
+import numbers
 import numpy as np
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from collections import deque
 
 logger = logging.getLogger(__name__)
+
+STRANGE_LOOP_TESTS = ("independent_calibration", "v04_confidence_match")
 
 
 @dataclass
@@ -58,11 +71,19 @@ class SelfReferenceMetrics:
     """Metrics about the system's self-referential processing."""
 
     depth: int  # How many recursive levels detected
-    self_model_coherence: float  # How consistent is the self-model (0-1)
-    meta_prediction_error: float  # Error of predicting own prediction accuracy
+    # The three measures below are None when nothing measured them: the
+    # coherence needs three self-model snapshots with a numeric attribute,
+    # the meta error and the calibration need a meta state carrying both
+    # its predicted and its actual accuracy
+    self_model_coherence: Optional[float]  # Consistency of the self-model (0-1)
+    meta_prediction_error: Optional[float]  # Error of predicting own accuracy
     prediction_about_prediction: bool  # Is the system predicting its predictions?
-    calibration_quality: float  # How well-calibrated is the self-model (0-1)
+    calibration_quality: Optional[float]  # Calibration of the self-model (0-1)
     strange_loop_detected: bool  # Is there genuine recursive reference?
+    # Which test produced strange_loop_detected: "independent_calibration",
+    # "v04_confidence_match", or "insufficient_data" when its inputs were
+    # missing ("unknown" for a record written before the field existed)
+    strange_loop_basis: str = "insufficient_data"
     timestamp: float = field(default_factory=time.time)
 
 
@@ -71,7 +92,10 @@ class DepthMeasurement:
     """Record of a single depth measurement."""
 
     depth: int
-    measurement_basis: str  # What evidence supported this depth
+    # "module_state" when the depth was read from module state (levels 1
+    # and 2), "keyword_heuristic" when level 3 or 4 came from the keyword
+    # lists over thought text and the attention focus
+    measurement_basis: str
     contributing_modules: List[str]
     self_reference_chain: List[str]  # The chain of self-references detected
     timestamp: float = field(default_factory=time.time)
@@ -101,10 +125,17 @@ class EpistemicDepthTracker:
         max_depth: int = 5,
         coherence_window: int = 20,
         strange_loop_threshold: float = 0.5,
+        strange_loop_test: str = "independent_calibration",
     ):
+        if strange_loop_test not in STRANGE_LOOP_TESTS:
+            raise ValueError(
+                f"strange_loop_test must be one of {STRANGE_LOOP_TESTS}, "
+                f"got {strange_loop_test!r}"
+            )
         self.max_depth = max_depth
         self.coherence_window = coherence_window
         self.strange_loop_threshold = strange_loop_threshold
+        self.strange_loop_test = strange_loop_test
 
         # History
         self._depth_history: deque = deque(maxlen=100)
@@ -151,6 +182,8 @@ class EpistemicDepthTracker:
         depth = 0
         chain: List[str] = []
         modules: List[str] = []
+        # Levels 3 and 4 rest on keyword lists, not on module state
+        keyword_based = False
 
         # Level 1: Does the system have a self-model?
         if self_model is not None:
@@ -212,6 +245,7 @@ class EpistemicDepthTracker:
 
             if self_referential_hots > 0:
                 depth = 3
+                keyword_based = True
                 chain.append(
                     f"meta_prediction -> HOT_about_self ({self_referential_hots} found)"
                 )
@@ -229,6 +263,7 @@ class EpistemicDepthTracker:
 
             if focus_on_self:
                 depth = 4
+                keyword_based = True
                 chain.append("HOT_about_self -> attention_to_self_model")
                 modules.append("AttentionSchema")
 
@@ -241,7 +276,7 @@ class EpistemicDepthTracker:
 
         measurement = DepthMeasurement(
             depth=depth,
-            measurement_basis="module_state_analysis",
+            measurement_basis="keyword_heuristic" if keyword_based else "module_state",
             contributing_modules=modules,
             self_reference_chain=chain,
         )
@@ -253,6 +288,7 @@ class EpistemicDepthTracker:
         self,
         self_model: Optional[Any] = None,
         meta_state: Optional[Any] = None,
+        recursive_observed: Optional[bool] = None,
     ) -> SelfReferenceMetrics:
         """
         Track self-reference quality and detect strange loops.
@@ -265,17 +301,24 @@ class EpistemicDepthTracker:
         Args:
             self_model: The SelfModel instance
             meta_state: The MetaState from active inference
+            recursive_observed: Whether the caller has observed the system
+                updating its own beliefs (the loop passes whether its
+                hyper-model has predicted a precision update). None skips
+                the check, for standalone use. Read by the
+                independent_calibration test only.
 
         Returns:
             SelfReferenceMetrics with comprehensive self-reference analysis
         """
         # Self-model coherence: how consistent has the self-model been?
+        # None until three snapshots exist.
         coherence = self._compute_self_model_coherence()
 
-        # Meta-prediction error
-        meta_error = 0.5
+        # Meta-prediction error and calibration: measured only from a meta
+        # state that carries both accuracies, otherwise None
+        meta_error: Optional[float] = None
         prediction_about_prediction = False
-        calibration = 0.5
+        calibration: Optional[float] = None
 
         if meta_state is not None:
             if hasattr(meta_state, "predicted_accuracy") and hasattr(
@@ -288,7 +331,9 @@ class EpistemicDepthTracker:
                 calibration = 1.0 - meta_error  # Low error = good calibration
 
         # Strange loop detection: does the self-model reference itself?
-        strange_loop = self._detect_strange_loop(self_model, meta_state)
+        strange_loop, basis = self._detect_strange_loop(
+            self_model, meta_state, recursive_observed
+        )
 
         metrics = SelfReferenceMetrics(
             depth=self.current_depth,
@@ -297,6 +342,7 @@ class EpistemicDepthTracker:
             prediction_about_prediction=prediction_about_prediction,
             calibration_quality=calibration,
             strange_loop_detected=strange_loop,
+            strange_loop_basis=basis,
         )
 
         self._metrics_history.append(metrics)
@@ -321,15 +367,17 @@ class EpistemicDepthTracker:
                     snapshot[attr] = float(val)
         return snapshot
 
-    def _compute_self_model_coherence(self) -> float:
+    def _compute_self_model_coherence(self) -> Optional[float]:
         """
         Compute how coherent the self-model has been over recent history.
 
         High coherence = the self-model changes smoothly and predictably.
         Low coherence = the self-model is erratic and inconsistent.
+        None with fewer than three snapshots, or when the snapshots hold
+        no numeric attribute: there is nothing to measure consistency over.
         """
         if len(self._self_model_states) < 3:
-            return 0.5  # Not enough data
+            return None
 
         states = list(self._self_model_states)
         # Compute variance of each attribute across recent states
@@ -343,7 +391,7 @@ class EpistemicDepthTracker:
             variances.append(np.var(values))
 
         if not variances:
-            return 0.5
+            return None
 
         # Low variance = high coherence
         avg_variance = np.mean(variances)
@@ -354,22 +402,37 @@ class EpistemicDepthTracker:
         self,
         self_model: Optional[Any],
         meta_state: Optional[Any],
-    ) -> bool:
+        recursive_observed: Optional[bool],
+    ) -> Tuple[bool, str]:
         """
-        Detect if a genuine strange loop (Hofstadter) exists.
+        Detect a strange loop (Hofstadter) by the configured proxy test.
 
         A strange loop occurs when:
         1. The self-model contains predictions about its own quality
         2. Those predictions affect how the self-model updates
         3. Creating a genuine circular causal chain
 
-        We detect this by checking if the meta-state's calibration
-        has been actively used AND the self-model has been updated
-        based on meta-predictions.
+        Returns the verdict and its basis: the name of the test that ran,
+        or ``insufficient_data`` when the test's inputs were missing.
         """
         if self_model is None or meta_state is None:
-            return False
+            return False, "insufficient_data"
 
+        if self.strange_loop_test == "v04_confidence_match":
+            detected = self._v04_confidence_match(self_model, meta_state)
+            return detected, "v04_confidence_match"
+
+        return self._independent_calibration(self_model, meta_state, recursive_observed)
+
+    def _v04_confidence_match(self, self_model: Any, meta_state: Any) -> bool:
+        """The v0.4.0 rule: the self-model's confidence is within the
+        threshold of the meta-state's confidence.
+
+        In the workspace the self-model's ``model_confidence`` is copied
+        from the meta-state each cycle, so this compares a value with its
+        own copy. Kept for the legacy preset. A meta state without the
+        field gives False instead of raising.
+        """
         # Check: has the meta-state been actively predicting?
         has_meta_history = (
             hasattr(meta_state, "total_predictions")
@@ -386,13 +449,52 @@ class EpistemicDepthTracker:
         # Check: does the self-model's confidence reflect meta-state calibration?
         calibration_reflected = False
         if has_meta_history and hasattr(self_model, "model_confidence"):
-            # If the self-model's confidence is close to the meta-state's,
-            # the loop has closed
-            sm_conf = float(self_model.model_confidence)
-            ms_conf = float(meta_state.model_confidence)
-            calibration_reflected = abs(sm_conf - ms_conf) < self.strange_loop_threshold
+            ms_conf = getattr(meta_state, "model_confidence", None)
+            if ms_conf is not None:
+                sm_conf = float(self_model.model_confidence)
+                calibration_reflected = (
+                    abs(sm_conf - float(ms_conf)) < self.strange_loop_threshold
+                )
 
         return has_meta_history and tracks_accuracy and calibration_reflected
+
+    def _independent_calibration(
+        self,
+        self_model: Any,
+        meta_state: Any,
+        recursive_observed: Optional[bool],
+    ) -> Tuple[bool, str]:
+        """Agreement between two independently measured calibrations.
+
+        The self-model's ``self_calibration_score`` is metacognition's
+        scoring of its own self-predictions; the meta-state's
+        ``prediction_accuracy`` is the inference ledger's forecast accuracy.
+        A loop is reported when both rest on enough history (five meta
+        predictions, three scored self-predictions), the caller has
+        observed a recursive update (unless it passed None), and the two
+        agree within ``strange_loop_threshold``. The copied
+        ``model_confidence`` is never read.
+        """
+        total = getattr(meta_state, "total_predictions", None)
+        accuracy = getattr(meta_state, "prediction_accuracy", None)
+        calibration = getattr(self_model, "self_calibration_score", None)
+        history = getattr(self_model, "prediction_accuracy_history", None)
+
+        for value in (total, accuracy, calibration):
+            if not isinstance(value, numbers.Real) or not math.isfinite(value):
+                return False, "insufficient_data"
+        try:
+            history_length = len(history)
+        except TypeError:
+            return False, "insufficient_data"
+        if total < 5 or history_length < 3:
+            return False, "insufficient_data"
+
+        if recursive_observed is not None and not recursive_observed:
+            return False, "independent_calibration"
+
+        agree = abs(float(calibration) - float(accuracy)) < self.strange_loop_threshold
+        return bool(agree), "independent_calibration"
 
     def get_depth_statistics(self) -> Dict[str, Any]:
         """Get depth statistics over measurement history."""
@@ -451,10 +553,11 @@ class EpistemicDepthTracker:
 
         if self._metrics_history:
             latest = self._metrics_history[-1]
-            lines.append(f" Coherence: {latest.self_model_coherence:.3f}")
-            lines.append(f" Calibration: {latest.calibration_quality:.3f}")
+            lines.append(f" Coherence: {_fmt_measure(latest.self_model_coherence)}")
+            lines.append(f" Calibration: {_fmt_measure(latest.calibration_quality)}")
             lines.append(
-                f" Strange loop: {'YES' if latest.strange_loop_detected else 'no'}"
+                f" Strange loop: {'YES' if latest.strange_loop_detected else 'no'} "
+                f"({latest.strange_loop_basis})"
             )
 
         if self._depth_history:
@@ -527,28 +630,50 @@ class EpistemicDepthTracker:
             )
 
 
+def _fmt_measure(value: Optional[float]) -> str:
+    """A measured value to three places, or ``insufficient_data``."""
+    return "insufficient_data" if value is None else f"{value:.3f}"
+
+
+def _opt_float(value: Any) -> Optional[float]:
+    """A float for a number, None for None or an unparseable value."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def metrics_to_dict(m: SelfReferenceMetrics) -> Dict[str, Any]:
-    """Plain-JSON form of SelfReferenceMetrics."""
+    """Plain-JSON form of SelfReferenceMetrics; unmeasured values stay None."""
     return {
         "depth": int(m.depth),
-        "self_model_coherence": float(m.self_model_coherence),
-        "meta_prediction_error": float(m.meta_prediction_error),
+        "self_model_coherence": _opt_float(m.self_model_coherence),
+        "meta_prediction_error": _opt_float(m.meta_prediction_error),
         "prediction_about_prediction": bool(m.prediction_about_prediction),
-        "calibration_quality": float(m.calibration_quality),
+        "calibration_quality": _opt_float(m.calibration_quality),
         "strange_loop_detected": bool(m.strange_loop_detected),
+        "strange_loop_basis": str(m.strange_loop_basis),
         "timestamp": float(m.timestamp),
     }
 
 
 def metrics_from_dict(raw: Dict[str, Any]) -> SelfReferenceMetrics:
-    """Rebuild SelfReferenceMetrics."""
+    """Rebuild SelfReferenceMetrics.
+
+    An absent or None measure restores as None. A record written before
+    ``strange_loop_basis`` existed restores with the basis ``unknown``: it
+    does not claim which test produced it.
+    """
     return SelfReferenceMetrics(
         depth=int(raw.get("depth", 0)),
-        self_model_coherence=float(raw.get("self_model_coherence", 0.5)),
-        meta_prediction_error=float(raw.get("meta_prediction_error", 0.5)),
+        self_model_coherence=_opt_float(raw.get("self_model_coherence")),
+        meta_prediction_error=_opt_float(raw.get("meta_prediction_error")),
         prediction_about_prediction=bool(raw.get("prediction_about_prediction", False)),
-        calibration_quality=float(raw.get("calibration_quality", 0.5)),
+        calibration_quality=_opt_float(raw.get("calibration_quality")),
         strange_loop_detected=bool(raw.get("strange_loop_detected", False)),
+        strange_loop_basis=str(raw.get("strange_loop_basis", "unknown")),
         timestamp=float(raw.get("timestamp", time.time())),
     )
 

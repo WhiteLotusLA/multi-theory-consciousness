@@ -119,18 +119,66 @@ def test_llm_upgrade_only_when_uncontended():
 
 
 def test_llm_miss_keeps_template_and_counts():
+    from tests.consciousness.continuous.test_generator import make as make_generator
+
+    # A real seed generator drafts the thought, so the template form checked
+    # below is the generator's own marking that the machine keeps on a miss.
+    drafted = []
     store = InMemoryThoughtStore()
     machine = make_machine(
-        ["river"],
         store=store,
+        generator=make_generator(),
         enhancer=FakeEnhancer(miss=True),
         contention_guard=lambda: False,
+        on_thought_generated=lambda thought: drafted.append(thought.content),
     )
     result = run(machine.tick())
     assert result.upgraded is False and result.expressed is True
     (stored,) = run(store.recent(5))
-    assert stored.content == "river"  # nothing composed in the model's place
+    assert drafted and stored.content == drafted[0]  # nothing composed instead
+    assert stored.content != "A model-written line."
+    assert stored.processing_context["form"] == "template"
+    assert "template_salience" not in stored.processing_context
+    assert "upgraded_from" not in stored.processing_context
     assert machine.get_status()["counters"]["llm_misses"] == 1
+
+
+def test_upgraded_thought_names_its_salience_basis():
+    from mtc.brain.protocol import FakeBrain
+    from mtc.consciousness.continuous.config import CTMConfig
+    from mtc.consciousness.continuous.enhancer import LLMThoughtEnhancer
+    from mtc.consciousness.continuous.persona import CTMPersona
+
+    def measured_template(thought):
+        thought.salience_score = 0.58
+        thought.processing_context["salience_basis"] = "affect"
+
+    enhancer = LLMThoughtEnhancer(
+        FakeBrain(["The light keeps changing."]),
+        CTMPersona(name="Testagent", system_prompt="You are {name}."),
+        CTMConfig(),
+        now=lambda: START,
+        narrate_mood=False,
+    )
+    store = InMemoryThoughtStore()
+    machine = make_machine(
+        ["river"],
+        store=store,
+        enhancer=enhancer,
+        contention_guard=lambda: False,
+        on_thought_generated=measured_template,
+    )
+    result = run(machine.tick())
+    assert result.upgraded is True
+    (stored,) = run(store.recent(5))
+    assert stored.content == "The light keeps changing."
+    assert stored.salience_score == 0.8
+    context = stored.processing_context
+    assert context["salience_basis"] == "llm_design_constant"
+    assert context["form"] == "model"
+    assert context["template_salience"] == 0.58
+    assert context["template_salience_basis"] == "affect"
+    assert context["upgraded_from"]
 
 
 def test_broadcast_only_expressed():
@@ -149,11 +197,43 @@ def test_broadcast_only_expressed():
     assert [m["thought"]["content"] for m in messages] == ["river", "garden"]
     assert all(m["type"] == "spontaneous_thought" for m in messages)
     assert "stream_state" in messages[0]
+    for message in messages:
+        assert message["thought"]["form"] == "template"
+        assert message["thought"]["salience_basis"] == "strategy_default"
 
     quiet = []
     silent = make_machine(["river"], embedder=None, broadcaster=quiet.append)
     run(silent.tick())
     assert quiet == []
+
+
+def test_broadcast_names_the_model_form():
+    from mtc.brain.protocol import FakeBrain
+    from mtc.consciousness.continuous.config import CTMConfig
+    from mtc.consciousness.continuous.enhancer import LLMThoughtEnhancer
+    from mtc.consciousness.continuous.persona import CTMPersona
+
+    messages = []
+    machine = make_machine(
+        ["river"],
+        broadcaster=messages.append,
+        enhancer=LLMThoughtEnhancer(
+            FakeBrain(["A model-written line."]),
+            CTMPersona(name="Testagent", system_prompt="You are {name}."),
+            CTMConfig(),
+            now=lambda: START,
+            narrate_mood=False,
+            settings=Settings(DEBUG=False),
+        ),
+        contention_guard=lambda: False,
+    )
+    result = run(machine.tick())
+    assert result.upgraded is True
+    (message,) = messages
+    assert message["thought"]["content"] == "A model-written line."
+    assert message["thought"]["form"] == "model"
+    assert message["thought"]["salience_basis"] == "llm_design_constant"
+    assert message["thought"]["salience"] == 0.8
 
 
 def test_inject_thought_stores_unexpressed():
@@ -165,6 +245,7 @@ def test_inject_thought_stores_unexpressed():
     assert record.should_express is False
     assert record.triggered_by == "dream_creative"
     assert record.processing_context["emotional_tone"] == "calm"
+    assert record.processing_context["form"] == "injected"
     (stored,) = run(store.recent(5))
     assert stored.thought_id == record.thought_id
     assert run(store.expressible(5)) == []
@@ -287,6 +368,66 @@ def test_step_failure_counted_and_raised_under_debug():
     loud = make_machine(["river"], store=BrokenStore(), settings=Settings(DEBUG=True))
     with pytest.raises(RuntimeError):
         run(loud.tick())
+
+
+def _broken_summary():
+    raise RuntimeError("summary down")
+
+
+def test_stream_summary_failure_counted_and_raised_under_debug():
+    messages = []
+    soft = make_machine(["river"], broadcaster=messages.append)
+    soft.buffer.get_stream_summary = _broken_summary
+    result = run(soft.tick())
+    assert result.expressed is True
+    (message,) = messages
+    assert message["stream_state"] == {}  # the fallback is unchanged
+    assert dict(soft.failures) == {"stream_summary": 1}  # counted in the broadcast
+    status = soft.get_status()  # and in the status read
+    assert status["stream_summary"] == {}
+    assert status["failures"] == {"stream_summary": 2}
+
+    loud = make_machine(
+        ["river"], broadcaster=messages.append, settings=Settings(DEBUG=True)
+    )
+    loud.buffer.get_stream_summary = _broken_summary
+    with pytest.raises(RuntimeError):
+        run(loud.tick())
+    with pytest.raises(RuntimeError):
+        loud.get_status()
+
+
+def test_status_carries_the_enhancer_miss_reasons():
+    from mtc.brain.protocol import FakeBrain
+    from mtc.consciousness.continuous.config import CTMConfig
+    from mtc.consciousness.continuous.enhancer import LLMThoughtEnhancer
+    from mtc.consciousness.continuous.persona import CTMPersona
+
+    enhancer = LLMThoughtEnhancer(
+        FakeBrain(["", "<think>only reasoning</think>"]),
+        CTMPersona(name="Testagent", system_prompt="You are {name}."),
+        CTMConfig(),
+        now=lambda: START,
+        narrate_mood=False,
+        settings=Settings(DEBUG=False),
+    )
+    machine = make_machine(
+        ["river", "garden"],
+        enhancer=enhancer,
+        contention_guard=lambda: False,
+        config=cfg_with(**FAST),
+    )
+    run(machine.tick())
+    run(machine.tick())
+    status = machine.get_status()
+    assert status["enhancer"] is True  # the boolean key stays
+    assert status["enhancer_status"]["miss_reasons"] == {
+        "empty_reply": 1,
+        "reasoning_only": 1,
+    }
+    assert status["enhancer_status"]["last_miss_reason"] == "reasoning_only"
+    assert status["counters"]["llm_misses"] == 2
+    assert "enhancer_status" not in make_machine(["river"]).get_status()
 
 
 def test_status_keys_for_the_integration():

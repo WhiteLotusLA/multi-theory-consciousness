@@ -107,4 +107,4 @@ def test_statistics_include_uncertain():
     asyncio.run(module.update_schema(_workspace_state(_content("next", 0.4))))
     stats = module.get_statistics()
     assert stats["uncertain_shifts"] == 2
-    assert stats["voluntary_ratio"] == 0.5
+    assert stats["voluntary_ratio"] is None

@@ -9,12 +9,19 @@ investment, urgency, progress and a lifecycle status.
 
 Goals come from pluggable proposers (``GoalProposer``: beliefs in, goals out).
 The default proposers read learned beliefs: topic beliefs propose an explore
-goal and consciousness-metric beliefs propose an understand goal. Speaker,
-temporal, emotional and social beliefs never create goals, so no goal is ever
-aimed at a person.
+goal and consciousness-metric beliefs propose an understand goal (a belief
+without a ``metric`` key proposes nothing). Speaker, temporal, emotional and
+social beliefs never create goals, so no goal is ever aimed at a person. A
+learning system that holds this goal system calls ``generate_goals`` after
+each learning pass that changed beliefs.
+
+Goal progress counts activities of the goal's category; it does not measure
+whether the goal was achieved. ``record_activity`` adds a fixed step to the
+best active goal of the activity's category, whatever the activity was about,
+and completes the goal at ``GOAL_COMPLETION_THRESHOLD``.
 
 Config: the cap (``max_active``, default 7), the activity-to-category map
-(``activity_categories``, default covering the batch-3 activities ``reflect``,
+(``activity_categories``, default covering the activities ``reflect``,
 ``write_creative`` and ``review_memories``) and the clock are constructor
 arguments. Persisted state: one document per goal through a ``GoalStore``
 (``upsert_goal``); active and paused goals are reloaded by ``initialize``. With
@@ -346,8 +353,10 @@ class IntrinsicGoalSystem:
     ) -> Optional[IntrinsicGoal]:
         """Credit an activity to its best matching goal.
 
-        Returns the updated goal (call ``persist`` to store it), or None when
-        the activity is unknown or no active goal matches; nothing changes then.
+        Progress counts activities of the goal's category; it does not measure
+        whether the goal was achieved. Returns the updated goal (call
+        ``persist`` to store it), or None when the activity is unknown or no
+        active goal matches; nothing changes then.
         """
         target = self.goal_for_activity(activity_type)
         if target is None:

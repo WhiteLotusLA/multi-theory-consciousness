@@ -5,10 +5,6 @@ Provides tools for maintaining conversation coherence:
 - Topic extraction from conversation history
 - Context summarization
 - Reference linking
-
-Created: November 23, 2025
-Author: Multi-Theory Consciousness Contributors
-Purpose: Fix Consciousness Gap #1 (Coherence Score: 0.0 -> 60%+)
 """
 
 from typing import List, Dict, Any, Optional
@@ -240,7 +236,7 @@ class ConversationCoherence:
             # Limit topics shown to fit in max_length
             topic_str = ", ".join(topics[:5])
             if len(topics) > 5:
-                topic_str += f"(and {len(topics) - 5} more topics)"
+                topic_str += f" (and {len(topics) - 5} more topics)"
             parts.append(f"\nMain topics: {topic_str}")
 
         # Recent context (last 3 messages)
@@ -452,37 +448,37 @@ if __name__ == "__main__":
     # Test the coherence tracker
     print("Testing Conversation Coherence Tracker...\n")
 
-    # Sample conversation
+    # Sample conversation: a neutral synthetic exchange
     sample_conversation = [
         {
             "role": "user",
-            "speaker": "User",
-            "content": "Hi! How are you feeling today?",
-        },
-        {
-            "role": "assistant",
-            "speaker": "Agent",
-            "content": "Hello! I'm feeling curious and energized. How are you?",
+            "speaker": "Alice",
+            "content": "Shall we plan a walk along the river this afternoon?",
         },
         {
             "role": "user",
-            "speaker": "User",
-            "content": "I'm great! I wanted to talk about your vision capabilities.",
-        },
-        {
-            "role": "assistant",
-            "speaker": "Agent",
-            "content": "My vision capabilities? That sounds exciting! What about them?",
+            "speaker": "Guest",
+            "content": "Good idea. What does the weather look like later?",
         },
         {
             "role": "user",
-            "speaker": "User",
-            "content": "You can now see images! Let me show you something.",
+            "speaker": "Alice",
+            "content": "The forecast says clouds at first and sun after three.",
         },
         {
-            "role": "assistant",
-            "speaker": "Agent",
-            "content": "How fascinating. I'd love to see it.",
+            "role": "user",
+            "speaker": "Guest",
+            "content": "Then a walk after three works. Which route along the river?",
+        },
+        {
+            "role": "user",
+            "speaker": "Alice",
+            "content": "The path past the old mill, about an hour each way.",
+        },
+        {
+            "role": "user",
+            "speaker": "Guest",
+            "content": "That route sounds right. I will bring the map.",
         },
     ]
 
@@ -501,7 +497,7 @@ if __name__ == "__main__":
     print(f"Coherence instructions:\n{instructions}\n")
 
     # Test reference detection
-    current_msg = "Tell me more about those vision capabilities you mentioned"
+    current_msg = "Remind me which river route we picked for the walk"
     references = tracker.extract_potential_references(current_msg, sample_conversation)
     print(f"Potential references for '{current_msg}':")
     for ref in references:

@@ -23,6 +23,14 @@ A failed attempt (no answer, an empty reply, an error) is counted under its
 error in ``get_status()`` and nothing else happens: no candidate, no share, no
 drive credit and no goal progress. Only successful results enter ``history``.
 
+A step that raises (``rest_check``, ``drive_read``, ``goal_read``,
+``activity``, ``experience_sink``, ``drive_update``, ``goal_credit``,
+``share_decision``, ``share_callback``, ``consolidation``, ``loop``, and the
+brain selector's ``selection``) keeps its fallback, is counted by step name in
+``get_status()["step_failures"]``, is logged the first time and every
+hundredth time with the exception type only, and is raised when
+``Settings.DEBUG`` is true (the passed settings, else ``get_settings()``).
+
 The loop never runs during a turn. ``notify_turn_started`` and
 ``notify_turn_finished`` bracket a turn (nesting is counted); while one is open
 ``step()`` does nothing and returns None, and a share decision is skipped when a
@@ -42,7 +50,8 @@ between consolidation calls; 0 disables), ``history_size``,
 name to ``{"type", "intensity"}`` passed to ``update_homeostasis``; the default
 maps ``reflect`` to ``sensemaking``, ``write_creative`` to ``exploring`` and
 ``review_memories`` to ``understanding``; an activity without a mapping credits
-no drive).
+no drive, and a mapping without a finite ``intensity`` sends the type alone so
+the drive model applies its default event intensity).
 
 Collaborators are injected: ``drives_source`` exposes ``homeostatic_drives``
 (``get_drive_state``, ``get_free_energy``) and ``update_homeostasis``;
@@ -62,9 +71,10 @@ data.
 import asyncio
 import logging
 import math
+import numbers
 import random
 import re
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import (
@@ -93,6 +103,7 @@ from mtc.consciousness.enhanced_global_workspace import (
     WorkspaceCandidateSource,
 )
 from mtc.consciousness.intrinsic_goals import IntrinsicGoalSystem
+from mtc.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +122,26 @@ _WORD = re.compile(r"[A-Za-z0-9_]+")
 SUMMARY_CHARS = 100
 GOAL_PROGRESS = 0.1
 TOP_GOALS = 3
+# A failed step is logged the first time and every this many times after.
+FAILURE_LOG_EVERY = 100
+
+
+def _count_failure(
+    failures: Counter, settings: Any, step: str, exc: BaseException
+) -> None:
+    """Count a failed step, log the first and every hundredth, raise in DEBUG."""
+    failures[step] += 1
+    count = failures[step]
+    if count == 1 or count % FAILURE_LOG_EVERY == 0:
+        logger.warning(
+            "autonomous life step %s failed (%d so far): %s",
+            step,
+            count,
+            type(exc).__name__,
+        )
+    resolved = settings if settings is not None else get_settings()
+    if bool(getattr(resolved, "DEBUG", False)):
+        raise exc
 
 
 def _default_activity_types() -> Dict[str, Dict[str, Any]]:
@@ -218,12 +249,16 @@ class BrainActivitySelector:
     The reply is stripped of reasoning blocks and split into words; it is
     accepted only when exactly one distinct option name appears among them.
     A missing, empty, unparseable or ambiguous answer returns the first option
-    with the source ``drive_fallback``.
+    with the source ``drive_fallback``. A brain call that raises (other than
+    no answer) is counted as ``selection`` in ``failures`` and raised when
+    ``Settings.DEBUG`` is true.
     """
 
-    def __init__(self, brain: BrainProtocol) -> None:
+    def __init__(self, brain: BrainProtocol, settings: Any = None) -> None:
         self.brain = brain
         self._fallback = DriveBasedSelector()
+        self._settings = settings
+        self.failures: Counter = Counter()
 
     async def select(
         self, context: ActivityContext, options: List[Activity]
@@ -246,7 +281,7 @@ class BrainActivitySelector:
         except NoAnswerError:
             text = ""
         except Exception as exc:
-            logger.warning("Activity choice failed: %s", type(exc).__name__)
+            _count_failure(self.failures, self._settings, "selection", exc)
             text = ""
         by_name = {a.name.lower(): a for a in options}
         found = {w.lower() for w in _WORD.findall(text) if w.lower() in by_name}
@@ -280,6 +315,7 @@ class AutonomousLife:
         rng: Optional[random.Random] = None,
         clock: Optional[Callable[[], datetime]] = None,
         sleep: Optional[Callable[[float], Awaitable[None]]] = None,
+        settings: Any = None,
     ) -> None:
         self.brain = brain
         self.drives_source = drives_source
@@ -305,6 +341,8 @@ class AutonomousLife:
         self.last_consolidated: Optional[int] = None
         self.last_skip: Optional[str] = None
         self.sink_errors = 0
+        self._settings = settings
+        self.step_failures: Counter = Counter()
         self.history: Deque[Dict[str, Any]] = deque(maxlen=self.config.history_size)
         self.recent_candidates: Deque[WorkspaceCandidate] = deque(
             maxlen=self.config.history_size
@@ -376,13 +414,17 @@ class AutonomousLife:
         self.last_skip = reason
         return None
 
+    def _failure(self, step: str, exc: BaseException) -> None:
+        """Count a failed step, log the first and every hundredth, raise in DEBUG."""
+        _count_failure(self.step_failures, self._settings, step, exc)
+
     def _resting(self) -> Optional[bool]:
         if self.is_rest_time is None:
             return False
         try:
             return bool(self.is_rest_time())
         except Exception as exc:
-            logger.warning("Rest check failed: %s", type(exc).__name__)
+            self._failure("rest_check", exc)
             return None
 
     def _read_drives(self) -> Optional[Dict[str, Dict[str, Any]]]:
@@ -393,7 +435,7 @@ class AutonomousLife:
             state = drives.get_drive_state()
             free_energy = _finite(drives.get_free_energy())
         except Exception as exc:
-            logger.warning("Drive read failed: %s", type(exc).__name__)
+            self._failure("drive_read", exc)
             return None
         if free_energy is not None:
             self.last_free_energy = free_energy
@@ -423,7 +465,7 @@ class AutonomousLife:
         try:
             result = await activity.run(context)
         except Exception as exc:
-            logger.warning("Activity %s raised: %s", activity.name, type(exc).__name__)
+            self._failure("activity", exc)
             result = ActivityResult(
                 activity=activity.name,
                 success=False,
@@ -476,7 +518,7 @@ class AutonomousLife:
                     str(g.description) for g in self.goals.get_top_goals(TOP_GOALS)
                 ]
             except Exception as exc:
-                logger.warning("Goal read failed: %s", type(exc).__name__)
+                self._failure("goal_read", exc)
         topic = descriptions[0] if descriptions else None
         return ActivityContext(
             drive=drive, urgency=urgency, topic=topic, goals=descriptions
@@ -537,17 +579,29 @@ class AutonomousLife:
             await self.experience_sink(candidate)
         except Exception as exc:
             self.sink_errors += 1
-            logger.warning("Experience sink failed: %s", type(exc).__name__)
+            self._failure("experience_sink", exc)
 
     async def _credit_drive(self, activity: Activity) -> None:
         mapped = self.config.activity_types.get(activity.name)
         if not mapped:
             return
-        payload = {"type": mapped.get("type"), "intensity": mapped.get("intensity")}
+        # The intensity goes along only when the mapping states a finite
+        # number (any real number but a boolean, numpy scalars included);
+        # otherwise the drive model applies its default.
+        payload: Dict[str, Any] = {"type": mapped.get("type")}
+        intensity = mapped.get("intensity")
+        if (
+            isinstance(intensity, numbers.Real)
+            and not isinstance(intensity, bool)
+            and math.isfinite(float(intensity))
+        ):
+            if not isinstance(intensity, (int, float)):
+                intensity = float(intensity)
+            payload["intensity"] = intensity
         try:
             await self.drives_source.update_homeostasis(payload)
         except Exception as exc:
-            logger.warning("Drive update failed: %s", type(exc).__name__)
+            self._failure("drive_update", exc)
 
     async def _credit_goal(self, activity: Activity) -> None:
         if self.goals is None:
@@ -557,7 +611,7 @@ class AutonomousLife:
             if goal is not None:
                 await self.goals.persist(goal)
         except Exception as exc:
-            logger.warning("Goal credit failed: %s", type(exc).__name__)
+            self._failure("goal_credit", exc)
 
     async def _maybe_share(self, result: ActivityResult) -> None:
         if self.share is None or self._turns_open > 0:
@@ -575,7 +629,7 @@ class AutonomousLife:
         except NoAnswerError:
             return
         except Exception as exc:
-            logger.warning("Share decision failed: %s", type(exc).__name__)
+            self._failure("share_decision", exc)
             return
         text = strip_reasoning_blocks(reply.text or "")
         found = {w.lower() for w in _WORD.findall(text) if w.lower() in _SHARE_WORDS}
@@ -595,7 +649,7 @@ class AutonomousLife:
         try:
             await self.share(shared)
         except Exception as exc:
-            logger.warning("Share callback failed: %s", type(exc).__name__)
+            self._failure("share_callback", exc)
 
     async def _maybe_consolidate(self) -> None:
         every = self.config.consolidate_every
@@ -607,7 +661,7 @@ class AutonomousLife:
         try:
             self.last_consolidated = await self.consolidate_thoughts()
         except Exception as exc:
-            logger.warning("Thought consolidation failed: %s", type(exc).__name__)
+            self._failure("consolidation", exc)
 
     # -- background task -------------------------------------------------------
 
@@ -642,7 +696,7 @@ class AutonomousLife:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.error("Life loop step failed: %s", type(exc).__name__)
+                self._failure("loop", exc)
                 wait = self.config.min_interval_s
             await self._sleep(wait)
 
@@ -667,11 +721,19 @@ class AutonomousLife:
             "history_size": len(self.history),
             "recent_candidates": len(self.recent_candidates),
             "sink_errors": self.sink_errors,
+            "step_failures": self._step_failure_counts(),
             "activities": self.registry.names(),
             "has_sink": self.experience_sink is not None,
             "has_share": self.share is not None,
             "has_goals": self.goals is not None,
         }
+
+    def _step_failure_counts(self) -> Dict[str, int]:
+        """Failed steps by name, the brain selector's ``selection`` included."""
+        counts = Counter(self.step_failures)
+        if isinstance(self.selector, BrainActivitySelector):
+            counts.update(self.selector.failures)
+        return dict(counts)
 
     def to_state_dict(self) -> Dict[str, Any]:
         """Return ``{"scalars", "arrays", "histories"}`` for the persistence hub."""

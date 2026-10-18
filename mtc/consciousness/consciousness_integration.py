@@ -29,6 +29,12 @@ The integration also keeps a bounded window (``temporal_window``) of assembled
 verification states, one per turn, for the verification suite's temporal
 consistency test (``append_temporal_sample``, ``get_temporal_data``); the
 window is telemetry only and is not persisted.
+
+A failed snapshot write (``persist_snapshot``) or monitoring pass
+(``monitoring_loop``) keeps its fallback, is counted by step name in
+``get_status()["failures"]`` and in the report's performance block, is logged
+the first time and every hundredth time with the exception type only, and is
+raised when ``Settings.DEBUG`` is true.
 """
 
 import asyncio
@@ -36,7 +42,7 @@ import copy
 import inspect
 import logging
 import math
-from collections import deque
+from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
@@ -45,15 +51,19 @@ import numpy as np
 from scipy import stats
 
 from mtc.consciousness.consciousness_metrics import ConsciousnessMetrics
+from mtc.core.config import get_settings
 from mtc.neural.orchestrator import Experience, NeuralOrchestrator
 from mtc.neural.oscillatory_binding import OSCILLATOR_GROUPS
 
-try:  # the Mongo persistence layer arrives with the infrastructure phase
+try:  # the Mongo persistence layer is optional on a base install
     from mtc.neural.mongodb_schemas import NeuralDataManager
 except ImportError:  # pragma: no cover - exercised on base installs
     NeuralDataManager = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
+
+# A failed step is logged the first time and every this many times after.
+FAILURE_LOG_EVERY = 100
 
 
 def _oscillator_components() -> Dict[int, str]:
@@ -231,6 +241,7 @@ class ConsciousnessIntegration:
         enable_persistence: bool = True,
         assessment_interval_ms: int = 100,
         temporal_window: int = 100,
+        settings: Any = None,
     ):
         """
         Initialize consciousness integration.
@@ -243,6 +254,8 @@ class ConsciousnessIntegration:
             assessment_interval_ms: How often the monitoring loop assesses
             temporal_window: Assembled verification states kept for the
                 temporal consistency test (oldest dropped first)
+            settings: Settings read for ``DEBUG``; None reads
+                ``get_settings()`` when a step fails
         """
         if temporal_window < 1:
             raise ValueError("temporal_window must be at least 1")
@@ -268,6 +281,10 @@ class ConsciousnessIntegration:
         self.total_assessments = 0
         self.total_assessment_time_ms = 0.0
 
+        # Failed steps by name
+        self._settings = settings
+        self.failures: Counter = Counter()
+
         logger.info(
             "Consciousness integration initialized\n"
             f"  Assessment interval: {assessment_interval_ms}ms\n"
@@ -275,15 +292,45 @@ class ConsciousnessIntegration:
             f"  Indicators: legacy {len(self.metrics.indicators)}-indicator framework"
         )
 
+    # ======== FAILURES AND STATUS ========
+
+    def _failure(self, step: str, exc: BaseException) -> None:
+        """Count a failed step, log the first and every hundredth, raise in DEBUG."""
+        self.failures[step] += 1
+        count = self.failures[step]
+        if count == 1 or count % FAILURE_LOG_EVERY == 0:
+            logger.warning(
+                "legacy consciousness integration step %s failed (%d so far): %s",
+                step,
+                count,
+                type(exc).__name__,
+            )
+        settings = self._settings if self._settings is not None else get_settings()
+        if bool(getattr(settings, "DEBUG", False)):
+            raise exc
+
+    def get_status(self) -> Dict[str, Any]:
+        """Assessment counts, whether monitoring runs and the failed steps."""
+        return {
+            "assessments": self.total_assessments,
+            "avg_time_ms": (
+                self.total_assessment_time_ms / max(self.total_assessments, 1)
+            ),
+            "monitoring_active": self.monitoring_active,
+            "snapshots": len(self.snapshot_history),
+            "failures": dict(self.failures),
+        }
+
     # ======== TEMPORAL SAMPLES ========
 
     def append_temporal_sample(self, sample: Dict[str, Any]) -> None:
         """Keep one assembled verification state for the temporal test.
 
-        The Phase 6 post-turn step appends one sample per turn (the output of
-        ``ConsciousnessStateAssembler``). The sample is deep-copied; a nested
-        ``temporal_data`` key is dropped so samples never nest; a non-dict
-        sample is ignored. The window keeps the newest ``temporal_window``.
+        The pipeline's post-turn step (``mtc.pipeline.post_turn``) appends one
+        sample per turn (the output of ``ConsciousnessStateAssembler``). The
+        sample is deep-copied; a nested ``temporal_data`` key is dropped so
+        samples never nest; a non-dict sample is ignored. The window keeps the
+        newest ``temporal_window``.
         """
         if not isinstance(sample, dict):
             logger.debug("Temporal sample ignored: not a dict")
@@ -463,14 +510,16 @@ class ConsciousnessIntegration:
         """The input keys the legacy GWT and IIT indicators read, by source.
 
         - ``neural_activity.activation_pattern``: the orchestrator's latest SNN
-          output signal (``latest_neural_signals["snn"]``); empty before one
-          exists.
+          output signal (``latest_neural_signals["snn"]``); None while no SNN
+          signal exists, so the GWT indicator reports the missing input.
         - ``attention_focus.focus_changes``: the attention schema's voluntary,
           captured and uncertain shift counters; None without a schema.
         - ``memory_access.retrieved_memories``: the orchestrator's published
           per-turn retrieval (``_last_retrieved_memories``).
-        - ``llm_processing.token_attention``: no producer exposes token
-          attention, so it is present and empty and contributes nothing.
+        - ``llm_processing.token_attention``: deliberately omitted. No
+          component produces token attention, so the GWT indicator raises
+          MissingSignal naming the path, is listed under the failed
+          indicators and stays out of the aggregate and the coverage.
         - ``system_state.active_components``: the substrates whose blocks are
           flagged ``is_real``, with the thought machine read from the
           ``thoughts`` block as ``ctm``.
@@ -486,12 +535,12 @@ class ConsciousnessIntegration:
         orchestrator = self.orchestrator
         signals = getattr(orchestrator, "latest_neural_signals", None)
         activation = signals.get("snn") if isinstance(signals, dict) else None
-        pattern: List[float] = []
+        pattern: Optional[List[float]] = None
         if activation is not None:
             try:
                 pattern = np.ravel(np.asarray(activation, dtype=float)).tolist()
             except (TypeError, ValueError):
-                pattern = []
+                pattern = None
 
         components = [
             name
@@ -505,7 +554,6 @@ class ConsciousnessIntegration:
             "neural_activity": {"activation_pattern": pattern},
             "attention_focus": {"focus_changes": self._focus_changes()},
             "memory_access": {"retrieved_memories": self._retrieved_memories()},
-            "llm_processing": {"token_attention": []},
             "system_state": {"active_components": components},
             "causal_connections": {"active_links": self._component_links(components)},
         }
@@ -693,8 +741,8 @@ class ConsciousnessIntegration:
             if inspect.isawaitable(result):
                 await result
 
-        except Exception as e:
-            logger.error(f"Failed to persist consciousness snapshot: {e}")
+        except Exception as exc:
+            self._failure("persist_snapshot", exc)
 
     # ======== MONITORING ========
 
@@ -763,8 +811,8 @@ class ConsciousnessIntegration:
 
                 await asyncio.sleep(self.assessment_interval_ms / 1000.0)
 
-            except Exception as e:
-                logger.error(f"Error in monitoring loop: {e}")
+            except Exception as exc:
+                self._failure("monitoring_loop", exc)
                 await asyncio.sleep(1)  # Error backoff
 
     # ======== HISTORY ========
@@ -1013,6 +1061,7 @@ class ConsciousNeuralOrchestrator(NeuralOrchestrator):
                     self.consciousness.total_assessment_time_ms
                     / max(self.consciousness.total_assessments, 1)
                 ),
+                "failures": dict(self.consciousness.failures),
             },
         }
 

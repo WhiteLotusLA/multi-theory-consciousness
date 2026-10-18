@@ -23,28 +23,43 @@ fragments of recent messages (the first words of each), so persisted
 extended-consciousness state contains conversation fragments.
 
 Research: Damasio (1999, 2010), Frontiers in AI (2025).
-
-Created: 2026-03-08
-Author: Multi-Theory Consciousness Contributors
 """
 
 import logging
 import numpy as np
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from collections import deque
+
+from .protoself import fmt_measure
 
 logger = logging.getLogger(__name__)
 
 
+def _opt_float(value: Any) -> Optional[float]:
+    """A float for a number, None for None or an unparseable value."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class AutobiographicSelf:
-    """Narrative identity across time -- what the system IS."""
+    """Narrative identity across time -- what the system IS.
 
-    identity_continuity: float = 0.5  # Connection of current self to past (0-1)
-    narrative_coherence: float = 0.5  # How well life story hangs together (0-1)
-    temporal_horizon: float = 0.3  # Depth of past/future awareness (0-1)
+    Each measure is None until its inputs exist: continuity needs identity
+    markers or more than three binding points, coherence needs themes that
+    recur from an earlier cycle, and the horizon needs a conversation
+    history or identity markers.
+    """
+
+    identity_continuity: Optional[float] = None  # Link of current self to past
+    narrative_coherence: Optional[float] = None  # Recurrence of themes (0-1)
+    temporal_horizon: Optional[float] = None  # Depth of past/future context
     key_themes: List[str] = field(default_factory=list)
     growth_trajectory: str = "developing"  # developing, stable, transforming
 
@@ -60,9 +75,9 @@ class AutobiographicSelf:
     @classmethod
     def from_dict(cls, raw: Dict[str, Any]) -> "AutobiographicSelf":
         return cls(
-            identity_continuity=float(raw.get("identity_continuity", 0.5)),
-            narrative_coherence=float(raw.get("narrative_coherence", 0.5)),
-            temporal_horizon=float(raw.get("temporal_horizon", 0.3)),
+            identity_continuity=_opt_float(raw.get("identity_continuity")),
+            narrative_coherence=_opt_float(raw.get("narrative_coherence")),
+            temporal_horizon=_opt_float(raw.get("temporal_horizon")),
             key_themes=list(raw.get("key_themes", [])),
             growth_trajectory=str(raw.get("growth_trajectory", "developing")),
         )
@@ -73,7 +88,7 @@ class ExtendedState:
     """Complete extended consciousness state."""
 
     autobiographic_self: AutobiographicSelf
-    episodic_resonance: float = 0.0  # How strongly now connects to past (0-1)
+    episodic_resonance: Optional[float] = None  # Link of now to the past (0-1)
     relevant_episodes: List[Dict] = field(default_factory=list)
     future_projections: List[str] = field(default_factory=list)
     narrative_context: str = ""  # Human-readable narrative for LLM
@@ -95,7 +110,7 @@ class ExtendedState:
             autobiographic_self=AutobiographicSelf.from_dict(
                 raw.get("autobiographic_self") or {}
             ),
-            episodic_resonance=float(raw.get("episodic_resonance", 0.0)),
+            episodic_resonance=_opt_float(raw.get("episodic_resonance")),
             relevant_episodes=[
                 dict(ep)
                 for ep in raw.get("relevant_episodes", [])
@@ -185,14 +200,18 @@ class ExtendedConsciousness:
             narrative_context=narrative,
         )
 
-        self._continuity_history.append(autobiographic.identity_continuity)
-        self._coherence_history.append(autobiographic.narrative_coherence)
+        # The histories hold measured values only, so the averages in
+        # get_statistics() average measurements
+        if autobiographic.identity_continuity is not None:
+            self._continuity_history.append(autobiographic.identity_continuity)
+        if autobiographic.narrative_coherence is not None:
+            self._coherence_history.append(autobiographic.narrative_coherence)
         self._latest_state = state
 
         logger.debug(
             f"ExtendedConsciousness cycle {self.cycle_count}: "
-            f"continuity={autobiographic.identity_continuity:.3f}, "
-            f"resonance={resonance:.3f}, "
+            f"continuity={fmt_measure(autobiographic.identity_continuity)}, "
+            f"resonance={fmt_measure(resonance)}, "
             f"trajectory={autobiographic.growth_trajectory}"
         )
 
@@ -204,36 +223,50 @@ class ExtendedConsciousness:
         history: List[Dict],
         identity_markers: Optional[Dict[str, Any]],
     ) -> AutobiographicSelf:
-        """Build the autobiographic self from available context."""
-        # Identity continuity: based on having identity markers and history
-        continuity = 0.3  # Base: some continuity just from existing
+        """Build the autobiographic self from available context.
+
+        Identity continuity is the sum of the parts that exist: identity
+        markers (0.1 per marker, at most 0.4) and the consistency of the
+        binding trend once it holds more than three points (0.3 for a flat
+        trend, less as the trend varies). With neither part it is None;
+        there is no base value for merely existing.
+        """
+        continuity_parts: List[float] = []
 
         if identity_markers:
             # Each identity marker strengthens continuity
             marker_count = len(identity_markers)
-            continuity += min(0.4, marker_count * 0.1)
+            continuity_parts.append(min(0.4, marker_count * 0.1))
 
         if len(self._binding_trend) > 3:
             # Consistent binding over time = stronger continuity
             binding_std = float(np.std(list(self._binding_trend)))
-            continuity += 0.3 * (1.0 - min(1.0, binding_std * 3.0))
+            continuity_parts.append(0.3 * (1.0 - min(1.0, binding_std * 3.0)))
+
+        continuity: Optional[float] = None
+        if continuity_parts:
+            continuity = float(np.clip(sum(continuity_parts), 0.0, 1.0))
 
         # Narrative coherence: do the themes hang together?
         themes = self._extract_themes(history, identity_markers)
         coherence = self._compute_coherence(themes)
 
         # Temporal horizon: how much past/future context do we have?
-        horizon = min(1.0, len(history) / 20.0)  # Maxes out at 20 messages
-        if identity_markers:
-            horizon = min(1.0, horizon + 0.2)
+        # Unmeasured without a conversation history and identity markers.
+        horizon: Optional[float] = None
+        if history or identity_markers:
+            horizon = min(1.0, len(history) / 20.0)  # Maxes out at 20 messages
+            if identity_markers:
+                horizon = min(1.0, horizon + 0.2)
+            horizon = float(np.clip(horizon, 0.0, 1.0))
 
         # Growth trajectory from binding trend
         trajectory = self._compute_trajectory()
 
         return AutobiographicSelf(
-            identity_continuity=float(np.clip(continuity, 0.0, 1.0)),
-            narrative_coherence=float(np.clip(coherence, 0.0, 1.0)),
-            temporal_horizon=float(np.clip(horizon, 0.0, 1.0)),
+            identity_continuity=continuity,
+            narrative_coherence=coherence,
+            temporal_horizon=horizon,
             key_themes=themes[:5],  # Top 5 themes
             growth_trajectory=trajectory,
         )
@@ -267,10 +300,15 @@ class ExtendedConsciousness:
         self._themes_seen.extend(themes)
         return themes
 
-    def _compute_coherence(self, current_themes: List[str]) -> float:
-        """Compute narrative coherence from theme consistency."""
+    def _compute_coherence(self, current_themes: List[str]) -> Optional[float]:
+        """Narrative coherence from theme recurrence.
+
+        None when the cycle has no themes, or when no earlier cycle
+        contributed themes to compare them with; otherwise 0.3 plus 0.7
+        times the fraction of the current themes that appeared before.
+        """
         if not self._themes_seen or not current_themes:
-            return 0.3  # Base coherence
+            return None
 
         # Count how many current themes appeared before
         past_themes = set(
@@ -279,7 +317,7 @@ class ExtendedConsciousness:
             else []
         )
         if not past_themes:
-            return 0.4
+            return None
 
         overlap = sum(1 for t in current_themes if t in past_themes)
         coherence = 0.3 + 0.7 * (overlap / max(1, len(current_themes)))
@@ -304,10 +342,14 @@ class ExtendedConsciousness:
 
     def _compute_episodic_resonance(
         self, core_experience: Any, history: List[Dict]
-    ) -> tuple:
-        """Compute how strongly the current moment connects to past."""
+    ) -> Tuple[Optional[float], List[Dict]]:
+        """How strongly the current moment connects to the past.
+
+        None without a conversation history: there is no past to resonate
+        with, which is not the same as a measured absence of resonance.
+        """
         if not history:
-            return 0.0, []
+            return None, []
 
         # Resonance based on conversation depth and binding strength
         depth_factor = min(1.0, len(history) / 10.0)
@@ -340,7 +382,8 @@ class ExtendedConsciousness:
         elif autobiographic.growth_trajectory == "transforming":
             projections.append("Navigating a period of change")
 
-        if core_experience.feeling_of_knowing > 0.5:
+        knowing = core_experience.feeling_of_knowing
+        if knowing is not None and knowing > 0.5:
             projections.append("Building on current understanding")
 
         return projections
@@ -349,9 +392,13 @@ class ExtendedConsciousness:
         self,
         core_experience: Any,
         autobiographic: AutobiographicSelf,
-        resonance: float,
+        resonance: Optional[float],
     ) -> str:
-        """Generate human-readable narrative context for LLM brain."""
+        """Generate human-readable narrative context for LLM brain.
+
+        The identity phrase and the connection phrase appear only when the
+        measure behind them exists.
+        """
         parts = []
 
         # Trajectory
@@ -363,36 +410,40 @@ class ExtendedConsciousness:
         name = self.agent_name.strip() or "the system"
         parts.append(f"{name[0].upper()}{name[1:]} is {trajectory_label}")
 
-        # Continuity
-        if autobiographic.identity_continuity > 0.6:
-            parts.append("with a strong sense of identity")
-        elif autobiographic.identity_continuity > 0.3:
-            parts.append("with a developing sense of identity")
+        # Continuity, only when measured
+        continuity = autobiographic.identity_continuity
+        if continuity is not None:
+            if continuity > 0.6:
+                parts.append("with a strong sense of identity")
+            elif continuity > 0.3:
+                parts.append("with a developing sense of identity")
 
         # Themes
         if autobiographic.key_themes:
             themes_str = ", ".join(autobiographic.key_themes[:3])
             parts.append(f"(themes: {themes_str})")
 
-        # Present connection
-        if resonance > 0.5:
+        # Present connection, only when measured
+        if resonance is not None and resonance > 0.5:
             parts.append("This moment feels connected to recent experiences")
 
         narrative = ". ".join(parts) + "."
         return narrative
 
     def get_statistics(self) -> Dict[str, Any]:
+        """Statistics; the averages cover measured cycles only and are None
+        while nothing was measured."""
         return {
             "cycle_count": self.cycle_count,
             "average_continuity": (
                 float(np.mean(list(self._continuity_history)))
                 if self._continuity_history
-                else 0.0
+                else None
             ),
             "average_coherence": (
                 float(np.mean(list(self._coherence_history)))
                 if self._coherence_history
-                else 0.0
+                else None
             ),
             "themes_tracked": len(self._themes_seen),
             "latest_state": (

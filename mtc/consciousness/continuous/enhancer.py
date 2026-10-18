@@ -11,7 +11,10 @@ reply, a reasoning-only reply and a reply that starts with one of
 ``successes``, ``miss_reasons`` and ``last_miss_reason`` count and name them;
 the first miss and every hundredth are logged at WARNING (reason, category and
 state only, never the thought text). The method never raises for a brain or
-prompt failure; a cancellation still propagates.
+prompt failure while ``Settings.DEBUG`` is false; with DEBUG true an
+unexpected failure (any exception other than ``NoAnswerError``) is counted as
+a miss first and then re-raised, while a ``NoAnswerError`` stays a plain miss
+in every mode. A cancellation always propagates.
 
 Context keys: ``recent_memory`` (required by ``memory``), ``emotions`` (a
 mapping of emotion name to score, required by ``emotion``; only finite numeric
@@ -21,14 +24,19 @@ through ``NarrationFlags``, or the ``narrate_mood`` argument); it is stored on
 the record as data either way. Reasoning blocks are removed with
 ``mtc.brain.thinking.split_thinking`` before the text is used.
 
+The record's salience is the design constant ``LLM_SALIENCE``; its
+``processing_context`` says so (``salience_basis`` ``llm_design_constant``)
+and names the thought's form (``form`` ``model``).
+
 The clock line is whatever the injected ``clock`` callable returns, added to
 the system prompt of waking states only (``awake`` and ``drowsy``); with no
 clock the prompt carries no time, and a clock that raises costs no thought.
 The record's instant comes from ``now`` (aware UTC). ``should_express`` is
 False: expression is decided later by the novelty gate. Config read:
-``CTMConfig.llm`` (max tokens, temperature, placeholder prefixes) and
-``NARRATE_THOUGHT_MOOD``. Thought text, memories and emotions are private
-runtime data.
+``CTMConfig.llm`` (max tokens, temperature, placeholder prefixes),
+``NARRATE_THOUGHT_MOOD`` and ``DEBUG`` (from the passed Settings, else the
+process settings). Thought text, memories and emotions are private runtime
+data.
 """
 
 from __future__ import annotations
@@ -53,6 +61,7 @@ from mtc.consciousness.continuous.schemas import (
     ThoughtType,
     new_thought_id,
 )
+from mtc.core.config import Settings, get_settings
 from mtc.core.narration import NarrationFlags
 
 logger = logging.getLogger(__name__)
@@ -65,8 +74,10 @@ CATEGORY_TO_TYPE: Dict[str, ThoughtType] = {
     "creative": ThoughtType.CREATIVE,
 }
 
-# A model-written thought is more deliberate than a template one.
+# A model-written thought is more deliberate than a template one. The value is
+# a design constant, not a measurement, and the record's salience_basis says so.
 LLM_SALIENCE = 0.8
+LLM_SALIENCE_BASIS = "llm_design_constant"
 WAKING_STATES = ("awake", "drowsy")
 _STATE_BASE_LEVEL = {"deep_sleep": 0.3, "drowsy": 0.5, "dreaming": 0.7, "awake": 0.6}
 _REFLECTIVE_WORDS = ("feel", "emotion", "wonder", "realize", "understand", "discover")
@@ -124,6 +135,7 @@ class LLMThoughtEnhancer:
         *,
         now: Optional[Callable[[], datetime]] = None,
         narrate_mood: Optional[bool] = None,
+        settings: Optional[Settings] = None,
     ) -> None:
         self.brain = brain
         self.persona = persona
@@ -131,6 +143,7 @@ class LLMThoughtEnhancer:
         self._clock = clock
         self._now: Callable[[], datetime] = now or _utc_now
         self._narrate_mood = narrate_mood
+        self._settings = settings
         self.misses = 0
         self.successes = 0
         self.miss_reasons: Dict[str, int] = {}
@@ -165,6 +178,10 @@ class LLMThoughtEnhancer:
             state,
         )
 
+    def _debug(self) -> bool:
+        settings = self._settings if self._settings is not None else get_settings()
+        return bool(getattr(settings, "DEBUG", False))
+
     def _mood_allowed(self) -> bool:
         if self._narrate_mood is not None:
             return bool(self._narrate_mood)
@@ -187,7 +204,11 @@ class LLMThoughtEnhancer:
         context: Optional[Mapping[str, Any]] = None,
         state: str = "awake",
     ) -> Optional[ThoughtRecord]:
-        """Return a model-written thought, or None for a miss (never raises)."""
+        """Return a model-written thought, or None for a miss.
+
+        An unexpected failure raises only under ``Settings.DEBUG``, after it
+        was counted (see the module docstring).
+        """
         if self.brain is None:
             self._miss("no_brain", category, state)
             return None
@@ -237,6 +258,10 @@ class LLMThoughtEnhancer:
                 triggered_by=f"llm_{category}",
                 emotional_context=_numeric_emotions(context.get("emotions")),
                 consciousness_state=state,
+                processing_context={
+                    "salience_basis": LLM_SALIENCE_BASIS,
+                    "form": "model",
+                },
                 should_express=False,
             )
         except NoAnswerError as exc:
@@ -244,10 +269,17 @@ class LLMThoughtEnhancer:
             return None
         except Exception as exc:
             self._miss(f"error_{type(exc).__name__}", category, state)
+            if self._debug():
+                raise
             logger.debug("thought generation failed", exc_info=True)
             return None
         self.successes += 1
         return record
 
 
-__all__ = ("CATEGORY_TO_TYPE", "LLM_SALIENCE", "LLMThoughtEnhancer")
+__all__ = (
+    "CATEGORY_TO_TYPE",
+    "LLM_SALIENCE",
+    "LLM_SALIENCE_BASIS",
+    "LLMThoughtEnhancer",
+)

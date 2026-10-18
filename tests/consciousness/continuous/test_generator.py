@@ -383,7 +383,9 @@ def test_untrained_bridge_gives_no_emotion():
     assert gen.status()["skipped"]["emotion"] == 30
 
 
-def test_pad_source_reads_pleasure_and_arousal():
+def test_pad_source_reads_only_measured_dimensions():
+    from mtc.consciousness.pad_affect import PADAffectModel, PADSources
+
     class Pad:
         def __init__(self, latest):
             self.latest = latest
@@ -392,10 +394,63 @@ def test_pad_source_reads_pleasure_and_arousal():
             return self.latest
 
     assert PadEmotionSource(Pad(None)).get_affect() is None
-    reading = PadEmotionSource(
-        Pad(SimpleNamespace(pleasure=-0.2, arousal=0.7, dominance=0.5))
-    ).get_affect()
-    assert reading == {"valence": -0.2, "arousal": 0.7}
+    # a state of unknown provenance (no measured list) is not a reading
+    model = PADAffectModel()
+    unknown = model.compute(
+        PADSources(homeostatic_satisfaction=-0.2, ignition_rate=0.7)
+    )
+    assert unknown.measured_inputs is None
+    assert PadEmotionSource(model).get_affect() is None
+    assert (
+        PadEmotionSource(
+            Pad(SimpleNamespace(pleasure=-0.2, arousal=0.7, dominance=0.5))
+        ).get_affect()
+        is None
+    )
+    # a state with only arousal measured names no valence
+    partial = SimpleNamespace(
+        pleasure=-0.2, arousal=0.7, dominance=0.5, measured_inputs=("ignition_rate",)
+    )
+    assert PadEmotionSource(Pad(partial)).get_affect() is None
+    # every dimension measured: the reading is the measured pleasure and arousal
+    measured = model.compute(
+        PADSources(homeostatic_satisfaction=-0.2, ignition_rate=0.7, agency_score=0.5),
+        measured=("homeostatic_satisfaction", "ignition_rate", "agency_score"),
+    )
+    assert measured.pleasure == pytest.approx(-0.2)
+    assert measured.arousal == pytest.approx(0.7)
+    reading = PadEmotionSource(model).get_affect()
+    assert reading == {"valence": pytest.approx(-0.2), "arousal": pytest.approx(0.7)}
+
+
+def test_unmeasured_pad_state_yields_no_emotion_thought():
+    from mtc.consciousness.pad_affect import PADAffectModel, PADSources
+
+    model = PADAffectModel()
+    model.compute(PADSources())  # every input at its default, nothing measured
+    gen = make(_emotion_only(), emotion_source=PadEmotionSource(model))
+    assert run(gen.generate_thought()) is None
+    assert gen.last_miss_reason == "no_seeds"
+    assert gen.status()["skipped"]["emotion"] == 1
+
+
+def test_neutral_valence_names_no_emotion():
+    from mtc.consciousness.pad_affect import NEUTRAL_PLEASURE_BAND
+
+    assert generator_module.NEUTRAL_PLEASURE_BAND is NEUTRAL_PLEASURE_BAND
+    gen = make(
+        config(emotion=0.5, spontaneous=0.5), emotion_source=FixedAffect(0.05, 0.9)
+    )
+    for _ in range(30):
+        thought = run(gen.generate_thought())
+        assert thought.thought_type is ThoughtType.SPONTANEOUS
+        assert thought.emotional_context == {}
+    assert gen.status()["skipped"]["emotion"] == 30
+    # just outside the band the measured emotion is named again
+    named = make(_emotion_only(), emotion_source=FixedAffect(-0.1, 0.9))
+    thought = run(named.generate_thought())
+    assert thought.thought_type is ThoughtType.EMOTION
+    assert thought.emotional_context == dict([name_affect(-0.1, 0.9)])
 
 
 def test_sensitive_rule_downweights_never_zero():
@@ -475,6 +530,18 @@ def test_should_express_is_provisional():
     assert run(make(never).generate_thought()).should_express is False
     doc = " ".join(generator_module.__doc__.split())
     assert "the machine replaces it with its novelty decision" in doc
+
+
+def test_generated_thoughts_carry_the_template_form():
+    memory = FakeMemory([{"id": 1, "content": "a quiet morning", "importance": 5}])
+    gen = make(memory_source=memory, emotion_source=FixedAffect(0.5, 0.7))
+    strategies = set()
+    for state in ("awake", "dreaming"):
+        for _ in range(60):
+            thought = run(gen.generate_thought(state))
+            assert thought.processing_context["form"] == "template"
+            strategies.add(thought.processing_context["strategy"])
+    assert len(strategies) >= 5  # every kind of draft is marked
 
 
 def test_no_llm_branch():

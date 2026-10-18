@@ -25,16 +25,22 @@ material is missing is skipped for that choice and counted in
   end-of-conversation boilerplate) are dropped, and one is drawn with the
   weights of the ``MemoryWeightRule`` list (a matching rule multiplies a
   memory's weight; a weight lowers its chance and never removes it);
-- emotion needs an ``EmotionSource`` with a reading. Valence in [-1, 1] and
+- emotion needs an ``EmotionSource`` with a reading outside the neutral band:
+  a reading whose absolute valence is below ``NEUTRAL_PLEASURE_BAND`` (the
+  PAD model's band, inside which its label reads Neutral) names no emotion,
+  and the strategy is skipped and counted. ``PadEmotionSource`` gives a
+  reading only when the PAD state's pleasure and arousal were both computed
+  from measured inputs. Valence in [-1, 1] and
   arousal in [0, 1] are named by quadrant of the circumplex model of affect
   (pleasant and active, pleasant and calm, unpleasant and active, unpleasant
   and calm); the thought's ``emotional_context`` holds that name and the
   reading's distance from the neutral centre, and the raw reading goes to
   ``processing_context["affect"]``. An emotion thought, waking or dreaming,
   uses only a template that names the measured emotion (``{current_emotion}``)
-  and draws no affect slot word (``AFFECT_SLOTS``: ``{emotion}``,
-  ``{feeling}``), so its text never names a feeling the reading did not; with
-  no such template the strategy has no material for that choice. An untrained
+  and uses no affect slot (``AFFECT_SLOTS``: ``{emotion}``, ``{feeling}``,
+  which the seed loader refuses in every template family), so its text never
+  names a feeling the reading did not; with no such template the strategy has
+  no material for that choice. An untrained
   emotion bridge has no reading, so no emotion is ever attributed in its place;
 - association pairs two plain ideas from the pack; questions and spontaneous
   lines need nothing; the dream families use the pack's dream templates, with a
@@ -48,7 +54,8 @@ moderate, ``drowsy`` and ``dreaming`` quiet, ``deep_sleep`` a whisper; a strong
 affect raises an emotion thought one step). Salience is the memory's
 importance (scaled from 0 to 10), the affect's strength, or a per-strategy
 design constant, and ``processing_context["salience_basis"]`` says which.
-``should_express`` is provisional: it is drawn from ``express_probability``
+Every generated thought carries ``processing_context["form"]`` ``template``
+(its words come from a seed template). ``should_express`` is provisional: it is drawn from ``express_probability``
 (``processing_context["express_basis"]`` is ``provisional``), and the machine
 replaces it with its novelty decision before anything is broadcast or stored.
 
@@ -107,11 +114,13 @@ from mtc.consciousness.continuous.schemas import (
     new_thought_id,
 )
 from mtc.consciousness.continuous.seeds import (
+    AFFECT_SLOTS,
     SLOT_KEYS,
     SeedError,
     SeedLibrary,
     template_fields,
 )
+from mtc.consciousness.pad_affect import NEUTRAL_PLEASURE_BAND, measured_dimensions
 from mtc.core.config import Settings, csv_list, get_settings
 
 logger = logging.getLogger(__name__)
@@ -119,6 +128,8 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "AFFECT_QUADRANTS",
     "AFFECT_SLOTS",
+    "MEASURED_SALIENCE_BASES",
+    "NEUTRAL_PLEASURE_BAND",
     "BridgeEmotionSource",
     "EmotionSource",
     "MemoryManagerSource",
@@ -166,6 +177,10 @@ _INTENSITY_ORDER = (
     ThoughtIntensity.URGENT,
 )
 
+# The salience bases that are measurements (a memory's stored importance, the
+# affect reading's strength); every other basis is a design constant.
+MEASURED_SALIENCE_BASES: Tuple[str, ...] = ("affect", "memory_importance")
+
 # Design constants (not measurements) for strategies with no measured basis.
 STRATEGY_SALIENCE: Dict[str, float] = {
     "association": 0.4,
@@ -185,8 +200,9 @@ AFFECT_QUADRANTS: Dict[Tuple[bool, bool], str] = {
     (False, False): "sadness",
 }
 STRONG_AFFECT = 0.6
-# Slot words that name a feeling at random; an emotion thought never uses them.
-AFFECT_SLOTS = ("emotion", "feeling")
+# AFFECT_SLOTS (imported from the seed loader) are the slot names that would
+# name a feeling at random: the loader refuses them, and an emotion thought
+# never takes a template that uses one.
 
 ANTI_REPEAT_RUN = 3
 ANTI_REPEAT_ZEROED = ("memory", "emotion")
@@ -200,6 +216,16 @@ FAILURE_LOG_EVERY = 100
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _nameable(affect: Optional[Mapping[str, float]]) -> bool:
+    """Whether a reading lies outside the neutral band, so an emotion is named.
+
+    The band is the PAD model's ``NEUTRAL_PLEASURE_BAND`` (inside it the PAD
+    label reads Neutral): a reading whose absolute valence is below it names
+    no emotion.
+    """
+    return affect is not None and abs(affect["valence"]) >= NEUTRAL_PLEASURE_BAND
 
 
 def name_affect(valence: float, arousal: float) -> Tuple[str, float]:
@@ -318,8 +344,18 @@ def _affect(valence: Any, arousal: Any) -> Optional[Dict[str, float]]:
     return {"valence": max(-1.0, min(1.0, v)), "arousal": max(0.0, min(1.0, a))}
 
 
+_PAD_READING_DIMENSIONS = frozenset({"pleasure", "arousal"})
+
+
 class PadEmotionSource:
-    """``EmotionSource`` over the PAD model's latest state (pleasure, arousal)."""
+    """``EmotionSource`` over the PAD model's latest state (pleasure, arousal).
+
+    The latest state is a reading only when both its pleasure and its arousal
+    were computed from at least one measured input
+    (``mtc.consciousness.pad_affect.measured_dimensions``). A state of unknown
+    provenance (no ``measured_inputs``) or with either dimension unmeasured
+    gives None: no emotion is named from default inputs.
+    """
 
     def __init__(self, pad_model: Any) -> None:
         self.pad_model = pad_model
@@ -327,6 +363,8 @@ class PadEmotionSource:
     def get_affect(self) -> Optional[Dict[str, float]]:
         latest = self.pad_model.get_latest()
         if latest is None:
+            return None
+        if not _PAD_READING_DIMENSIONS <= measured_dimensions(latest):
             return None
         return _affect(getattr(latest, "pleasure", None), latest.arousal)
 
@@ -595,8 +633,8 @@ class ThoughtGenerator:
             self.skipped["emotion"] += 1
             self._warn_once(
                 "emotion",
-                "thought generator has no affect reading; emotion thoughts are "
-                "skipped",
+                "thought generator has no affect reading outside the neutral "
+                "band; emotion thoughts are skipped",
             )
         recent = list(self.recent_thought_types)[-ANTI_REPEAT_RUN:]
         if (
@@ -642,8 +680,8 @@ class ThoughtGenerator:
                 if measured is not None:
                     salience, basis = measured, "memory_importance"
         if strategy == "emotion":
-            if affect is None:
-                raise _Unavailable("no affect")
+            if not _nameable(affect):
+                raise _Unavailable("no affect reading outside the neutral band")
             name, strength = name_affect(affect["valence"], affect["arousal"])
             context["current_emotion"] = name
             emotional = {name: strength}
@@ -728,7 +766,7 @@ class ThoughtGenerator:
             )
         dreaming = state in DREAM_STATES
         affect = self._read_affect()
-        weights = self._weights_for(dreaming, affect is not None)
+        weights = self._weights_for(dreaming, _nameable(affect))
         draft: Optional[_Draft] = None
         while True:
             names = [k for k, v in weights.items() if v > 0]
@@ -752,6 +790,7 @@ class ThoughtGenerator:
         processing = dict(draft.processing)
         processing.update(
             {
+                "form": "template",
                 "strategy": draft.strategy,
                 "template_key": draft.template_key,
                 "state": state,

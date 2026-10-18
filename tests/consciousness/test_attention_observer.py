@@ -262,3 +262,36 @@ def test_observe_never_raises(tmp_path):
     entry = _run(observer.observe(_focus("odd")))
     assert entry is not None
     assert _run(observer.observe(object())) is None
+
+
+def test_journal_failure_is_counted_and_raised_under_debug(tmp_path):
+    blocked = tmp_path / "file_not_dir"
+    blocked.write_text("occupied")
+    observer, store = _observer(tmp_path, journal_dir=blocked)
+    entry = _run(observer.observe(_focus("a sudden sound")))
+    # The store write still happened and the entry is returned as before.
+    assert entry is not None
+    assert _run(store.recent_grabs(10)) == [dataclasses.asdict(entry)]
+    assert observer.status()["failures"] == {"journal": 1}
+
+    class _Failing(InMemoryAttentionGrabStore):
+        async def add_grab(self, doc):
+            raise RuntimeError("store down")
+
+    failing, _ = _observer(tmp_path / "s", store=_Failing())
+    assert _run(failing.observe(_focus("a knock"))) is not None
+    assert failing.status()["failures"] == {"store": 1}
+
+    class _Unreadable:
+        @property
+        def summary(self):
+            raise ValueError("unreadable focus")
+
+    assert _run(failing.observe(_Unreadable())) is None
+    assert failing.status()["failures"] == {"store": 1, "observe": 1}
+
+    debug = SimpleNamespace(**vars(_settings(tmp_path / "d")), DEBUG=True)
+    loud, _ = _observer(tmp_path / "d", settings=debug, journal_dir=blocked)
+    with pytest.raises(OSError):
+        _run(loud.observe(_focus("a sudden sound")))
+    assert loud.status()["failures"] == {"journal": 1}

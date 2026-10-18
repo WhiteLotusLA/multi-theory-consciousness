@@ -66,3 +66,18 @@ async def test_no_answer_keeps_heuristic_reasoning(tmp_path):
     assert with_brain.confidence == pytest.approx(heuristic.confidence)
     assert len(mock.requests) == 1
     assert brain.status()["no_answers"]["empty"] == 1
+
+
+@pytest.mark.asyncio
+async def test_no_answer_is_a_plain_miss_under_debug(tmp_path):
+    brain, mock = _brain(tmp_path, MockProvider(replies=[MockEvent.EMPTY]))
+    await brain.initialize()
+    schema = AttentionSchemaModule(settings=Settings(DEBUG=True))
+    context = "Guest is reading the tide table"
+    heuristic = await schema.model_other_attention("Guest", context)
+    with_brain = await schema.model_other_attention("Guest", context, llm_brain=brain)
+    assert with_brain.reasoning == heuristic.reasoning
+    assert with_brain.confidence == pytest.approx(heuristic.confidence)
+    assert schema.get_statistics()["failures"] == {}
+    assert len(mock.requests) == 1
+    assert brain.status()["no_answers"]["empty"] == 1

@@ -121,7 +121,18 @@ def test_gwi_mismatched_lengths_truncate():
     assert score == pytest.approx(expected)
 
 
-def test_gwi_missing_token_attention_contributes_zero():
+def test_gwi_missing_token_attention_raises():
+    data = _gwi_data([0.1, 0.5, 0.3], [], retrieved=["m1"], focus_changes=4, latency=50)
+    data["llm_processing"]["token_attention"] = None
+    with pytest.raises(MissingSignal, match="llm_processing.token_attention"):
+        _measure(GlobalWorkspaceIntegration(), data)
+    del data["llm_processing"]
+    with pytest.raises(MissingSignal, match="llm_processing.token_attention"):
+        _measure(GlobalWorkspaceIntegration(), data)
+
+
+def test_gwi_empty_token_attention_contributes_no_correlation():
+    # The formula itself: an explicit empty vector adds no correlation term.
     data = _gwi_data([0.1, 0.5, 0.3], [], retrieved=["m1"], focus_changes=4, latency=50)
     score = _measure(GlobalWorkspaceIntegration(), data)
     assert score == pytest.approx(0.5 * 0.3 + 0.5 * 0.4)
@@ -224,6 +235,15 @@ def test_metrics_nothing_measured_is_none():
     trends = analysis.get_longitudinal_analysis(hours=1)["trends"]
     assert trends["overall"]["measured_samples"] == 0
     assert trends["global_workspace_integration"]["mean"] is None
+
+
+def test_summary_trend_is_none_for_one_sample():
+    one = metrics_mod._summary([0.4])
+    assert one["trend"] is None
+    assert one["mean"] == pytest.approx(0.4)
+    assert one["measured_samples"] == 1
+    two = metrics_mod._summary([0.2, 0.6])
+    assert two["trend"] == pytest.approx(0.4)
 
 
 def test_indicator_count_is_fourteen():

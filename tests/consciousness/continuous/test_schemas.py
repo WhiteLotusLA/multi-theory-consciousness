@@ -134,7 +134,7 @@ def test_doc_shape_matches_mongo_thought_stream():
     assert doc["coherence_score"] == 0.7
     assert doc["metadata"]["should_express"] is True
     assert doc["metadata"]["intensity"] == "strong"
-    # The document constructs the Phase 5 dataclass unchanged.
+    # The document constructs the ThoughtStream dataclass unchanged.
     assert ThoughtStream(**doc).to_dict() == doc
 
 

@@ -27,6 +27,15 @@ System metrics are optional. gather_system_body_metrics() returns only the
 keys it can actually measure, and the body mapping overrides a channel only
 when its key is present, so nothing is fabricated from a default.
 
+First update (the ``first_delta`` constructor argument): an update with no
+previous body state (the first one, or the first after a rejected restore)
+has nothing to measure a perturbation against.
+  - "unmeasured" (default): body_delta, stability and the arousal feeling
+    are None on that update and nothing enters the delta history.
+  - "v04_zero": the v0.4.0 behaviour, which recorded body_delta 0.0,
+    stability 1.0 and arousal 0.0 and put the 0.0 into the history; kept
+    so the legacy preset reproduces the published numbers.
+
 The critical output is body_delta -- the magnitude of change in body
 state between updates. When body_delta is high, something significant
 is happening that may require conscious attention. This perturbation
@@ -36,9 +45,6 @@ Primordial feelings (pleasure/pain, vitality, arousal) are derived
 from body state TRENDS -- not single snapshots -- to avoid noise.
 
 Research: Damasio (1999, 2010), Frontiers in AI (2025).
-
-Created: 2026-03-08
-Author: Multi-Theory Consciousness Contributors
 """
 
 import logging
@@ -52,6 +58,28 @@ from collections import deque
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
+
+
+def fmt_measure(value: Optional[float], spec: str = ".3f") -> str:
+    """Format a measured value, or name an unmeasured one.
+
+    Reports, prompt context and log lines print ``insufficient_data`` for
+    None instead of a number, so an unmeasured quantity never reads as a
+    measurement.
+    """
+    if value is None:
+        return "insufficient_data"
+    return format(float(value), spec)
+
+
+def opt_float(value: Any) -> Optional[float]:
+    """A float for a number, None for None or an unparseable value."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass
@@ -106,12 +134,17 @@ class BodyState:
 
 @dataclass
 class ProtoSelfState:
-    """Complete protoself state at a moment in time."""
+    """Complete protoself state at a moment in time.
+
+    ``body_delta``, ``stability`` and the ``arousal`` feeling are None on an
+    update that had no previous body state to compare with (see the
+    ``first_delta`` modes in the module docstring).
+    """
 
     body_state: BodyState
-    body_delta: float  # How much body state changed (perturbation signal)
-    stability: float  # Moving average of inverse body_delta (high = stable)
-    primordial_feelings: Dict[str, float]  # Proto-emotions from body state trends
+    body_delta: Optional[float]  # Change in body state (perturbation signal)
+    stability: Optional[float]  # Inverse of the mean recent delta (high = stable)
+    primordial_feelings: Dict[str, Optional[float]]  # Proto-emotions from trends
     timestamp: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -127,10 +160,10 @@ class ProtoSelfState:
     def from_dict(cls, raw: Dict[str, Any]) -> "ProtoSelfState":
         return cls(
             body_state=BodyState.from_dict(raw.get("body_state") or {}),
-            body_delta=float(raw.get("body_delta", 0.0)),
-            stability=float(raw.get("stability", 1.0)),
+            body_delta=opt_float(raw.get("body_delta")),
+            stability=opt_float(raw.get("stability")),
             primordial_feelings={
-                str(k): float(v)
+                str(k): opt_float(v)
                 for k, v in (raw.get("primordial_feelings") or {}).items()
             },
             timestamp=float(raw.get("timestamp", time.time())),
@@ -141,6 +174,8 @@ class ProtoSelfState:
 CIRCADIAN_CYCLE_LENGTH = 1000
 
 CIRCADIAN_MODES = ("sinusoid", "v04_sawtooth", "wall_clock")
+
+FIRST_DELTA_MODES = ("unmeasured", "v04_zero")
 
 
 def sinusoid_circadian(cycle_count: int, period: int = CIRCADIAN_CYCLE_LENGTH) -> float:
@@ -292,6 +327,7 @@ class Protoself:
         wake_hour: int = 6,
         sleep_hour: int = 22,
         clock: Optional[Callable[[], datetime]] = None,
+        first_delta: str = "unmeasured",
     ):
         """
         Args:
@@ -302,10 +338,17 @@ class Protoself:
             sleep_hour: Hour (0-23) the sleep period starts
             clock: Optional callable returning the current datetime; the
                 wall-clock model uses it instead of the system clock
+            first_delta: "unmeasured" (default): an update with no previous
+                body state reports body_delta, stability and arousal as
+                None; "v04_zero": it records 0.0, 1.0 and 0.0 (v0.4.0)
         """
         if circadian not in CIRCADIAN_MODES:
             raise ValueError(
                 f"circadian must be one of {CIRCADIAN_MODES}, got {circadian!r}"
+            )
+        if first_delta not in FIRST_DELTA_MODES:
+            raise ValueError(
+                f"first_delta must be one of {FIRST_DELTA_MODES}, got {first_delta!r}"
             )
         for label, hour in (("wake_hour", wake_hour), ("sleep_hour", sleep_hour)):
             if not 0 <= int(hour) <= 23:
@@ -314,6 +357,7 @@ class Protoself:
             raise ValueError("wake_hour and sleep_hour must differ")
 
         self.circadian = circadian
+        self.first_delta = first_delta
         self.timezone = timezone
         self.wake_hour = int(wake_hour)
         self.sleep_hour = int(sleep_hour)
@@ -456,7 +500,9 @@ class Protoself:
                 memory_usage_pct, cpu_load
 
         Returns:
-            ProtoSelfState with body state, perturbation, stability, feelings
+            ProtoSelfState with body state, perturbation, stability, feelings.
+            With no previous body state the perturbation, the stability and
+            the arousal are None under the default ``first_delta`` mode.
         """
         self.cycle_count += 1
 
@@ -476,23 +522,26 @@ class Protoself:
 
         # --- Compute perturbation (body_delta) ---
         current_vec = body.to_vector()
+        body_delta: Optional[float]
         if self._previous_body_vector is not None:
             body_delta = float(np.linalg.norm(current_vec - self._previous_body_vector))
+        elif self.first_delta == "v04_zero":
+            body_delta = 0.0  # v0.4.0 recorded the first update as no change
         else:
-            body_delta = 0.0
+            body_delta = None  # no previous body state: nothing to measure
         self._previous_body_vector = current_vec.copy()
-        self._body_delta_history.append(body_delta)
+        if body_delta is not None:
+            self._body_delta_history.append(body_delta)
 
         # --- Compute stability (inverse of average delta) ---
-        avg_delta = (
-            float(np.mean(list(self._body_delta_history)))
-            if self._body_delta_history
-            else 0.0
-        )
-        stability = 1.0 / (
-            1.0 + avg_delta * 5.0
-        )  # Maps to ~1.0 when delta~0, ~0.5 when delta~0.2
-        self._stability_history.append(stability)
+        # Unmeasured while no delta has been measured
+        stability: Optional[float] = None
+        if self._body_delta_history:
+            avg_delta = float(np.mean(list(self._body_delta_history)))
+            stability = 1.0 / (
+                1.0 + avg_delta * 5.0
+            )  # Maps to ~1.0 when delta~0, ~0.5 when delta~0.2
+            self._stability_history.append(stability)
 
         # --- Derive primordial feelings from trends ---
         self._valence_trend.append(valence)
@@ -510,7 +559,7 @@ class Protoself:
 
         logger.debug(
             f"Protoself cycle {self.cycle_count}: "
-            f"delta={body_delta:.3f}, stability={stability:.3f}, "
+            f"delta={fmt_measure(body_delta)}, stability={fmt_measure(stability)}, "
             f"energy={body.energy_level:.2f}, pain={body.pain_signals:.2f}"
         )
 
@@ -606,14 +655,15 @@ class Protoself:
 
     def _derive_primordial_feelings(
         self, valence: float, body: BodyState, free_energy: float
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Optional[float]]:
         """
         Derive primordial feelings from body state trends.
 
         Feelings are trend-based, not snapshot-based:
         - pleasure_pain: valence trend (improving = pleasure)
         - vitality: energy trend (high energy = vital)
-        - arousal: body_delta magnitude (high change = high arousal)
+        - arousal: body_delta magnitude (high change = high arousal); None
+          while no body delta has been measured
         """
         # Pleasure-pain from valence trend
         if len(self._valence_trend) >= 2:
@@ -630,12 +680,11 @@ class Protoself:
         else:
             vitality = body.energy_level
 
-        # Arousal from recent body_delta
+        # Arousal from recent body_delta; unmeasured until one exists
+        arousal: Optional[float] = None
         if self._body_delta_history:
             recent_deltas = list(self._body_delta_history)[-3:]
             arousal = float(np.clip(np.mean(recent_deltas) * 3.0, 0.0, 1.0))
-        else:
-            arousal = 0.0
 
         return {
             "pleasure_pain": pleasure_pain,
@@ -644,18 +693,19 @@ class Protoself:
         }
 
     def get_statistics(self) -> Dict[str, Any]:
-        """Get comprehensive protoself statistics."""
+        """Protoself statistics; the averages are None while their history
+        holds no measurement."""
         return {
             "cycle_count": self.cycle_count,
             "average_stability": (
                 float(np.mean(list(self._stability_history)))
                 if self._stability_history
-                else 0.0
+                else None
             ),
             "average_body_delta": (
                 float(np.mean(list(self._body_delta_history)))
                 if self._body_delta_history
-                else 0.0
+                else None
             ),
             "latest_state": (
                 self._latest_state.to_dict() if self._latest_state else None
@@ -691,6 +741,7 @@ class Protoself:
             "scalars": {
                 "cycle_count": self.cycle_count,
                 "circadian": self.circadian,
+                "first_delta": self.first_delta,
                 "last_time_period": self._last_time_period,
             },
             "arrays": arrays,

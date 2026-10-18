@@ -13,14 +13,15 @@ Four components, each in [0, 1]:
 - structural (0.15): relative difference of sentence length, punctuation
   density and vocabulary richness
 - marker (0.25): behavioral markers lost (weight 0.7) and new
-  should-not-contain violations (weight 0.3)
+  should-not-contain violations (weight 0.3), over the positions measured in
+  both snapshots (a hit of None, a marker too abstract to check, is left out)
 
 ``DriftDetector.compare`` flags a rollback when the aggregate exceeds
 ``rollback_threshold`` (default 0.3). The detector is stateless and does no
 I/O.
 
-A component that cannot be computed (no embeddings, no markers defined, no
-text) is None for that entry and is left out: the entry's index is the
+A component that cannot be computed (no embeddings, no markers defined or
+none measurable, no text) is None for that entry and is left out: the entry's index is the
 weighted mean of the components that were measured. An entry present in only
 one snapshot is listed under ``entries_missing``. With no entry comparable the
 reading is ``insufficient_data`` with a None aggregate and no rollback claim.
@@ -34,7 +35,7 @@ import logging
 import math
 import re
 from collections import Counter
-from typing import Dict, List, Mapping, Optional
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from mtc.consciousness.rsi.canon_schema import (
     DriftReading,
@@ -129,25 +130,43 @@ def structural_drift(baseline_text: str, current_text: str) -> Optional[float]:
     return sum(diffs) / len(diffs)
 
 
+def _measured_pairs(
+    baseline: Sequence[Optional[bool]], current: Sequence[Optional[bool]]
+) -> List[Tuple[bool, bool]]:
+    """The positions where both snapshots hold a measured hit."""
+    return [
+        (bool(b), bool(c))
+        for b, c in zip(baseline, current)
+        if b is not None and c is not None
+    ]
+
+
 def marker_drift(
-    baseline_hits: List[bool],
-    current_hits: List[bool],
-    violation_baseline: List[bool],
-    violation_current: List[bool],
+    baseline_hits: Sequence[Optional[bool]],
+    current_hits: Sequence[Optional[bool]],
+    violation_baseline: Sequence[Optional[bool]],
+    violation_current: Sequence[Optional[bool]],
 ) -> Optional[float]:
-    """Marker loss (0.7) plus new violations (0.3); None when nothing is defined."""
-    if not (baseline_hits or current_hits or violation_baseline or violation_current):
+    """Marker loss (0.7) plus new violations (0.3) over measurable positions.
+
+    Only positions where both snapshots hold a hit that is not None are
+    compared. The loss rate is the share of measurable baseline hits that the
+    current snapshot lost; the violation rate the share of measurable
+    should-not-contain positions newly violated. None when no position on
+    either list is measurable.
+    """
+    markers = _measured_pairs(baseline_hits, current_hits)
+    violations = _measured_pairs(violation_baseline, violation_current)
+    if not markers and not violations:
         return None
     loss_rate = 0.0
-    if baseline_hits or current_hits:
-        lost = sum(1 for b, c in zip(baseline_hits, current_hits) if b and not c)
-        loss_rate = lost / max(sum(1 for b in baseline_hits if b), 1)
+    if markers:
+        lost = sum(1 for b, c in markers if b and not c)
+        loss_rate = lost / max(sum(1 for b, _ in markers if b), 1)
     violation_rate = 0.0
-    if violation_baseline or violation_current:
-        new = sum(
-            1 for b, c in zip(violation_baseline, violation_current) if c and not b
-        )
-        violation_rate = new / max(len(violation_current), 1)
+    if violations:
+        new = sum(1 for b, c in violations if c and not b)
+        violation_rate = new / len(violations)
     return min(1.0, loss_rate * 0.7 + violation_rate * 0.3)
 
 

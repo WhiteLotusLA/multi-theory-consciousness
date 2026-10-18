@@ -4,9 +4,10 @@ Attention-Capture Journal
 
 Observe-only record of the moments attention was pulled rather than chosen:
 the attention schema's ``captured`` and ``emotional`` shifts. Recording
-changes nothing in the attention dynamics. The Phase 6 orchestrator calls
-``observe`` with the schema's current focus after each cycle when the journal
-is enabled.
+changes nothing in the attention dynamics. The pipeline's consciousness
+orchestrator (``mtc.pipeline.consciousness_orchestrator``) calls ``observe``
+with the schema's current focus after each workspace cycle; the runtime builds
+the observer, and recording is gated by the setting below.
 
 Config keys, read at call time from ``settings`` (or ``get_settings()``):
 
@@ -16,6 +17,7 @@ Config keys, read at call time from ``settings`` (or ``get_settings()``):
   grab_journal.md`` unless ``journal_dir`` is given; created on the first
   recorded entry.
 - ``TIMEZONE``: the local display time of each entry.
+- ``DEBUG``: a failed step is raised instead of counted only.
 
 Each recorded focus is reduced to a ``GrabEntry``: the summary with reasoning
 blocks removed (``strip_reasoning_blocks`` over ``reasoning_tags``) and
@@ -30,18 +32,22 @@ above it, ``unknown`` for a non-finite strength.
 
 Entries go to an ``AttentionGrabStore`` (``mtc.memory.protocols``; None means
 ``InMemoryAttentionGrabStore``) with an aware UTC ISO timestamp, and as one
-line to the journal. Both writes are independent and fail soft: ``observe``
-never raises. Grab entries can hold real people's names at runtime and are
-private data; the journal lives in the gitignored agent space.
+line to the journal. Both writes are independent and fail soft. A failed step
+(``observe``, ``store`` or ``journal``) is counted by name in ``status()``,
+logged the first time and every hundredth time with the exception type only,
+and raised when ``DEBUG`` is true; with ``DEBUG`` off ``observe`` never
+raises. Grab entries can hold real people's names at runtime and are private
+data; the journal lives in the gitignored agent space.
 """
 
 import logging
 import math
 import uuid
+from collections import Counter
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 from zoneinfo import ZoneInfo
 
 from mtc.brain.protocol import strip_reasoning_blocks
@@ -59,6 +65,8 @@ logger = logging.getLogger(__name__)
 
 GRAB_SHIFT_TYPES = frozenset({"captured", "emotional"})
 SUMMARY_MAX_CHARS = 140
+# A failed step is logged the first time and every this many times after.
+FAILURE_LOG_EVERY = 100
 JOURNAL_NAME = "grab_journal.md"
 _JOURNAL_HEADER = "# Attention-capture journal\n\n"
 
@@ -125,9 +133,28 @@ class AttentionGrabObserver:
         self.focus_threshold = float(focus_threshold)
         self.capture_threshold = float(capture_threshold)
         self._last_focus_key: Optional[str] = None
+        self.failures: Counter = Counter()
 
     def _config(self) -> Any:
         return self._settings if self._settings is not None else get_settings()
+
+    def _failure(self, step: str, exc: BaseException) -> None:
+        """Count a failed step, log the first and every hundredth, raise in DEBUG."""
+        self.failures[step] += 1
+        count = self.failures[step]
+        if count == 1 or count % FAILURE_LOG_EVERY == 0:
+            logger.warning(
+                "attention capture step %s failed (%d so far): %s",
+                step,
+                count,
+                type(exc).__name__,
+            )
+        if bool(getattr(self._config(), "DEBUG", False)):
+            raise exc
+
+    def status(self) -> Dict[str, Any]:
+        """Whether recording is on and the failed steps counted by name."""
+        return {"enabled": self.enabled, "failures": dict(self.failures)}
 
     @property
     def enabled(self) -> bool:
@@ -163,11 +190,12 @@ class AttentionGrabObserver:
         return " ".join(text.split())[:SUMMARY_MAX_CHARS]
 
     async def observe(self, focus: Optional[AttentionTarget]) -> Optional[GrabEntry]:
-        """Record the focus when it is a new capture; never raises.
+        """Record the focus when it is a new capture.
 
         Returns the recorded entry, or None when disabled, when there is no
-        focus, when the shift was chosen or habitual, or when the focus is
-        the one observed last.
+        focus, when the shift was chosen or habitual, when the focus is the
+        one observed last, or when reading the focus failed. Never raises
+        unless ``DEBUG`` is true.
         """
         if not self.enabled:
             return None
@@ -196,8 +224,8 @@ class AttentionGrabObserver:
                 ),
                 focus_key=key,
             )
-        except Exception as e:
-            logger.warning(f"Attention capture observation failed: {e}")
+        except Exception as exc:
+            self._failure("observe", exc)
             return None
         await self._persist(entry)
         logger.info(
@@ -210,8 +238,8 @@ class AttentionGrabObserver:
         """Write the entry to the store and to the journal, independently."""
         try:
             await self.store.add_grab(asdict(entry))
-        except Exception as e:
-            logger.warning(f"Attention capture store write failed: {e}")
+        except Exception as exc:
+            self._failure("store", exc)
         try:
             path = self.journal_path
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -220,8 +248,8 @@ class AttentionGrabObserver:
                 if new_file:
                     handle.write(_JOURNAL_HEADER)
                 handle.write(self._line(entry) + "\n")
-        except Exception as e:
-            logger.warning(f"Attention capture journal write failed: {e}")
+        except Exception as exc:
+            self._failure("journal", exc)
 
     @staticmethod
     def _line(entry: GrabEntry) -> str:

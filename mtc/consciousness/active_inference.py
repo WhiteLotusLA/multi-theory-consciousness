@@ -27,21 +27,20 @@ Research Foundation:
 - Friston, K. (2012). "Active Inference and Free Energy"
 - Parr, T., & Friston, K. J. (2019). "Generalised free energy and active inference"
 - Butlin et al. (2023), 14 indicators - Predictive Processing
-
-Created: December 5, 2025
-Author: Multi-Theory Consciousness Contributors
 """
 
 import asyncio
 import logging
 import time
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 from mtc.consciousness.prediction_ledger import PredictionLedger
+from mtc.core.config import get_settings
 
 # pymdp for Active Inference.
 # pymdp v1.0 ships a JAX-based Agent (pymdp.agent) and preserves the original
@@ -94,10 +93,19 @@ _SOCIAL_TYPES_V04 = ("conversation", "interaction", "connecting")
 _SOCIAL_TYPES_F4 = _SOCIAL_TYPES_V04 + ("social_interaction",)
 _COHERENCE_TYPES_F4 = ("reasoning", "understanding", "sensemaking")
 
+# The drive model's event intensity for an activity that states none (absent
+# or None). A parameter of the drive simulation, not a measurement: the
+# post-turn step and the autonomous loop send events without an intensity by
+# design.
+DEFAULT_ACTIVITY_INTENSITY = 0.5
+
 # Long-running processes keep bounded histories: once a list passes the limit
 # it is trimmed to the most recent KEEP entries.
 HISTORY_LIMIT = 1000
 HISTORY_KEEP = 500
+# A failed step or a zero-mass observation is logged the first time and every
+# this many times after.
+FAILURE_LOG_EVERY = 100
 META_HISTORY_LIMIT = HISTORY_LIMIT
 META_HISTORY_KEEP = HISTORY_KEEP
 
@@ -302,6 +310,17 @@ INFERENCE_HISTORY_LIMIT = 100
 POSTERIOR_MAPPING_LIMIT = 200
 
 
+def _finite_or_none(value: Any) -> Optional[float]:
+    """The value as a finite float; None when missing, non-numeric or not finite."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if np.isfinite(number) else None
+
+
 def _generic_labels(prefix: str, count: int) -> List[str]:
     return [f"{prefix}_{i}" for i in range(count)]
 
@@ -413,7 +432,8 @@ class ActiveInferenceConfig:
 
     # Optional receiver for per-cycle signal records (a dict with signal_id,
     # values, computed_from, context and timestamp). The module never writes
-    # files itself; a sink that raises is logged and ignored.
+    # files itself; a sink that raises is counted as the failed step
+    # "signal_sink" and the cycle goes on (Settings.DEBUG raises instead).
     signal_sink: Optional[Callable[[Dict[str, Any]], None]] = None
 
     # World model preset (see the class docstring)
@@ -764,9 +784,11 @@ class ActiveInferenceState:
     most_urgent_drive: Optional[str] = None
     urgency_level: float = 0.0
 
-    # Meta-inference fields (Beautiful Loop - self-referential prediction)
-    meta_confidence: float = 0.5
-    meta_predicted_accuracy: float = 0.5
+    # Meta-inference fields (Beautiful Loop - self-referential prediction).
+    # None until the meta-state has scored a forecast (and always None with
+    # meta inference off): before that they would only repeat its priors.
+    meta_confidence: Optional[float] = None
+    meta_predicted_accuracy: Optional[float] = None
     meta_cognitive_load: float = 0.0
 
     timestamp: float = field(default_factory=time.time)
@@ -973,7 +995,9 @@ class HomeostaticDrives:
 
         # Map activity types to drive impacts
         activity_type = activity.get("type", "unknown")
-        intensity = activity.get("intensity", 0.5)
+        intensity = activity.get("intensity")
+        if intensity is None:
+            intensity = DEFAULT_ACTIVITY_INTENSITY
 
         if drive.name == "attention_budget":
             # Cognitive activities deplete attention. Under "f4" this includes
@@ -1373,10 +1397,24 @@ class ActiveInferenceModule:
     # observation mix to within a quarter of the total mass.
     FORECAST_TOLERANCE = 0.5
 
-    def __init__(self, config: Optional[ActiveInferenceConfig] = None):
+    def __init__(
+        self, config: Optional[ActiveInferenceConfig] = None, settings: Any = None
+    ):
+        """Build the generative model and the pymdp agent.
+
+        Args:
+            config: Module configuration; None uses the defaults.
+            settings: Settings read for ``DEBUG``; None reads
+                ``get_settings()`` when a step fails. A failed step is counted
+                by name in ``get_statistics()["failures"]``, logged the first
+                time and every hundredth time with the exception type only,
+                and raised when ``DEBUG`` is true.
+        """
         if Agent is None or pymdp_utils is None:
             raise ImportError(PYMDP_MISSING_MESSAGE)
         self.config = config or ActiveInferenceConfig()
+        self._settings = settings
+        self.failures: Counter = Counter()
 
         # Define the generative model dimensions
         self.num_states = self.config.num_hidden_states
@@ -1452,6 +1490,9 @@ class ActiveInferenceModule:
         # Counters
         self.total_inferences = 0
         self.total_model_updates = 0
+        # Observations with no positive mass, read as channel 0 (see
+        # infer_and_act)
+        self.zero_mass_observations = 0
 
         logger.info(
             "Active Inference Module initialized (FEP): %d hidden states, "
@@ -1654,6 +1695,13 @@ class ActiveInferenceModule:
                 from the Attention Schema. Sharpens the A matrix for attended
                 channels, implementing the FEP account of attention as
                 precision modulation (Whyte et al. 2026, Feldman & Friston 2010).
+
+        A zero-mass observation (no positive sum, as an all-zero vector from
+        a cycle with no winning content) is read as observation channel 0,
+        exactly like a one-hot vector on that channel: beliefs and the
+        generative model still update. Each one is counted in
+        ``zero_mass_observations`` (logged the first time and every
+        hundredth time).
         """
         # Ensure observation is the right size
         if len(observation) != self.num_observations:
@@ -1687,7 +1735,10 @@ class ActiveInferenceModule:
 
         # Step 1: Infer hidden states from observation
         # Convert observation to index for pymdp
-        obs_index = int(np.argmax(observation)) if observation.sum() > 0 else 0
+        has_mass = observation.sum() > 0
+        if not has_mass:
+            self._count_zero_mass()
+        obs_index = int(np.argmax(observation)) if has_mass else 0
         qs = self.agent.infer_states([obs_index])
 
         # pymdp returns a numpy array containing arrays for each factor
@@ -1820,11 +1871,38 @@ class ActiveInferenceModule:
         A_mod[0] = A_mod[0] / col_sums
         return A_mod
 
+    def _count_zero_mass(self) -> None:
+        """Count a zero-mass observation; log the first and every hundredth."""
+        self.zero_mass_observations += 1
+        count = self.zero_mass_observations
+        if count == 1 or count % FAILURE_LOG_EVERY == 0:
+            logger.warning(
+                "active inference observation %d had no mass; read as channel 0",
+                count,
+            )
+
+    def _failure(self, step: str, exc: BaseException) -> None:
+        """Count a failed step, log the first and every hundredth, raise in DEBUG."""
+        self.failures[step] += 1
+        count = self.failures[step]
+        if count == 1 or count % FAILURE_LOG_EVERY == 0:
+            logger.warning(
+                "active inference step %s failed (%d so far): %s",
+                step,
+                count,
+                type(exc).__name__,
+            )
+        settings = self._settings if self._settings is not None else get_settings()
+        if bool(getattr(settings, "DEBUG", False)):
+            raise exc
+
     def _emit_signal(self, prediction_error: float, observation: np.ndarray) -> None:
         """Send this cycle's prediction error record to the configured sink.
 
         The record carries the observation novelty (L1 distance to the
-        previous observation) as a content-coupling feature. Never raises.
+        previous observation) as a content-coupling feature. A sink that
+        raises is counted as the failed step ``signal_sink``; this method
+        raises only when ``Settings.DEBUG`` is true.
         """
         sink = self.config.signal_sink
         if sink is None:
@@ -1848,8 +1926,8 @@ class ActiveInferenceModule:
         }
         try:
             sink(record)
-        except Exception as exc:  # noqa: BLE001 - a sink must never break a cycle
-            logger.debug("signal sink raised and was ignored: %s", exc)
+        except Exception as exc:  # noqa: BLE001 - counted; raised only in DEBUG
+            self._failure("signal_sink", exc)
 
     def prediction_error_rank(self, value: float) -> Optional[float]:
         """Percentile rank of ``value`` in the module's own recent errors.
@@ -1878,7 +1956,8 @@ class ActiveInferenceModule:
         Conscious focus sharpens future predictions: the persistent bias
         decays by WORKSPACE_BIAS_DECAY each call, then every winner adds its
         activation times WORKSPACE_BIAS_GAIN to its content type's channel,
-        capped at WORKSPACE_BIAS_CAP.
+        capped at WORKSPACE_BIAS_CAP. A winner without a finite activation
+        level adds nothing.
 
         Args:
             winners: Workspace winners. Each may be a workspace content object
@@ -1891,18 +1970,21 @@ class ActiveInferenceModule:
         for winner in winners or []:
             if isinstance(winner, dict):
                 content_type = winner.get("content_type")
-                activation = winner.get("activation_level", 0.5)
+                activation = winner.get("activation_level")
             else:
                 candidate = getattr(winner, "candidate", winner)
                 if candidate is None:
                     continue
                 content_type = getattr(candidate, "content_type", None)
-                activation = getattr(candidate, "activation_level", 0.5)
+                activation = getattr(candidate, "activation_level", None)
+            level = _finite_or_none(activation)
+            if level is None:
+                continue
 
             channel = self.channel_for_content_type(content_type)
             if channel is None:
                 continue
-            boost = max(0.0, float(activation)) * self.WORKSPACE_BIAS_GAIN
+            boost = max(0.0, level) * self.WORKSPACE_BIAS_GAIN
             self._workspace_precision_bias[channel] = min(
                 self._workspace_precision_bias[channel] + boost,
                 self.WORKSPACE_BIAS_CAP,
@@ -2299,13 +2381,15 @@ class ActiveInferenceModule:
         )
         total_fe = vfe + homeostatic_fe
 
-        # Meta-inference state (Beautiful Loop)
-        meta_confidence = 0.5
-        meta_predicted_accuracy = 0.5
+        # Meta-inference state (Beautiful Loop). The confidence and predicted
+        # accuracy are readings only once a forecast was scored.
+        meta_confidence: Optional[float] = None
+        meta_predicted_accuracy: Optional[float] = None
         meta_cognitive_load = 0.0
         if self.meta_state is not None:
-            meta_confidence = self.meta_state.model_confidence
-            meta_predicted_accuracy = self.meta_state.predicted_accuracy
+            if self.meta_state.total_predictions > 0:
+                meta_confidence = self.meta_state.model_confidence
+                meta_predicted_accuracy = self.meta_state.predicted_accuracy
             meta_cognitive_load = self.meta_state.cognitive_load
 
         return ActiveInferenceState(
@@ -2360,6 +2444,8 @@ class ActiveInferenceModule:
             "hierarchical_prediction_error": hpp_error,
             "measured_accuracy": self.prediction_ledger.measured_accuracy(),
             "scored_forecasts": self.prediction_ledger.scored_count,
+            "zero_mass_observations": self.zero_mass_observations,
+            "failures": dict(self.failures),
         }
 
     async def generate_active_inference_report(self) -> str:
@@ -2369,11 +2455,18 @@ class ActiveInferenceModule:
         error trend and the free energy line, ``narrate_body_drives`` the most
         urgent need. A closed gate drops the line; the computation behind it
         (get_state, drives, free energy) runs either way.
+
+        A line is written only when what it states was measured: the trend
+        only with more than ten prediction errors (the history ``get_state``
+        needs for a trend), the most urgent need only when its urgency is
+        above zero, and the free energy line only after an inference ran. The
+        free energy line names the level and makes no accuracy claim. A
+        fresh module reports the empty string.
         """
         state = self.get_state()
 
         report_parts = []
-        if self.config.narrate_free_energy:
+        if self.config.narrate_free_energy and len(self.prediction_errors) > 10:
             trend = state.prediction_error_trend
             if trend not in ("decreasing", "stable"):
                 trend = "increasing"
@@ -2381,17 +2474,21 @@ class ActiveInferenceModule:
                 f"My current active inference state: prediction error {trend}."
             )
 
-        if state.most_urgent_drive and self.config.narrate_body_drives:
+        if (
+            state.most_urgent_drive
+            and state.urgency_level > 0
+            and self.config.narrate_body_drives
+        ):
             report_parts.append(
                 f"Most urgent need: {state.most_urgent_drive} "
                 f"(urgency: {state.urgency_level:.2f})."
             )
 
-        if self.config.narrate_free_energy:
+        if self.config.narrate_free_energy and self.free_energy_history:
             if state.total_free_energy > 1.0:
                 report_parts.append("High free energy - seeking to reduce surprise.")
             else:
-                report_parts.append("Low free energy - predictions are accurate.")
+                report_parts.append("Low free energy.")
 
         return " ".join(report_parts)
 
@@ -2423,6 +2520,7 @@ class ActiveInferenceModule:
             "num_actions": self.num_actions,
             "total_inferences": int(self.total_inferences),
             "total_model_updates": int(self.total_model_updates),
+            "zero_mass_observations": int(self.zero_mass_observations),
             "pending_prediction_id": self._pending_prediction_id,
             "hpp_precisions": {
                 str(i): float(level.precision)
@@ -2520,7 +2618,7 @@ class ActiveInferenceModule:
         """Ledger state from either saved shape, or None when absent.
 
         The flat shape keeps two lists under ``ledger_pending`` and
-        ``ledger_scored``. State written in Phase 1 nested the ledger's whole
+        ``ledger_scored``. An older state shape nested the ledger's whole
         state dict under ``prediction_ledger``; it is still read.
         """
         if "ledger_pending" in h or "ledger_scored" in h:
@@ -2574,6 +2672,9 @@ class ActiveInferenceModule:
 
         # --- scalars ---
         self.total_inferences = int(s.get("total_inferences", self.total_inferences))
+        self.zero_mass_observations = int(
+            s.get("zero_mass_observations", self.zero_mass_observations)
+        )
         # Counts updates of the current model, so it resets with the model
         self.total_model_updates = (
             int(s.get("total_model_updates", self.total_model_updates))

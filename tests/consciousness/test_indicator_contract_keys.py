@@ -12,6 +12,7 @@ from mtc.consciousness.consciousness_integration import ConsciousnessIntegration
 from mtc.consciousness.consciousness_metrics import (
     GlobalWorkspaceIntegration,
     IntegratedInformationPhi,
+    MissingSignal,
 )
 
 # Oscillator indices by binding group: snn 0-7, lsm 8-15, htm 16-23, cross 24-29.
@@ -87,7 +88,8 @@ def test_contract_keys_absent_sources_stay_missing():
     keys = _integration(SimpleNamespace())._build_indicator_contract_keys(
         _blocks(False, False, False)
     )
-    assert keys["neural_activity"]["activation_pattern"] == []
+    # No SNN signal: the activation pattern is missing, not an empty vector.
+    assert keys["neural_activity"]["activation_pattern"] is None
     assert keys["attention_focus"]["focus_changes"] is None
     assert keys["memory_access"]["retrieved_memories"] is None
     assert keys["system_state"]["active_components"] == []
@@ -95,15 +97,24 @@ def test_contract_keys_absent_sources_stay_missing():
     assert "broadcast_latency_ms" not in keys
 
 
-def test_token_attention_honestly_empty():
+def test_token_attention_is_absent_and_named():
     integration = _integration(_orchestrator())
     keys = integration._build_indicator_contract_keys(_blocks())
-    assert keys["llm_processing"]["token_attention"] == []
+    # No component produces token attention, so the key is left out.
+    assert "token_attention" not in keys.get("llm_processing", {})
 
-    score = asyncio.run(GlobalWorkspaceIntegration().measure(keys))
-    # Correlation term is zero; coupling (2 memories + 6 shifts) / 10 = 0.8
-    # and efficiency 1 - 20 / 100 = 0.8.
-    assert score == pytest.approx(0.8 * 0.3 + 0.8 * 0.4)
+    with pytest.raises(MissingSignal) as caught:
+        asyncio.run(GlobalWorkspaceIntegration().measure(keys))
+    assert "llm_processing.token_attention" in str(caught.value)
+    assert "neural_activity.activation_pattern" not in str(caught.value)
+
+    # Without an SNN signal the activation pattern is named as well.
+    keys = _integration(
+        _orchestrator(latest_neural_signals=None)
+    )._build_indicator_contract_keys(_blocks())
+    with pytest.raises(MissingSignal) as caught:
+        asyncio.run(GlobalWorkspaceIntegration().measure(keys))
+    assert "neural_activity.activation_pattern" in str(caught.value)
 
 
 def test_ctm_component_read_from_thoughts_block():

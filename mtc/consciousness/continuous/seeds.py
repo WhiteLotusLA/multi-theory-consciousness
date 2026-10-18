@@ -16,8 +16,8 @@ Pack keys:
   ``dream_spontaneous_templates``;
 - plain entries: ``concept_pairs`` (two words each), ``creative_concepts`` and
   ``memory_query_terms``;
-- slot words (``SLOT_KEYS``): ``reflection``, ``feeling``, ``emotion``,
-  ``descriptor``, ``assessment`` and ``observation``;
+- slot words (``SLOT_KEYS``): ``reflection``, ``descriptor``, ``assessment``
+  and ``observation``;
 - the scalar ``description``.
 
 A template names a slot as ``{name}``. A slot word list fills it with one random
@@ -29,6 +29,14 @@ load time (naming the file, the key and the slot), so a template no caller
 could ever fill is refused rather than shipped dead; a context slot the caller
 did not supply raises ``SeedError`` when the template is filled: nothing is
 invented in its place. Slot word entries and plain entries carry no braces.
+
+There is no affect slot. A template that names ``{feeling}`` or ``{emotion}``
+(``AFFECT_SLOTS``), in any template family, and a pack that carries a
+``feeling`` or ``emotion`` word list are refused at load with a ``SeedError``
+that names the file, the key and the slot: a thought names an emotion only
+through ``{current_emotion}``, the emotion the affect reading measured. A
+library built directly from a mapping treats the two names as context slots
+nobody supplies, so a template using one is never chosen.
 
 Config keys read: ``CTM_CONFIG_DIR`` (the pack directory, read at call time).
 Pack text is configuration, not thought data; PyYAML is imported inside the
@@ -50,13 +58,19 @@ logger = logging.getLogger(__name__)
 
 SLOT_KEYS = (
     "reflection",
-    "feeling",
-    "emotion",
     "descriptor",
     "assessment",
     "observation",
 )
 CONTEXT_SLOTS = ("memory", "current_emotion", "first", "second", "concept")
+# Slot names that would name a feeling at random. A template using one and a
+# word list under one are refused at load: a thought names an emotion only
+# through the measured {current_emotion}.
+AFFECT_SLOTS = ("emotion", "feeling")
+AFFECT_HINT = (
+    "a thought names an emotion only through {current_emotion}, the emotion "
+    "the affect reading measured"
+)
 
 TEMPLATE_KEYS = (
     "memory_templates",
@@ -275,6 +289,12 @@ def _check_entries(key: str, value: Any, path: Path) -> List[Any]:
                 names = template_fields(item)
             except SeedError as exc:
                 raise SeedError(f"{where}: {exc}") from exc
+            affect = [n for n in names if n in AFFECT_SLOTS]
+            if affect:
+                raise SeedError(
+                    f"{where}: the affect slot {affect[0]!r} in template {item!r} "
+                    f"would name a feeling at random; {AFFECT_HINT}"
+                )
             unknown = [n for n in names if n not in SLOT_KEYS + CONTEXT_SLOTS]
             if unknown:
                 raise SeedError(
@@ -288,6 +308,11 @@ def _check_entries(key: str, value: Any, path: Path) -> List[Any]:
 
 def _merge_pack(merged: Dict[str, Any], pack: Mapping[str, Any], path: Path) -> None:
     for key, value in pack.items():
+        if key in AFFECT_SLOTS:
+            raise SeedError(
+                f"seed pack {path} has an unknown key {key!r}: there is no "
+                f"affect word list; {AFFECT_HINT}"
+            )
         if key not in ALL_KEYS:
             raise SeedError(f"seed pack {path} has an unknown key {key!r}")
         if key in SCALAR_KEYS:
@@ -303,6 +328,7 @@ def _merge_pack(merged: Dict[str, Any], pack: Mapping[str, Any], path: Path) -> 
 
 
 __all__: Tuple[str, ...] = (
+    "AFFECT_SLOTS",
     "ALL_KEYS",
     "CONTEXT_SLOTS",
     "LIST_KEYS",

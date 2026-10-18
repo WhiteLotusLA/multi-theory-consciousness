@@ -159,6 +159,26 @@ def test_mood_gate_reads_the_passed_settings(tmp_path, monkeypatch):
     assert machine.enhancer._mood_allowed() is False
 
 
+def test_enhancer_debug_reads_the_passed_settings(tmp_path, monkeypatch):
+    from mtc.consciousness.continuous import enhancer as enhancer_module
+
+    loud = Settings(
+        PROJECT_ROOT=str(tmp_path),
+        CTM_CONFIG_DIR=str(ROOT / "config" / "ctm"),
+        CTM_STORE="memory",
+        DEBUG=True,
+    )
+    quiet = _settings(tmp_path)
+    # the process settings say the opposite of the passed ones
+    monkeypatch.setattr(enhancer_module, "get_settings", lambda: quiet)
+    machine = build_thought_machine(
+        settings=loud, brain=FakeBrain([RuntimeError("boom")])
+    )
+    assert machine.enhancer._debug() is True
+    with pytest.raises(RuntimeError):
+        asyncio.run(machine.enhancer.generate("reflection", {}, "awake"))
+
+
 def test_weight_rules_from_settings(tmp_path):
     settings = _settings(
         tmp_path,

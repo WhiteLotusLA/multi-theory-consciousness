@@ -84,7 +84,11 @@ class LookupEmbedder:
 
 
 class ScriptedGenerator:
-    """Returns one scripted thought per call (None once the script is empty)."""
+    """Returns one scripted thought per call (None once the script is empty).
+
+    Like the seed generator's, each thought is a template thought whose
+    salience is a design constant (``form`` and ``salience_basis``).
+    """
 
     def __init__(self, texts: Iterable[str], clock: Clock, kind=ThoughtType.REFLECTION):
         self.texts = deque(texts)
@@ -107,6 +111,10 @@ class ScriptedGenerator:
             intensity=ThoughtIntensity.MODERATE,
             salience_score=0.5,
             consciousness_state=state,
+            processing_context={
+                "form": "template",
+                "salience_basis": "strategy_default",
+            },
             should_express=True,
         )
 
@@ -282,6 +290,38 @@ def test_level_unavailable_means_no_modulation_and_status_says_so():
     run(off.tick())
     assert off.get_status()["modulation"] == "disabled"
     assert off.modulation_factor() == 1.0
+
+
+def test_unmeasured_level_leaves_the_cadence_unmodulated():
+    readings = deque([0.0, None, float("nan")])
+
+    async def level():
+        return readings.popleft()
+
+    clock = Clock()
+    machine = make_machine(
+        endless(20),
+        clock=clock,
+        config=cfg_with(
+            max_thoughts_per_minute=100, consciousness_modulation={"refresh_every": 1}
+        ),
+        consciousness_level_provider=level,
+    )
+    run(machine.tick())
+    # a measured 0.0 slows the cadence: that is a measurement
+    assert machine.get_status()["modulation"] == "measured"
+    assert machine.modulation_factor() == pytest.approx(0.4)
+    for _ in range(2):
+        clock.advance(1)
+        run(machine.tick())
+        status = machine.get_status()
+        # the provider has no measured level: nothing is assumed in its place
+        assert status["consciousness_level"] is None
+        assert status["modulation"] == "unavailable"
+        assert status["modulation_factor"] == 1.0
+        assert machine.modulation_factor() == 1.0
+        assert machine.current_frequency == pytest.approx(0.008)
+    assert readings == deque()
 
 
 def test_resource_check_is_non_blocking():

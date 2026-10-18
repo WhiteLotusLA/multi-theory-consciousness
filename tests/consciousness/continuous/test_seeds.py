@@ -117,7 +117,7 @@ def test_user_pack_extends_and_overrides(tmp_path):
         "description: first\n"
         'questions:\n  - "What is the {descriptor} part really for?"\n'
         "concept_pairs:\n  - [sea, shore]\n"
-        "feeling:\n  - brisk\n",
+        "descriptor:\n  - brisk\n",
     )
     _write(
         base,
@@ -137,14 +137,50 @@ def test_user_pack_extends_and_overrides(tmp_path):
     assert questions.count("What is the {descriptor} part really for?") == 1
     assert questions[-1] == "A new open question?"
     assert ["sea", "shore"] in lib.entries("concept_pairs")
-    assert lib.entries("feeling")[-1] == "brisk"
+    assert lib.entries("descriptor")[-1] == "brisk"
     assert [p.name for p in lib.packs] == [
         "default.yaml",
         "10-first.yaml",
         "20-second.yaml",
     ]
     # The user pack changed nothing in the shipped file's library object.
-    assert "brisk" not in default.entries("feeling")
+    assert "brisk" not in default.entries("descriptor")
+
+
+@pytest.mark.parametrize("key", TEMPLATE_KEYS)
+def test_affect_slot_in_any_template_family_is_refused(tmp_path, key):
+    assert len(TEMPLATE_KEYS) == 9
+    for slot, template in (
+        ("feeling", "A {feeling} moment."),
+        ("emotion", "Some {emotion} here."),
+    ):
+        base = _base(tmp_path / slot)
+        path = _write(base, "affect.yaml", f'{key}:\n  - "{template}"\n')
+        with pytest.raises(SeedError) as err:
+            SeedLibrary.from_config_dir(base, settings=_settings(tmp_path))
+        message = str(err.value)
+        assert str(path) in message, message
+        assert repr(key) in message, message
+        assert repr(slot) in message, message
+        assert "{current_emotion}" in message, message
+
+
+def test_affect_word_lists_are_refused(tmp_path):
+    assert not {"feeling", "emotion"} & set(SLOT_KEYS)
+    assert not {"feeling", "emotion"} & set(ALL_KEYS)
+    for slot in ("feeling", "emotion"):
+        base = _base(tmp_path / slot)
+        path = _write(base, "words.yaml", f"{slot}:\n  - brisk\n")
+        with pytest.raises(SeedError) as err:
+            SeedLibrary.from_config_dir(base, settings=_settings(tmp_path))
+        message = str(err.value)
+        assert str(path) in message and repr(slot) in message, message
+        assert "{current_emotion}" in message, message
+    # the shipped pack carries neither list
+    import yaml
+
+    shipped = yaml.safe_load(DEFAULT_PACK.read_text("utf-8"))
+    assert not {"feeling", "emotion"} & set(shipped)
 
 
 def test_default_pack_is_neutral():
