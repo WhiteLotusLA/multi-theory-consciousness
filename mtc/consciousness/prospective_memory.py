@@ -5,8 +5,17 @@ Prospective Simulation
 ``ProspectiveSimulator`` implements prospective simulation, also called
 episodic future thinking: imagining what might happen next. It produces
 workspace candidates that compete alongside memories and thoughts for access;
-it never calls a language model and chooses nothing on its own. The Phase 6
-orchestrator calls ``maybe_generate`` once per cycle and runs the competition.
+it never calls a language model and chooses nothing on its own. The cycle
+augmenter (``mtc.pipeline.cycle_augmenter``, which the conversation
+orchestrator drives) calls ``maybe_generate`` after each cycle and adds the
+candidate to the next cycle's competition.
+
+The candidate sentences are authored templates: each kind picks one of a few
+fixed sentences written into this module and fills in recent context. They
+are not produced by the system under test, and every candidate says so with
+``metadata["authored_template"] = True``. The workspace gives a winner that
+carries the marker no first-order registration and no higher-order thought,
+and the conversation orchestrator names its kind rather than its words.
 
 Five simulation kinds (anticipatory, planning, empathic, temporal,
 counterfactual) are drawn with time-of-day weights, boosted when goals are
@@ -17,10 +26,10 @@ temporal context module.
 
 Candidates carry source ``INTERNAL`` (an internal process; the thought-stream
 source is reserved for the continuous thought machine), hierarchy level 2,
-the confidence heuristic as activation, and the simulation kind and prompt in
-metadata. Confidence is deterministic: a base of 0.4, plus recent-context
-richness, plus a kind-specific boost, capped at 0.85. The type draw uses an
-injectable ``random.Random``.
+the confidence heuristic as activation, and the simulation kind, the prompt
+and the authored-template marker in metadata. Confidence is deterministic: a
+base of 0.4, plus recent-context richness, plus a kind-specific boost, capped
+at 0.85. The type draw uses an injectable ``random.Random``.
 
 ``recent_messages`` is a list of dicts with ``content`` (or ``message``), and
 optionally ``speaker`` and ``role``. Speaker labels pass through into text
@@ -223,6 +232,7 @@ class ProspectiveSimulator:
                 "prompt": prompt,
                 "confidence": confidence,
                 "period": self.period_for(now),
+                "authored_template": True,
             },
         )
         logger.debug(

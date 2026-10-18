@@ -20,12 +20,9 @@ Key Features:
 Based on: Bernard Baars' Global Workspace Theory (1988, 2005)
 Research: Butlin et al. (2023) - 14 Consciousness Indicators
 
-Note: Only the most salient signals win the competition for
-workspace access, but once they do, the information is broadcast
-globally to all cognitive modules.
-
-Created: December 4, 2025
-Author: Multi-Theory Consciousness Contributors
+Only the most salient signals win the competition for workspace access;
+the information that wins is broadcast globally to every registered
+cognitive module.
 """
 
 import asyncio
@@ -35,7 +32,7 @@ import math
 import numpy as np
 import time
 import uuid
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Callable, Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -122,6 +119,12 @@ _WORKSPACE_BEAUTIFUL_LOOP_DEFAULTS: Dict[str, Any] = {
 # ============================================================================
 
 
+# How the refractory period's simulated clock advances between cycles
+REFRACTORY_CLOCK_PER_CYCLE = "per_cycle"  # competition_duration_ms per cycle
+REFRACTORY_CLOCK_ELAPSED = "elapsed"  # plus the real time between cycles
+REFRACTORY_CLOCKS = (REFRACTORY_CLOCK_PER_CYCLE, REFRACTORY_CLOCK_ELAPSED)
+
+
 @dataclass
 class TemporalWorkspaceConfig:
     """
@@ -134,6 +137,14 @@ class TemporalWorkspaceConfig:
 
     All timing is in SIMULATED milliseconds -- no real wall-clock delay
     is introduced. The competition runs as a tight numerical loop.
+
+    ``refractory_clock`` says how the simulated clock advances between
+    cycles: ``per_cycle`` (the default) by ``competition_duration_ms`` per
+    cycle whatever the real time, which keeps a seeded run machine
+    independent; ``elapsed`` also by the real time between cycles read from
+    the workspace's clock, so cycles further apart than the refractory
+    period are never refractory (a caller that drives the workspace in
+    real time, such as the conversation runtime, sets it).
     """
 
     competition_duration_ms: float = 250.0  # 200-300ms biological range
@@ -141,6 +152,14 @@ class TemporalWorkspaceConfig:
     broadcast_propagation_ms: float = 30.0  # Per-module delivery delay (unused for now)
     refractory_period_ms: float = 500.0  # Min time between broadcasts
     timestep_ms: float = 10.0  # Simulation resolution
+    refractory_clock: str = REFRACTORY_CLOCK_PER_CYCLE
+
+    def __post_init__(self) -> None:
+        if self.refractory_clock not in REFRACTORY_CLOCKS:
+            raise ValueError(
+                f"refractory_clock must be one of {REFRACTORY_CLOCKS}, "
+                f"got {self.refractory_clock!r}"
+            )
 
 
 # ============================================================================
@@ -245,7 +264,7 @@ class WorkspaceContent:
     """
     Content that has WON competition and entered conscious awareness.
 
-    This represents what the system is actively "aware of"- content that
+    This represents what the system is actively "aware of" - content that
     has been broadcast to all cognitive modules.
     """
 
@@ -296,6 +315,9 @@ class IgnitionEvent:
     # Dynamics
     was_sustained: bool = True  # Did it maintain activation?
     triggered_broadcast: bool = True
+    # True once check_sustain has measured this event; was_sustained is a
+    # measurement only then
+    sustain_checked: bool = False
 
 
 @dataclass
@@ -348,8 +370,12 @@ class ConsciousnessState:
 
     # Metrics
     ignition_events: int  # Count of ignitions this cycle
-    integration_level: float  # How integrated is the content (0-1)
-    broadcast_coverage: float  # % of modules that received broadcast
+    # Mean absolute correlation across the neural signals (0-1); None when
+    # it was not measured (fewer than two usable signals this cycle)
+    integration_level: Optional[float]
+    # Share of module deliveries that succeeded (0-1); None when nothing
+    # could have received (no receiver registered and nothing delivered)
+    broadcast_coverage: Optional[float]
 
     # Attention state (GWT)
     attention_focus: str  # What source is dominating
@@ -400,16 +426,20 @@ class ConsciousnessState:
     beautiful_loop_moment: Optional[ConsciousMoment] = None
     beautiful_loop_quality: float = 0.0
     epistemic_depth: int = 0
-    binding_quality: float = 0.0
+    # None when the loop bound nothing this cycle (winners without a vector)
+    binding_quality: Optional[float] = 0.0
     is_field_evidencing: bool = False
     beautiful_loop_report: Optional[str] = None
 
-    # Damasio Three-Layer Model -- protoself, core, extended
+    # Damasio Three-Layer Model -- protoself, core, extended. The three
+    # Optional fields are None when the layer measured nothing: the first
+    # protoself update has no previous body state (stability and feeling of
+    # knowing), and the extended layer may report no identity continuity.
     damasio_state: Optional[Dict[str, Any]] = None
-    protoself_stability: float = 0.0
+    protoself_stability: Optional[float] = 0.0
     self_world_binding: float = 0.0
-    feeling_of_knowing: float = 0.0
-    autobiographic_continuity: float = 0.0
+    feeling_of_knowing: Optional[float] = 0.0
+    autobiographic_continuity: Optional[float] = 0.0
     narrative_context: str = ""
     damasio_report: Optional[str] = None
 
@@ -965,13 +995,17 @@ class AttentionBottleneck:
         bottom_up = 0.4 * (0.6 * stimulus_strength + 0.4 * novelty)
 
         # TOP-DOWN FACTORS (30%)
-        # Goal relevance - does this relate to current goals?
+        # Goal and task relevance. A measured keyword match is recorded on
+        # the candidate; the neutral competition constant used when the
+        # workspace has no goals or task is not, so the candidate keeps the
+        # relevance its producer supplied (which the thalamic gate reads).
         goal_relevance = await self._calculate_goal_relevance(candidate)
-        candidate.goal_relevance = goal_relevance
+        if self.current_goals:
+            candidate.goal_relevance = goal_relevance
 
-        # Task relevance - does this help the current task?
         task_relevance = await self._calculate_task_relevance(candidate)
-        candidate.task_relevance = task_relevance
+        if self.current_task:
+            candidate.task_relevance = task_relevance
 
         top_down = 0.3 * (0.5 * goal_relevance + 0.5 * task_relevance)
 
@@ -1057,10 +1091,12 @@ class AttentionBottleneck:
         """
         Calculate relevance to current goals.
 
-        Goal-relevant content gets top-down attention boost.
+        Goal-relevant content gets top-down attention boost. With no goals
+        set on the workspace the 0.5 is a neutral competition constant, not
+        a measurement, and it is not recorded on the candidate.
         """
         if not self.current_goals:
-            return 0.5  # Neutral if no goals set
+            return 0.5  # Neutral competition constant when no goals are set
 
         # Simple keyword matching (could be enhanced with embeddings)
         summary_lower = candidate.summary.lower()
@@ -1079,9 +1115,12 @@ class AttentionBottleneck:
     async def _calculate_task_relevance(self, candidate: WorkspaceCandidate) -> float:
         """
         Calculate relevance to current task.
+
+        With no task set on the workspace the 0.5 is a neutral competition
+        constant, not a measurement, and it is not recorded on the candidate.
         """
         if not self.current_task:
-            return 0.5  # Neutral if no task
+            return 0.5  # Neutral competition constant when no task is set
 
         # Simple matching
         summary_lower = candidate.summary.lower()
@@ -1097,11 +1136,12 @@ class AttentionBottleneck:
         Calculate temporal proximity bonus.
 
         Recent content gets slight priority (attention has momentum).
+        Exponential decay with rate 0.1 per second: full bonus at 0 s, half
+        at about 6.9 s, about 0.37 at 10 s.
         """
         age_seconds = time.time() - candidate.timestamp
 
-        # Exponential decay: full bonus at 0s, half at 5s, quarter at 10s
-        decay_rate = 0.1  # Decay constant
+        decay_rate = 0.1  # Decay constant, per second
         recency = np.exp(-decay_rate * age_seconds)
 
         return float(recency)
@@ -1236,6 +1276,8 @@ class GlobalBroadcast:
         self.total_broadcasts = 0
         self.successful_broadcasts = 0
         self.failed_broadcasts = 0
+        # A broadcast with no receiver is logged once, not per ignition
+        self._no_receiver_logged = False
 
         logger.info("Global Broadcast system initialized")
 
@@ -1274,7 +1316,11 @@ class GlobalBroadcast:
         failed = 0
 
         if not self.registered_modules:
-            logger.warning("No modules registered for broadcast!")
+            # Nothing could receive: no delivery is counted, so the coverage
+            # stays unmeasured rather than reading as a failed broadcast
+            if not self._no_receiver_logged:
+                logger.debug("No modules registered for broadcast; nothing delivered")
+                self._no_receiver_logged = True
             return results
 
         # Parallel broadcast to all modules
@@ -1346,22 +1392,31 @@ class GlobalBroadcast:
             self.broadcast_log.pop(0)
 
     @property
-    def coverage_ratio(self) -> float:
+    def coverage_ratio(self) -> Optional[float]:
         """Share of module deliveries that succeeded.
 
-        With no broadcasts nothing reached any module, so the coverage is
-        0.0; an empty workspace does not report perfect integration.
+        None when no module is registered and no delivery was ever recorded:
+        nothing could have received, so the share is undefined. With
+        receivers and no broadcast yet nothing reached any module, so the
+        coverage is 0.0; an empty workspace does not report perfect
+        integration. ``legacy_coverage_ratio`` reads 1.0 before the first
+        broadcast whatever is registered (v0.4.0).
         """
         total = self.successful_broadcasts + self.failed_broadcasts
         if self.total_broadcasts == 0 or total == 0:
-            # legacy_v04 compatibility, remove in v0.6.0
-            return 1.0 if self.legacy_coverage_ratio else 0.0
+            if self.legacy_coverage_ratio:
+                # legacy_v04 compatibility, remove in v0.6.0
+                return 1.0
+            if not self.registered_modules:
+                return None
+            return 0.0
         return self.successful_broadcasts / total
 
     def get_statistics(self) -> Dict[str, Any]:
-        """Get broadcast statistics."""
+        """Get broadcast statistics (``coverage_ratio`` None when unmeasured)."""
         return {
             "registered_modules": list(self.registered_modules.keys()),
+            "receivers": len(self.registered_modules),
             "total_broadcasts": self.total_broadcasts,
             "successful": self.successful_broadcasts,
             "failed": self.failed_broadcasts,
@@ -1403,6 +1458,8 @@ class IgnitionDetector:
         amplification_factor: float = 2.0,
         sustain_duration: float = 0.5,  # seconds
         decay_rate: float = 0.1,  # per second
+        clock: Optional[Callable[[], float]] = None,
+        legacy_sustain_rate: bool = False,
     ):
         """
         Initialize ignition detector.
@@ -1412,16 +1469,29 @@ class IgnitionDetector:
             amplification_factor: How much salience amplifies upon ignition
             sustain_duration: How long content must stay above threshold
             decay_rate: Rate of salience decay after ignition
+            clock: Time source in epoch seconds for ignition times, the
+                pending-ignition timers and the sustain check (``time.time``
+                when None; a test injects its own)
+            legacy_sustain_rate: Report the sustain rate over every ignition
+                event, which reads 1.0 although no sustain check runs
+                (v0.4.0). By default the rate covers the events a sustain
+                check measured and is None until one has run.
         """
         self.threshold = ignition_threshold
         self.amplification = amplification_factor
         self.sustain_duration = sustain_duration
         self.decay_rate = decay_rate
+        self.clock: Callable[[], float] = clock if clock is not None else time.time
+        self.legacy_sustain_rate = bool(legacy_sustain_rate)
 
         # Tracking
         self.ignition_events: List[IgnitionEvent] = []
         self.pending_ignitions: Dict[str, Tuple[WorkspaceContent, float]] = {}
         self.max_events = 1000
+        # A pending entry older than this can no longer be revisited within
+        # its sustain window and is dropped (the sustain window plus one
+        # window of margin), so the dict holds live entries only
+        self.pending_ttl: float = 2.0 * sustain_duration
 
         # Reference to workspace for triggering broadcasts
         self.workspace: Optional["EnhancedGlobalWorkspace"] = None
@@ -1448,17 +1518,18 @@ class IgnitionDetector:
         Returns:
             IgnitionEvent if ignition occurred, None otherwise
         """
+        now = self.clock()
+
         # Check if below threshold
         if content.salience < self.threshold:
             # Remove from pending if it was there
-            if content.id in self.pending_ignitions:
-                del self.pending_ignitions[content.id]
+            self.pending_ignitions.pop(content.id, None)
             return None
 
         # Check if already tracking this content
         if content.id in self.pending_ignitions:
             _, start_time = self.pending_ignitions[content.id]
-            duration = time.time() - start_time
+            duration = now - start_time
 
             # Check if sustained long enough
             if duration >= self.sustain_duration:
@@ -1468,14 +1539,31 @@ class IgnitionDetector:
                 # Still pending
                 return None
 
-        # New content above threshold - start tracking
-        self.pending_ignitions[content.id] = (content, time.time())
+        # New content above threshold - start tracking. Entries that can no
+        # longer be revisited are dropped first and the dict stays bounded,
+        # so a long-lived process does not accumulate one entry per cycle.
+        self._prune_pending(now)
+        self.pending_ignitions[content.id] = (content, now)
 
         # For fast ignition (high salience), trigger immediately
         if content.salience > self.threshold * 1.5:
             return await self._trigger_ignition(content)
 
         return None
+
+    def _prune_pending(self, now: float) -> None:
+        """Drop pending entries older than ``pending_ttl`` and keep the dict
+        under ``max_events`` entries, oldest first."""
+        stale = [
+            content_id
+            for content_id, (_, started) in self.pending_ignitions.items()
+            if now - started > self.pending_ttl
+        ]
+        for content_id in stale:
+            del self.pending_ignitions[content_id]
+        while len(self.pending_ignitions) >= self.max_events:
+            oldest = next(iter(self.pending_ignitions))
+            del self.pending_ignitions[oldest]
 
     async def _trigger_ignition(self, content: WorkspaceContent) -> IgnitionEvent:
         """
@@ -1498,7 +1586,7 @@ class IgnitionDetector:
             pre_ignition_salience=pre_salience,
             post_ignition_salience=amplified_salience,
             amplification_factor=amplified_salience / pre_salience,
-            ignition_time=time.time(),
+            ignition_time=self.clock(),
             expected_duration=expected_duration,
             was_sustained=True,
             triggered_broadcast=True,
@@ -1548,8 +1636,11 @@ class IgnitionDetector:
         if not event:
             return content.salience >= self.threshold
 
+        # This event's sustain is now a measurement
+        event.sustain_checked = True
+
         # Calculate time since ignition
-        time_since = time.time() - event.ignition_time
+        time_since = self.clock() - event.ignition_time
 
         # Apply decay
         decayed_salience = float(
@@ -1576,16 +1667,45 @@ class IgnitionDetector:
             self.ignition_events.pop(0)
 
     def get_statistics(self) -> Dict[str, Any]:
-        """Get ignition statistics."""
+        """Get ignition statistics.
+
+        ``pending_count`` counts the entries still inside ``pending_ttl`` on
+        the detector's own clock (wall-clock seconds by default, whatever
+        the workspace's simulated refractory clock says), so it is live at
+        the moment of the call and can shrink between two calls.
+
+        ``sustain_rate`` is the sustained share of the events a sustain check
+        measured (``sustain_checked_count``), or None when none was checked.
+        Under ``legacy_sustain_rate`` the dict is the v0.4.0 one: the share
+        over every event, 1.0 while nothing checks them.
+        """
+        self._prune_pending(self.clock())
         if not self.ignition_events:
             return {"total_ignitions": 0}
 
-        sustained = sum(1 for e in self.ignition_events if e.was_sustained)
+        if self.legacy_sustain_rate:
+            # legacy_v04 compatibility, remove in v0.6.0
+            sustained = sum(1 for e in self.ignition_events if e.was_sustained)
+            return {
+                "total_ignitions": len(self.ignition_events),
+                "sustained_count": sustained,
+                "sustain_rate": sustained / len(self.ignition_events),
+                "avg_amplification": np.mean(
+                    [e.amplification_factor for e in self.ignition_events]
+                ),
+                "avg_duration": np.mean(
+                    [e.expected_duration for e in self.ignition_events]
+                ),
+                "pending_count": len(self.pending_ignitions),
+            }
 
+        checked = [e for e in self.ignition_events if e.sustain_checked]
+        sustained = sum(1 for e in checked if e.was_sustained)
         return {
             "total_ignitions": len(self.ignition_events),
             "sustained_count": sustained,
-            "sustain_rate": sustained / len(self.ignition_events),
+            "sustain_checked_count": len(checked),
+            "sustain_rate": sustained / len(checked) if checked else None,
             "avg_amplification": np.mean(
                 [e.amplification_factor for e in self.ignition_events]
             ),
@@ -1643,6 +1763,8 @@ class EnhancedGlobalWorkspace:
         thalamic_gate_enabled: bool = True,
         theory_interactions_enabled: bool = True,
         legacy_coverage_ratio: bool = False,
+        legacy_broadcast_receivers: bool = False,
+        legacy_sustain_rate: bool = False,
         body_metrics_enabled: bool = True,
         precision_feedback_enabled: bool = True,
         self_prediction_enabled: bool = True,
@@ -1654,6 +1776,7 @@ class EnhancedGlobalWorkspace:
         theory_interaction_config: Optional[TheoryInteractionConfig] = None,
         phi_tracker: Optional[Any] = None,
         attention_schema_kwargs: Optional[Dict[str, Any]] = None,
+        clock: Optional[Callable[[], float]] = None,
     ):
         """
         Initialize the Enhanced Global Workspace.
@@ -1664,7 +1787,10 @@ class EnhancedGlobalWorkspace:
             amplification_factor: Non-linear ignition amplification
             integration_dimensions: Size of integrated representation
             temporal_config: Temporal dynamics configuration. Uses
-                biologically-plausible defaults when not supplied.
+                biologically-plausible defaults when not supplied; its
+                ``refractory_clock`` picks the per-cycle or the elapsed clock.
+            clock: Time source in seconds for the elapsed refractory clock
+                (``time.monotonic`` when None); see ``set_clock``.
             competition_mode: "hierarchical" (per-level capacity with
                 promotion) or "flat" (one pool, the v0.4.0 competition).
             thalamic_gate_enabled: Filter candidates through the thalamic
@@ -1673,7 +1799,18 @@ class EnhancedGlobalWorkspace:
                 apply its somatic and Phi signals as the next cycle's
                 salience bias.
             legacy_coverage_ratio: Report a broadcast coverage of 1.0 before
-                any broadcast (v0.4.0); the default reports 0.0.
+                any broadcast (v0.4.0); the default reports 0.0 with
+                receivers and None without any.
+            legacy_broadcast_receivers: Register the three
+                acknowledgement-only receivers for the workspace's own
+                attention schema, metacognition and active inference, which
+                makes the broadcast coverage 1.0 by construction (v0.4.0).
+                The default registers none and reports coverage only for
+                the receivers a caller registers; the workspace hands its
+                winners to its own modules by direct call either way.
+            legacy_sustain_rate: Report an ignition sustain rate of 1.0
+                although no sustain check runs (v0.4.0); the default reports
+                none until a sustain check has run.
             body_metrics_enabled: Feed real system metrics and the previous
                 cycle's duration to the protoself once per cycle.
             precision_feedback_enabled: Let workspace winners raise the
@@ -1710,6 +1847,12 @@ class EnhancedGlobalWorkspace:
         self.temporal_config = temporal_config or TemporalWorkspaceConfig()
         self._last_ignition_time_ms: float = -1000.0
         self._simulated_time_ms: float = 0.0
+        # The elapsed refractory clock: the time source and when the last
+        # cycle ended on it (None before the first cycle and after a reset)
+        self._clock: Callable[[], float] = (
+            clock if clock is not None else time.monotonic
+        )
+        self._last_cycle_end_s: Optional[float] = None
 
         # Core components
         self.bottleneck = AttentionBottleneck(
@@ -1725,6 +1868,7 @@ class EnhancedGlobalWorkspace:
         self.ignition_detector = IgnitionDetector(
             ignition_threshold=ignition_threshold,
             amplification_factor=amplification_factor,
+            legacy_sustain_rate=legacy_sustain_rate,
         )
         self.ignition_detector.workspace = self  # Allow detector to trigger broadcasts
 
@@ -1739,6 +1883,10 @@ class EnhancedGlobalWorkspace:
         # Unconscious buffer (content that didn't win competition)
         self.unconscious_buffer: List[WorkspaceCandidate] = []
         self.max_unconscious = 50
+        # Bottleneck winners dropped before admission, cumulative: by the
+        # refractory period and by the temporal competition
+        self._refractory_dropped = 0
+        self._temporal_dropped = 0
 
         # Cycle tracking
         self.cycle_count = 0
@@ -1796,15 +1944,21 @@ class EnhancedGlobalWorkspace:
             else None
         )
 
-        # Register child modules as broadcast receivers
-        # This ensures broadcast_coverage reflects the workspace's integrated architecture
-        for name, module in [
-            ("attention_schema", self.attention_schema),
-            ("metacognition", self.metacognition),
-            ("active_inference", self.active_inference),
-        ]:
-            receiver = _ModuleBroadcastReceiver(name, module)
-            self.broadcaster.register_module(receiver)
+        # The workspace's own modules receive the winners by direct call in
+        # the cycle, which cannot fail and is not counted as coverage. Under
+        # legacy_broadcast_receivers they are also registered through
+        # acknowledgement-only wrappers, which made the coverage 1.0 by
+        # construction in v0.4.0.
+        self.legacy_broadcast_receivers = bool(legacy_broadcast_receivers)
+        if self.legacy_broadcast_receivers:
+            # legacy_v04 compatibility, remove in v0.6.0
+            for name, module in [
+                ("attention_schema", self.attention_schema),
+                ("metacognition", self.metacognition),
+                ("active_inference", self.active_inference),
+            ]:
+                receiver = _ModuleBroadcastReceiver(name, module)
+                self.broadcaster.register_module(receiver)
 
         logger.info(
             f"Enhanced Global Workspace initialized\n"
@@ -1817,7 +1971,8 @@ class EnhancedGlobalWorkspace:
             f"  Theory interactions: {'on' if theory_interactions_enabled else 'off'}\n"
             f"  Attention Schema (AST), Metacognition (HOT), Active Inference "
             f"(FEP), Beautiful Loop (BLT), Damasio layers\n"
-            f"  Broadcast receivers: 3 registered"
+            f"  Broadcast receivers: "
+            f"{len(self.broadcaster.registered_modules)} registered"
         )
 
     @staticmethod
@@ -1872,6 +2027,33 @@ class EnhancedGlobalWorkspace:
     def set_arousal(self, arousal: float) -> None:
         """Supply the thalamic gate's arousal (an orchestrator's own value)."""
         self.bottleneck.set_arousal(arousal)
+
+    @property
+    def refractory_clock(self) -> str:
+        """How the refractory clock advances: ``per_cycle`` or ``elapsed``."""
+        return self.temporal_config.refractory_clock
+
+    @property
+    def clock(self) -> Callable[[], float]:
+        """The time source, in seconds, of the elapsed refractory clock."""
+        return self._clock
+
+    def set_clock(self, clock: Callable[[], float]) -> None:
+        """Hand the workspace the clock its elapsed refractory period reads.
+
+        The end of each cycle is recorded on this clock and the gap to the
+        next cycle joins the simulated clock under ``elapsed``; a persisted
+        end time is compared with the same clock after a restore, and a
+        negative gap counts as none. The default clock is ``time.monotonic``,
+        whose readings are not comparable across processes: a workspace
+        restored on the default clock credits one arbitrary gap (or none,
+        when it is negative) before its first cycle. A caller that runs the
+        workspace in real time passes its own clock so that a restore reads
+        the clock that wrote the end time and so that tests can drive it.
+        """
+        if not callable(clock):
+            raise TypeError("clock must be a callable returning seconds")
+        self._clock = clock
 
     def register_module(self, module: CognitiveModule) -> None:
         """Register a cognitive module to receive broadcasts."""
@@ -1963,11 +2145,22 @@ class EnhancedGlobalWorkspace:
         winner_ids = {w.candidate.id for w in winners}
         losers = [c for c in candidates if c.id not in winner_ids]
         self._add_to_unconscious(losers)
+        bottleneck_winners = list(winners)
 
         # Step 2b: Temporal competition -- biologically-plausible delay
         # Check refractory period first: the workspace cannot ignite
         # again until refractory_period_ms of simulated time has passed.
         cfg = self.temporal_config
+        # Under the elapsed clock the real time since the last cycle ended
+        # joins the simulated clock first; per_cycle adds nothing here, so
+        # the cadence stays machine independent.
+        if (
+            cfg.refractory_clock == REFRACTORY_CLOCK_ELAPSED
+            and self._last_cycle_end_s is not None
+        ):
+            gap_s = self._clock() - self._last_cycle_end_s
+            if math.isfinite(gap_s) and gap_s > 0.0:
+                self._simulated_time_ms += gap_s * 1000.0
         in_refractory = (
             self._simulated_time_ms - self._last_ignition_time_ms
         ) < cfg.refractory_period_ms
@@ -1983,6 +2176,22 @@ class EnhancedGlobalWorkspace:
         else:
             # Run temporal competition: only sustained winners survive
             winners = self._run_temporal_competition(winners)
+
+        # A bottleneck winner the refractory period or the temporal
+        # competition dropped was not admitted: it joins the unconscious
+        # buffer like any other loser, and the drop is counted
+        admitted_ids = {w.id for w in winners}
+        dropped = [
+            w.candidate
+            for w in bottleneck_winners
+            if w.id not in admitted_ids and w.candidate is not None
+        ]
+        if dropped:
+            self._add_to_unconscious(dropped)
+            if in_refractory:
+                self._refractory_dropped += len(dropped)
+            else:
+                self._temporal_dropped += len(dropped)
 
         # Advance simulated clock by competition duration
         self._simulated_time_ms += cfg.competition_duration_ms
@@ -2013,8 +2222,9 @@ class EnhancedGlobalWorkspace:
             while len(self.stream_of_consciousness) > self.max_stream_length:
                 self.stream_of_consciousness.pop(0)
 
-        # Step 6: Integrate neural signals if provided
-        integration_level = 0.0
+        # Step 6: Integrate neural signals if provided. The level is a
+        # measurement or None; nothing stands in for it on the state.
+        integration_level: Optional[float] = None
         if neural_signals:
             integration_level = await self._measure_integration(neural_signals)
 
@@ -2058,8 +2268,19 @@ class EnhancedGlobalWorkspace:
         # Step 8: Metacognition (HOT) - Generate Higher-Order Thoughts
         # Content becomes CONSCIOUS when targeted by a HOT
         hots_generated: List[HigherOrderThought] = []
+        ignited_ids = {content.id for content in ignited}
 
         for winner in winners:
+            # An authored template (prospective memory marks its candidates
+            # with metadata["authored_template"]) competes, may ignite and
+            # sits in the workspace, but the system did not produce its
+            # words: it is registered as no first-order state and gets no
+            # higher-order thought.
+            if winner.candidate is not None and (winner.candidate.metadata or {}).get(
+                "authored_template"
+            ):
+                continue
+
             # Register each winning candidate as a first-order state
             content_summary = (
                 winner.candidate.summary[:100] if winner.candidate else "Unknown"
@@ -2091,12 +2312,17 @@ class EnhancedGlobalWorkspace:
                 evidence_strength=winner.salience * 0.8,
             )
 
-            # Generate HOT - THIS MAKES IT CONSCIOUS
+            # Generate HOT - THIS MAKES IT CONSCIOUS. The trigger says
+            # whether the winner ignited this cycle or was admitted alone.
             hot = await self.metacognition.generate_hot(
                 first_order,
                 meta_type=MetaType.AWARENESS,
                 voluntary=False,
-                trigger="workspace_ignition",
+                trigger=(
+                    "workspace_ignition"
+                    if winner.id in ignited_ids
+                    else "workspace_admission"
+                ),
             )
 
             if hot:
@@ -2184,10 +2410,13 @@ class EnhancedGlobalWorkspace:
             }
         )
 
-        # Update homeostatic drives based on current activity
+        # Update homeostatic drives based on current activity. An unmeasured
+        # integration level moves no drive: the intensity reads 0.0 for None,
+        # the value the drives saw before the level could be None (the key
+        # stays present; a missing key would read as 0.5).
         activity = {
             "type": "consciousness_cycle",
-            "intensity": integration_level,
+            "intensity": 0.0 if integration_level is None else integration_level,
             "understanding_level": inference_result.action_confidence,
             "ignition_count": len(ignited),
         }
@@ -2359,6 +2588,10 @@ class EnhancedGlobalWorkspace:
         elapsed_ms = (time.time() - start_time) * 1000
         # The protoself reads this as the response latency next cycle
         self._last_cycle_duration_ms = elapsed_ms
+        # When this cycle ended on the workspace's clock, for the elapsed
+        # refractory clock (recorded whichever clock mode is set, so a
+        # restored or re-clocked workspace has it)
+        self._last_cycle_end_s = _finite_float(self._clock())
 
         # Enhanced logging with all consciousness phases
         schema_state = (
@@ -2373,19 +2606,20 @@ class EnhancedGlobalWorkspace:
         pred_error = inference_result.prediction_error if inference_result else 0.0
         vfe = inference_result.variational_free_energy if inference_result else 0.0
 
+        # Optional fields print as "unmeasured" when a module measured nothing
         logger.info(
             f"Cycle {self.cycle_count} complete ({elapsed_ms:.1f}ms): "
             f"conscious={state.is_conscious}, "
             f"ignitions={state.ignition_events}, "
-            f"integration={state.integration_level:.3f}, "
+            f"integration={_fmt3(state.integration_level)}, "
             f"schema={schema_state}, "
             f"HOTs={hots_count}, level={meta_level}, "
             f"FEP: PE={pred_error:.3f}, VFE={vfe:.3f}, "
             f"loop: depth={state.epistemic_depth}, "
-            f"bind={state.binding_quality:.3f}, "
-            f"q={state.beautiful_loop_quality:.3f}, "
-            f"damasio: bind={state.self_world_binding:.3f}, "
-            f"fok={state.feeling_of_knowing:.3f}"
+            f"bind={_fmt3(state.binding_quality)}, "
+            f"q={_fmt3(state.beautiful_loop_quality)}, "
+            f"damasio: bind={_fmt3(state.self_world_binding)}, "
+            f"fok={_fmt3(state.feeling_of_knowing)}"
         )
 
         return state
@@ -2520,45 +2754,57 @@ class EnhancedGlobalWorkspace:
 
     async def _measure_integration(
         self, neural_signals: Dict[str, np.ndarray]
-    ) -> float:
+    ) -> Optional[float]:
         """
         Measure integration level across neural signals.
 
-        High integration = information flows across whole system
-        Low integration = information stays local
+        The level is the mean absolute pairwise correlation, across unit
+        index, of the signals' latest output vectors cut to a common length
+        (different units of different substrates, not time samples).
 
-        This is related to Integrated Information Theory (IIT).
+        A zero-variance vector has no correlation with anything and is left
+        out; the statistic over the remaining signals is unchanged. None when
+        it cannot be measured: fewer than two usable (varying) signals, a
+        common length under 2, or no finite pairwise correlation. No numpy
+        warning is emitted for the degenerate cases.
         """
         if len(neural_signals) < 2:
-            return 0.5  # Can't measure integration with <2 sources
+            return None
 
         # Normalize signals to same length
         min_len = min(len(s) for s in neural_signals.values())
-        normalized = {k: v[:min_len] for k, v in neural_signals.items()}
+        if min_len < 2:
+            return None
+        normalized = {
+            k: np.asarray(v, dtype=float)[:min_len]
+            for k, v in neural_signals.items()
+            if np.ptp(np.asarray(v, dtype=float)[:min_len]) != 0.0
+        }
+        if len(normalized) < 2:
+            return None
 
         # Calculate pairwise correlations
         correlations = []
         keys = list(normalized.keys())
 
-        for i in range(len(keys)):
-            for j in range(i + 1, len(keys)):
-                corr = np.corrcoef(normalized[keys[i]], normalized[keys[j]])[0, 1]
-                if not np.isnan(corr):
-                    correlations.append(abs(corr))
+        with np.errstate(invalid="ignore", divide="ignore"):
+            for i in range(len(keys)):
+                for j in range(i + 1, len(keys)):
+                    corr = np.corrcoef(normalized[keys[i]], normalized[keys[j]])[0, 1]
+                    if np.isfinite(corr):
+                        correlations.append(abs(float(corr)))
 
         if not correlations:
-            return 0.5
+            return None
 
         # High correlation = high integration
-        integration = np.mean(correlations)
-
-        return float(integration)
+        return float(np.mean(correlations))
 
     async def _workspace_to_observation(
         self,
         winners: List[WorkspaceContent],
         ignited: List[WorkspaceContent],
-        integration_level: float,
+        integration_level: Optional[float],
         emotional_state: Optional[Dict[str, float]] = None,
     ) -> np.ndarray:
         """
@@ -2579,13 +2825,13 @@ class EnhancedGlobalWorkspace:
         self,
         winners: List[WorkspaceContent],
         ignited: List[WorkspaceContent],
-        integration_level: float,
+        integration_level: Optional[float],
         emotional_state: Optional[Dict[str, float]] = None,
     ) -> np.ndarray:
         """
         The 5-channel workspace encoder:
 
-        - Observation 0: Integration/coherence level
+        - Observation 0: Integration/coherence level (0.0 when unmeasured)
         - Observation 1: Emotional arousal
         - Observation 2: Cognitive load (number of winners)
         - Observation 3: Ignition strength
@@ -2598,8 +2844,10 @@ class EnhancedGlobalWorkspace:
 
         observation = np.zeros(max(num_observations, 5))
 
-        # Observation 0: Integration/coherence (0-1)
-        observation[0] = integration_level
+        # Observation 0: Integration/coherence (0-1). An unmeasured level is
+        # no evidence mass on the channel: 0.0, the value the channel read
+        # before the level could be None.
+        observation[0] = 0.0 if integration_level is None else integration_level
 
         # Observation 1: Emotional arousal (0-1)
         if emotional_state:
@@ -2852,6 +3100,9 @@ class EnhancedGlobalWorkspace:
             "is_conscious": self.current_conscious_content is not None,
             "stream_length": len(self.stream_of_consciousness),
             "unconscious_buffer": len(self.unconscious_buffer),
+            # Bottleneck winners dropped before admission (cumulative)
+            "refractory_dropped": self._refractory_dropped,
+            "temporal_dropped": self._temporal_dropped,
             "bottleneck": self.bottleneck.get_statistics(),
             "broadcast": self.broadcaster.get_statistics(),
             "ignition": self.ignition_detector.get_statistics(),
@@ -2983,10 +3234,13 @@ class EnhancedGlobalWorkspace:
         self.current_conscious_content = None
         self.stream_of_consciousness.clear()
         self.unconscious_buffer.clear()
+        self._refractory_dropped = 0
+        self._temporal_dropped = 0
         self.cycle_count = 0
         self._last_ignition_time_ms = -1000.0
         self._simulated_time_ms = 0.0
         self._last_cycle_duration_ms = None
+        self._last_cycle_end_s = None
         self._previous_state = None
         self.bottleneck.cross_theory_bias = 0.0
         # The theory interactions (smoothed signals, cycle count) and the
@@ -3031,8 +3285,9 @@ class EnhancedGlobalWorkspace:
 
         Returns ``{"scalars": ..., "arrays": ..., "histories": ...}``:
             scalars: cycle count, simulated clock, prior prediction error,
-                cross-theory bias, arousal, broadcast counters and the last
-                cycle duration
+                cross-theory bias, arousal, broadcast counters, the last
+                cycle duration and when the last cycle ended on the
+                workspace's clock
             histories: the stream of consciousness, the unconscious buffer,
                 the competition history, the novelty digests, the broadcast
                 log and the ignition events, as JSON-safe records
@@ -3052,6 +3307,9 @@ class EnhancedGlobalWorkspace:
             "simulated_time_ms": _finite_or(self._simulated_time_ms, 0.0),
             "last_ignition_time_ms": _finite_or(self._last_ignition_time_ms, -1000.0),
             "last_cycle_duration_ms": _finite_float(self._last_cycle_duration_ms),
+            "last_cycle_end_s": _finite_float(self._last_cycle_end_s),
+            "refractory_dropped": int(self._refractory_dropped),
+            "temporal_dropped": int(self._temporal_dropped),
             "current_conscious_content_id": current.id if current else None,
             "bottleneck.prior_prediction_error": _finite_or(
                 self.bottleneck._prior_prediction_error, 0.0
@@ -3124,6 +3382,12 @@ class EnhancedGlobalWorkspace:
         )
         if "last_cycle_duration_ms" in s:
             self._last_cycle_duration_ms = _finite_float(s["last_cycle_duration_ms"])
+        if "last_cycle_end_s" in s:
+            self._last_cycle_end_s = _finite_float(s["last_cycle_end_s"])
+        if "refractory_dropped" in s:
+            self._refractory_dropped = max(0, _int_or(s["refractory_dropped"], 0))
+        if "temporal_dropped" in s:
+            self._temporal_dropped = max(0, _int_or(s["temporal_dropped"], 0))
         bottleneck = self.bottleneck
         bottleneck._prior_prediction_error = _finite_or(
             s.get("bottleneck.prior_prediction_error"),
@@ -3244,6 +3508,11 @@ def _finite_float(value: Any) -> Optional[float]:
 def _finite_or(value: Any, default: float) -> float:
     number = _finite_float(value)
     return default if number is None else number
+
+
+def _fmt3(value: Optional[float]) -> str:
+    """A measurement to three decimals, or "unmeasured" for None."""
+    return "unmeasured" if value is None else f"{value:.3f}"
 
 
 def _int_or(value: Any, default: int) -> int:
@@ -3461,6 +3730,7 @@ def _ignition_to_record(event: IgnitionEvent) -> Dict[str, Any]:
         "expected_duration": _finite_or(event.expected_duration, 0.0),
         "was_sustained": bool(event.was_sustained),
         "triggered_broadcast": bool(event.triggered_broadcast),
+        "sustain_checked": bool(event.sustain_checked),
     }
 
 
@@ -3479,6 +3749,8 @@ def _ignition_from_record(record: Dict[str, Any]) -> IgnitionEvent:
         expected_duration=float(record.get("expected_duration", 0.0)),
         was_sustained=bool(record.get("was_sustained", True)),
         triggered_broadcast=bool(record.get("triggered_broadcast", True)),
+        # A record saved before the field existed was never checked
+        sustain_checked=bool(record.get("sustain_checked", False)),
     )
 
 
@@ -3586,7 +3858,8 @@ if __name__ == "__main__":
         print("\nCONSCIOUSNESS STATE:")
         print(f"  Is conscious: {state.is_conscious}")
         print(f"  Ignition events: {state.ignition_events}")
-        print(f"  Integration level: {state.integration_level:.3f}")
+        print(f"  Integration level: {_fmt3(state.integration_level)}")
+        print(f"  Broadcast coverage: {_fmt3(state.broadcast_coverage)}")
         print(f"  Attention focus: {state.attention_focus}")
         print(f"  Stream position: {state.stream_position}")
 
@@ -3618,8 +3891,10 @@ if __name__ == "__main__":
         print(
             f"  Bottleneck avg candidates: {stats['bottleneck'].get('avg_candidates', 0):.1f}"
         )
+        sustain_rate = stats["ignition"].get("sustain_rate")
         print(
-            f"  Ignition sustain rate: {stats['ignition'].get('sustain_rate', 0):.2%}"
+            "  Ignition sustain rate: "
+            + ("unmeasured" if sustain_rate is None else f"{sustain_rate:.2%}")
         )
 
         print("\nEnhanced Global Workspace test complete!")

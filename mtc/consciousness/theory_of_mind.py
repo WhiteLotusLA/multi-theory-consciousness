@@ -18,8 +18,9 @@ Speakers and trust:
   and on every load, and never by a heuristic. The default lookup ignores the
   name and returns ``DEFAULT_SPEAKER_TRUST`` (read from settings at call
   time); a lookup that fails or returns a non-numeric value falls back to it,
-  and values are clipped to [0, 1]. The Phase 6 pipeline passes a lookup
-  backed by its token-checked speaker-trust module.
+  and values are clipped to [0, 1]. The conversation pipeline's runtime
+  (``mtc.pipeline.runtime``) passes a lookup backed by its token-checked
+  speaker-trust module.
 
 Smoothing: warmth, reciprocity, depth, the communication style and the
 emotional profile move by an exponential moving average with weight

@@ -228,3 +228,61 @@ async def test_empty_samples_are_not_counted_and_never_gain_confidence():
     assert await avg.sample_count("default") == 0
     await avg.record("default", {"valence": None})
     assert await avg.sample_count("default") == 0
+
+
+@pytest.mark.asyncio
+async def test_fallback_label_has_zero_confidence():
+    """No rule fired: the fallback label carries no confidence and no runner-up."""
+    avg = InMemoryEmotionAverages()
+    await prime(avg, "default", 25, valence=0.0, arousal=0.5, vitality=0.5)
+    ext = EmotionExtractor(averages=avg)
+    out = await ext.extract(make_state(valence=0.0, arousal=0.5, vitality=0.5))
+    assert out.baseline == "running"
+    assert out.label == "neutral"
+    assert out.secondary is None
+    assert out.confidence == 0.0
+
+
+@pytest.mark.asyncio
+async def test_single_rule_margin_keeps_the_fallback_as_runner_up():
+    """One rule at 0.45 against the fallback at 0.1: margin (0.45 - 0.1) / 0.45."""
+    avg = InMemoryEmotionAverages()
+    await prime(avg, "default", 25, valence=-0.2, arousal=0.5, vitality=0.5)
+    ext = EmotionExtractor(averages=avg)
+    out = await ext.extract(make_state(valence=-0.1, arousal=0.5, vitality=0.6))
+    assert out.baseline == "running"
+    assert out.label == "calm"
+    assert out.secondary == "neutral"
+    assert out.confidence == pytest.approx((0.45 - 0.1) / 0.45)
+    assert out.confidence == pytest.approx(0.778, abs=1e-3)
+
+
+@pytest.mark.asyncio
+async def test_somatic_intensity_is_the_mean_of_the_measured_intensities():
+    markers = [
+        {"valence": 0.2, "intensity": None},
+        {"valence": 0.4, "intensity": 0.6},
+        {"valence": -0.3, "intensity": float("nan")},
+        {"valence": 0.5, "intensity": 0.2},
+    ]
+    ext = EmotionExtractor()
+    raw = ext._extract_raw(make_state(markers=markers))
+    assert raw["somatic_intensity_avg"] == pytest.approx(0.4)
+    assert raw["somatic_valence_avg"] == pytest.approx(0.8 / 4)
+    out = await ext.extract(make_state(markers=markers))
+    assert out.raw["somatic_intensity_avg"] == pytest.approx(0.4)
+
+
+@pytest.mark.asyncio
+async def test_somatic_intensity_is_none_when_no_marker_has_one():
+    markers = [
+        {"valence": 0.2, "intensity": None},
+        {"valence": -0.4, "intensity": None},
+    ]
+    ext = EmotionExtractor()
+    raw = ext._extract_raw(make_state(markers=markers))
+    assert raw["somatic_intensity_avg"] is None
+    assert raw["somatic_valence_avg"] == pytest.approx(-0.1)
+    out = await ext.extract(make_state(valence=0.4, arousal=0.8, markers=markers))
+    assert out.raw["somatic_intensity_avg"] is None
+    assert isinstance(out.label, str) and out.label

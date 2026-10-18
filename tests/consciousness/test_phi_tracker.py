@@ -178,6 +178,72 @@ class TestBinarization:
         tracker = PhiTracker()
         assert tracker.extract_module_states(SimpleNamespace()) == (0, 0, 0, 0, 0)
 
+    def test_unmeasured_integration_level_reads_the_composite(self):
+        """integration_level None falls back to the is_conscious composite."""
+        state = _state(integration_level=None, is_conscious=True, ignition_events=1)
+        signals = PhiTracker._module_signals(state)
+        # 0.3 (workspace active) + 0.4 (ignited) + 0.3 * 1/3 (one ignition).
+        assert signals["GWT"] == pytest.approx(0.8)
+        zero = _state(integration_level=0.0, is_conscious=True, ignition_events=1)
+        assert PhiTracker._module_signals(zero)["GWT"] == pytest.approx(0.8)
+        idle = _state(integration_level=None)
+        assert PhiTracker._module_signals(idle)["GWT"] == 0.0
+
+    def test_module_signal_sources_are_as_documented(self):
+        """AST, HOT, FEP and BLT read the layers the docstring names."""
+        state = _state(
+            protoself_stability=0.9,
+            feeling_of_knowing=0.2,
+            homeostatic_urgency=("x", 0.4),
+            binding_quality=0.6,
+            attention_schema=SimpleNamespace(current_focus="a focus"),
+            higher_order_thoughts=["a", "b", "c"],
+            prediction_error=0.95,
+            beautiful_loop_quality=0.1,
+        )
+        signals = PhiTracker._module_signals(state)
+        assert signals["AST"] == pytest.approx(0.9)
+        assert signals["HOT"] == pytest.approx(0.2)
+        assert signals["FEP"] == pytest.approx(0.4)
+        assert signals["BLT"] == pytest.approx(0.6)
+        # A field that is None (unmeasured) falls back like an absent one.
+        unmeasured = _state(
+            protoself_stability=None,
+            feeling_of_knowing=None,
+            binding_quality=None,
+            attention_schema=SimpleNamespace(current_focus="a focus"),
+            higher_order_thoughts=["a", "b"],
+            beautiful_loop_quality=0.3,
+        )
+        none_read = PhiTracker._module_signals(unmeasured)
+        assert none_read["AST"] == pytest.approx(0.7)
+        assert none_read["HOT"] == pytest.approx(2.0 / 3.0)
+        assert none_read["BLT"] == pytest.approx(0.3)
+        # A measured 0.0 is read as 0.0, not replaced by the fallback.
+        zero = _state(
+            attention_schema=SimpleNamespace(current_focus="a focus"),
+            higher_order_thoughts=["a", "b"],
+            beautiful_loop_quality=0.3,
+        )
+        zero_read = PhiTracker._module_signals(zero)
+        assert (zero_read["AST"], zero_read["HOT"], zero_read["BLT"]) == (
+            0.0,
+            0.0,
+            0.0,
+        )
+        # A state that lacks the fields falls back too.
+        bare = SimpleNamespace(
+            attention_schema=SimpleNamespace(current_focus="a focus"),
+            higher_order_thoughts=["a", "b", "c"],
+            prediction_error=0.25,
+            beautiful_loop_quality=0.3,
+        )
+        fallback = PhiTracker._module_signals(bare)
+        assert fallback["AST"] == pytest.approx(0.7)
+        assert fallback["HOT"] == pytest.approx(1.0)
+        assert fallback["FEP"] == pytest.approx(0.25)
+        assert fallback["BLT"] == pytest.approx(0.3)
+
     def test_state_index_is_big_endian(self):
         tracker = PhiTracker()
         assert tracker._state_to_index((1, 0, 0, 0, 0)) == 16
@@ -295,6 +361,30 @@ class TestLatestPhi:
         clamp = raw.latest_phi / 2.0
         clamped = _warm_tracker(150, phi_clamp=clamp)
         assert clamped.latest_phi == pytest.approx(clamp)
+
+    def test_proxy_floor_on_a_constant_state(self):
+        """A frozen state reads about 0.5 bits after warm-up, then decays."""
+        frozen = SimpleNamespace(
+            integration_level=0.0,
+            is_conscious=True,
+            ignition_events=1,
+            protoself_stability=0.9,
+            feeling_of_knowing=0.6,
+            homeostatic_urgency=("curiosity", 0.4),
+            binding_quality=0.5,
+        )
+        tracker = PhiTracker(min_transitions=128, history_size=1024)
+        for _ in range(129):
+            tracker.record_module_states(frozen)
+        assert tracker.transitions_recorded == 128
+        early = tracker.latest_phi
+        assert 0.35 < early < 0.65
+        for _ in range(4097 - 129):
+            tracker.record_module_states(frozen)
+        assert tracker.transitions_recorded == 4096
+        late = tracker.latest_phi
+        assert late < 0.06
+        assert late < early
 
     def test_latest_phi_none_and_logged_on_failure(self, monkeypatch, caplog):
         tracker = _warm_tracker(100)
@@ -472,10 +562,27 @@ class TestArchitecturalPhi:
 
 
 class TestNeuralIntegration:
-    def test_neural_integration_zero_on_constant_input(self):
+    def test_neural_integration_none_on_constant_input(self):
         tracker = PhiTracker()
         constant = np.ones(50)
-        assert tracker.get_neural_integration(constant, constant, constant) == 0.0
+        assert tracker.get_neural_integration(constant, constant, constant) is None
+        varied = np.arange(50, dtype=float)
+        assert tracker.get_neural_integration(varied, varied, constant) is None
+
+    def test_neural_integration_none_on_numerical_failure(self, monkeypatch, caplog):
+        tracker = PhiTracker()
+        rng = np.random.default_rng(3)
+
+        def broken(_matrix):
+            raise np.linalg.LinAlgError("no convergence")
+
+        monkeypatch.setattr(phi_tracker_module.np.linalg, "eigvalsh", broken)
+        with caplog.at_level("WARNING"):
+            value = tracker.get_neural_integration(
+                rng.random(50), rng.random(50), rng.random(50)
+            )
+        assert value is None
+        assert "Neural integration computation failed" in caplog.text
 
     def test_correlated_is_more_integrated_than_independent(self):
         tracker = PhiTracker()
@@ -493,10 +600,10 @@ class TestNeuralIntegration:
             math.log(3)
         )
 
-    def test_short_or_empty_input_is_zero(self):
+    def test_short_or_empty_input_is_none(self):
         tracker = PhiTracker()
-        assert tracker.get_neural_integration([1.0], [2.0], [3.0]) == 0.0
-        assert tracker.get_neural_integration([], [], []) == 0.0
+        assert tracker.get_neural_integration([1.0], [2.0], [3.0]) is None
+        assert tracker.get_neural_integration([], [], []) is None
 
     def test_uses_common_prefix_of_first_fifty(self):
         tracker = PhiTracker()
@@ -539,6 +646,27 @@ class TestPersistence:
         assert restored.extract_module_states(probe) == tracker.extract_module_states(
             probe
         )
+
+    def test_restore_keeps_constructor_configuration(self, caplog):
+        saved = PhiTracker(min_transitions=10, history_size=64, laplace_alpha=0.5)
+        probe = _mid_state()
+        for _ in range(20):
+            saved.record_module_states(probe)
+        assert not saved.warming_up
+        state = saved.to_state_dict()
+
+        restored = PhiTracker(min_transitions=128)
+        with caplog.at_level("INFO"):
+            restored.from_state_dict(state)
+        assert restored.min_transitions == 128
+        assert restored.history_size == 1024
+        assert restored.laplace_alpha == 0.1
+        assert restored.state_history.maxlen == 1024
+        assert restored.transitions_recorded == 19
+        assert restored.warming_up is True
+        assert restored.latest_phi is None
+        assert len(restored.state_history) == 20
+        assert "min_transitions" in caplog.text
 
     def test_shape_mismatch_is_skipped(self):
         tracker = PhiTracker()

@@ -10,10 +10,14 @@ Tests for the Enhanced Global Workspace (GWT)
 
 import pytest
 import asyncio
+import dataclasses
+import logging
 import numpy as np
 import time
+import warnings
 from typing import Dict, Any
 
+from mtc.consciousness.active_inference import ActiveInferenceConfig
 from mtc.consciousness.enhanced_global_workspace import (
     AttentionBottleneck,
     GlobalBroadcast,
@@ -26,6 +30,45 @@ from mtc.consciousness.enhanced_global_workspace import (
     CognitiveModule,
     ConsciousnessState,
 )
+
+# A small active inference geometry: the cycle tests below do not measure it
+FAST_FEP = dict(num_hidden_states=4, num_actions=2, planning_horizon=2)
+
+
+def _fast_workspace(**kwargs) -> EnhancedGlobalWorkspace:
+    """A workspace that runs cycles quickly and samples no machine metrics."""
+    kwargs.setdefault("active_inference_config", ActiveInferenceConfig(**FAST_FEP))
+    kwargs.setdefault("body_metrics_enabled", False)
+    return EnhancedGlobalWorkspace(**kwargs)
+
+
+def _strong(summary: str = "a strong thought", **overrides) -> WorkspaceCandidate:
+    """A candidate that wins the bottleneck and ignites on its first occurrence."""
+    fields = dict(
+        content=summary,
+        content_type="thought",
+        summary=summary,
+        source=WorkspaceCandidateSource.CTM,
+        source_module="ctm",
+        activation_level=0.9,
+        emotional_salience=0.7,
+    )
+    fields.update(overrides)
+    return WorkspaceCandidate(**fields)
+
+
+class _FakeClock:
+    """A clock the test advances by hand."""
+
+    def __init__(self, now: float = 1000.0):
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
 
 # ============================================================================
 # FIXTURES
@@ -166,29 +209,90 @@ class TestAttentionBottleneck:
         assert len(winners) <= bottleneck.capacity
         assert len(winners) == 7  # Should hit capacity exactly
 
+    @staticmethod
+    def _weak_candidate() -> WorkspaceCandidate:
+        """Very low activation, no emotional weight, the same content each time."""
+        return WorkspaceCandidate(
+            content="same_low_content",
+            content_type="noise",
+            summary="same_low_activation_noise",
+            source=WorkspaceCandidateSource.SENSORY,
+            activation_level=0.05,
+            emotional_salience=0.0,
+        )
+
     @pytest.mark.asyncio
     async def test_competition_respects_threshold(self, bottleneck):
-        """Verify content below threshold doesn't enter consciousness."""
-        # All candidates with extremely low activation and no novelty bonus
-        # (same content repeated to remove novelty factor)
-        candidates = [
-            WorkspaceCandidate(
-                content="same_low_content",  # Same content = no novelty
-                content_type="noise",
-                summary="same_low_activation_noise",  # Same summary
-                source=WorkspaceCandidateSource.SENSORY,
-                activation_level=0.05,  # Extremely low
-                emotional_salience=0.0,  # No emotional weight
-            )
-            for _ in range(5)
-        ]
+        """Already-seen weak content scores under the threshold and no copy
+        of it wins: 0.4 * (0.6 * 0.05 + 0.4 * 0.2) + 0.15 + 0.1 is 0.294."""
+        # One copy first, so the content's digest is in the novelty window
+        await bottleneck.compete_for_access([self._weak_candidate()])
 
+        candidates = [self._weak_candidate() for _ in range(5)]
         winners = await bottleneck.compete_for_access(candidates)
 
-        # With very low activation and no novelty/emotion, should be below threshold
-        # Note: if any win, they should still be >= threshold by definition
-        for winner in winners:
-            assert winner.salience >= bottleneck.threshold
+        assert winners == []
+        assert [c.novelty_score for c in candidates] == [0.2] * 5
+
+    @pytest.mark.asyncio
+    async def test_first_occurrence_of_weak_content_wins_on_novelty_and_neutral_relevance(
+        self, bottleneck
+    ):
+        """The bare bottleneck admits a first occurrence of weak content:
+        novelty 0.9 and the neutral relevance of 0.5 (which adds 0.15 to
+        every salience when the workspace has no goals or task; see the
+        relevance sentence of docs/HONEST_LIMITATIONS.md) put it at about
+        0.406 against the 0.3 threshold. A recalibration of the thresholds
+        flips this test deliberately."""
+        winners = await bottleneck.compete_for_access([self._weak_candidate()])
+
+        assert len(winners) == 1
+        assert winners[0].salience == pytest.approx(0.406, abs=1e-3)
+
+    @pytest.mark.asyncio
+    async def test_unset_goals_do_not_overwrite_producer_relevance(self, bottleneck):
+        """With no goals or task set, the competition uses its neutral
+        constants but leaves the producer's relevance on the candidate."""
+        candidate = WorkspaceCandidate(
+            content="a question",
+            content_type="conversation",
+            summary="a question from the operator",
+            source=WorkspaceCandidateSource.LLM,
+            activation_level=0.9,
+            emotional_salience=0.2,
+            goal_relevance=0.9,
+            task_relevance=0.2,
+        )
+        winners = await bottleneck.compete_for_access([candidate])
+
+        assert candidate.goal_relevance == 0.9
+        assert candidate.task_relevance == 0.2
+        # The salience still reads the neutral 0.5 for both terms
+        expected = 0.4 * (0.6 * 0.9 + 0.4 * 0.9) + 0.3 * 0.5 + 0.2 * 0.2 + 0.1
+        assert winners[0].salience == pytest.approx(expected, abs=1e-3)
+
+    @pytest.mark.asyncio
+    async def test_set_goals_record_measured_relevance(self, bottleneck):
+        """With goals set, the keyword match is measured and recorded."""
+        bottleneck.set_goals(["alpha beta"])
+        matching = WorkspaceCandidate(
+            content="m",
+            content_type="thought",
+            summary="a note about alpha",
+            source=WorkspaceCandidateSource.CTM,
+            activation_level=0.8,
+        )
+        unrelated = WorkspaceCandidate(
+            content="u",
+            content_type="thought",
+            summary="a note about gamma",
+            source=WorkspaceCandidateSource.CTM,
+            activation_level=0.8,
+        )
+        await bottleneck.compete_for_access([matching, unrelated])
+
+        assert matching.goal_relevance == pytest.approx(0.5)
+        assert unrelated.goal_relevance == 0.0
 
     @pytest.mark.asyncio
     async def test_safety_gets_priority(self, bottleneck):
@@ -366,24 +470,41 @@ class TestGlobalBroadcast:
         assert stats["coverage_ratio"] == 1.0
 
     @pytest.mark.asyncio
-    async def test_no_modules_warning(self, broadcaster):
-        """Verify warning when broadcasting with no modules."""
+    async def test_no_modules_counts_no_broadcast(self, broadcaster, caplog):
+        """With no registered module a broadcast delivers nothing, counts
+        nothing and says so once at DEBUG, not once per ignition at WARNING."""
         candidate = WorkspaceCandidate(
             content="orphan",
             content_type="test",
             summary="Orphan content",
             source=WorkspaceCandidateSource.CTM,
         )
-        content = WorkspaceContent(candidate=candidate, salience=0.8)
+        logger_name = "mtc.consciousness.enhanced_global_workspace"
+        with caplog.at_level(logging.DEBUG, logger=logger_name):
+            for _ in range(3):
+                content = WorkspaceContent(candidate=candidate, salience=0.8)
+                results = await broadcaster.broadcast(content)
+                assert results == {}
 
-        results = await broadcaster.broadcast(content)
+        assert broadcaster.total_broadcasts == 0
+        assert broadcaster.coverage_ratio is None
+        records = [
+            r
+            for r in caplog.records
+            if r.name == logger_name and "registered" in r.getMessage()
+        ]
+        assert [r.levelno for r in records] == [logging.DEBUG]
 
-        assert results == {}
+    def test_coverage_ratio_unmeasured_without_receivers(self, broadcaster):
+        """Nothing could have received, so the coverage is undefined (None);
+        with a receiver and no broadcast yet it is a measured 0.0."""
+        assert broadcaster.coverage_ratio is None
+        assert broadcaster.get_statistics()["coverage_ratio"] is None
+        assert broadcaster.get_statistics()["receivers"] == 0
 
-    def test_coverage_ratio_zero_when_nothing_broadcast(self, broadcaster):
-        """No broadcast reached any module, so coverage is 0.0, not 1.0."""
+        broadcaster.register_module(MockCognitiveModule("listener"))
         assert broadcaster.coverage_ratio == 0.0
-        assert broadcaster.get_statistics()["coverage_ratio"] == 0.0
+        assert broadcaster.get_statistics()["receivers"] == 1
 
     def test_legacy_coverage_ratio_branch(self):
         """legacy_coverage_ratio keeps the v0.4.0 reading of 1.0."""
@@ -505,6 +626,62 @@ class TestIgnitionDetector:
         assert stats["total_ignitions"] == 5
         assert stats["avg_amplification"] > 1.0
 
+    @pytest.mark.asyncio
+    async def test_sustain_rate_is_none_until_a_sustain_check_runs(
+        self, ignition_detector
+    ):
+        """No sustain check has run, so no rate is reported; a check that
+        finds the content sustained gives 1.0 and one that finds it decayed
+        gives 0.0, over the checked events only."""
+        content = WorkspaceContent(
+            candidate=WorkspaceCandidate(content="s", summary="sustained"),
+            salience=0.8,
+        )
+        event = await ignition_detector.check_ignition(content)
+        assert event is not None
+        assert event.sustain_checked is False
+
+        stats = ignition_detector.get_statistics()
+        assert stats["total_ignitions"] == 1
+        assert stats["sustain_rate"] is None
+        assert stats["sustain_checked_count"] == 0
+        assert stats["sustained_count"] == 0
+
+        assert await ignition_detector.check_sustain(content) is True
+        stats = ignition_detector.get_statistics()
+        assert event.sustain_checked is True
+        assert stats["sustain_checked_count"] == 1
+        assert stats["sustained_count"] == 1
+        assert stats["sustain_rate"] == 1.0
+
+        event.ignition_time -= 60.0
+        assert await ignition_detector.check_sustain(content) is False
+        stats = ignition_detector.get_statistics()
+        assert stats["sustain_checked_count"] == 1
+        assert stats["sustained_count"] == 0
+        assert stats["sustain_rate"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_legacy_sustain_rate_keeps_the_v04_constant(self):
+        """legacy_sustain_rate reports 1.0 straight after an ignition,
+        although nothing checked it (v0.4.0), with the v0.4.0 keys alone."""
+        detector = IgnitionDetector(legacy_sustain_rate=True)
+        content = WorkspaceContent(
+            candidate=WorkspaceCandidate(content="s", summary="sustained"),
+            salience=0.8,
+        )
+        assert await detector.check_ignition(content) is not None
+
+        stats = detector.get_statistics()
+        assert stats["sustain_rate"] == 1.0
+        assert stats["sustained_count"] == 1
+        assert "sustain_checked_count" not in stats
+
+        # The workspace forwards the switch to its detector
+        legacy = _fast_workspace(legacy_sustain_rate=True)
+        assert legacy.ignition_detector.legacy_sustain_rate is True
+        assert _fast_workspace().ignition_detector.legacy_sustain_rate is False
+
 
 # ============================================================================
 # ENHANCED GLOBAL WORKSPACE TESTS
@@ -603,13 +780,20 @@ class TestEnhancedGlobalWorkspace:
             ),
         ]
 
-        await workspace.process_consciousness_cycle(candidates=candidates)
+        state = await workspace.process_consciousness_cycle(candidates=candidates)
 
-        workspace.get_unconscious_buffer()
-
-        # Low salience should be in unconscious buffer
-        # (if it didn't win competition)
-        assert len(workspace.stream_of_consciousness) >= 1
+        # The noise lost (the gate filtered it) and sits in the buffer; the
+        # thought alone was admitted and ignited
+        assert [c.summary for c in workspace.get_unconscious_buffer()] == [
+            "Low salience noise"
+        ]
+        assert [w.candidate.summary for w in state.workspace_contents] == [
+            "High salience thought"
+        ]
+        assert state.is_conscious
+        assert [c.candidate.summary for c in workspace.stream_of_consciousness] == [
+            "High salience thought"
+        ]
 
     @pytest.mark.asyncio
     async def test_submit_candidate_convenience(self, workspace):
@@ -681,11 +865,78 @@ class TestEnhancedGlobalWorkspace:
         assert state.primary_content is None
 
     @pytest.mark.asyncio
-    async def test_cycle_without_broadcast_reports_zero_coverage(self, workspace):
-        """A cycle with zero broadcasts reads coverage 0.0 by default."""
+    async def test_cycle_without_receivers_reports_unmeasured_coverage(self, workspace):
+        """A default workspace has no receiver, so the coverage is None; with
+        a receiver registered and nothing broadcast it is a measured 0.0."""
         state = await workspace.process_consciousness_cycle(candidates=[])
         assert workspace.broadcaster.total_broadcasts == 0
+        assert state.broadcast_coverage is None
+
+        workspace.register_module(MockCognitiveModule("listener"))
+        state = await workspace.process_consciousness_cycle(candidates=[])
         assert state.broadcast_coverage == 0.0
+
+    @pytest.mark.asyncio
+    async def test_default_workspace_registers_no_stub_receivers(self):
+        """The workspace hands its winners to its own modules by direct
+        call, which cannot fail and is not counted as coverage: nothing is
+        registered and the coverage stays unmeasured through ignitions."""
+        workspace = _fast_workspace(
+            temporal_config=TemporalWorkspaceConfig(refractory_period_ms=0.0)
+        )
+        assert workspace.broadcaster.registered_modules == {}
+
+        ignitions = 0
+        for i in range(3):
+            state = await workspace.process_consciousness_cycle([_strong(f"t {i}")])
+            ignitions += state.ignition_events
+            assert state.broadcast_coverage is None
+        assert ignitions == 3
+
+        stats = workspace.get_statistics()["broadcast"]
+        assert stats["coverage_ratio"] is None
+        assert stats["receivers"] == 0
+        assert stats["total_broadcasts"] == 0
+
+    @pytest.mark.asyncio
+    async def test_failing_receiver_lowers_coverage(self):
+        """Coverage is the delivery share over the receivers a caller
+        registered: one of two failing gives 0.5."""
+        workspace = _fast_workspace(
+            temporal_config=TemporalWorkspaceConfig(refractory_period_ms=0.0)
+        )
+        workspace.register_module(MockCognitiveModule("good"))
+        workspace.register_module(MockCognitiveModule("bad", should_fail=True))
+
+        state = await workspace.process_consciousness_cycle([_strong()])
+
+        assert state.ignition_events == 1
+        assert state.broadcast_coverage == pytest.approx(0.5)
+        stats = workspace.get_statistics()["broadcast"]
+        assert stats["receivers"] == 2
+        assert stats["coverage_ratio"] == pytest.approx(0.5)
+
+    @pytest.mark.asyncio
+    async def test_legacy_broadcast_receivers_keep_v04_coverage(self):
+        """legacy_broadcast_receivers registers the three acknowledgement-only
+        receivers, which makes the coverage 1.0 by construction (v0.4.0)."""
+        workspace = _fast_workspace(
+            legacy_broadcast_receivers=True,
+            temporal_config=TemporalWorkspaceConfig(refractory_period_ms=0.0),
+        )
+        assert sorted(workspace.broadcaster.registered_modules) == [
+            "active_inference",
+            "attention_schema",
+            "metacognition",
+        ]
+
+        state = await workspace.process_consciousness_cycle([_strong()])
+
+        assert state.ignition_events == 1
+        assert state.broadcast_coverage == 1.0
+        stats = workspace.get_statistics()["broadcast"]
+        assert stats["receivers"] == 3
+        assert stats["total_broadcasts"] == 1
 
     @pytest.mark.asyncio
     async def test_cycle_without_broadcast_legacy_coverage(self):
@@ -699,6 +950,58 @@ class TestEnhancedGlobalWorkspace:
         workspace = EnhancedGlobalWorkspace()
         assert workspace.bottleneck.threshold == 0.3
         assert workspace.ignition_detector.threshold == 0.3
+
+    @pytest.mark.asyncio
+    async def test_weak_candidate_does_not_enter_the_workspace(self):
+        """At workspace level the first occurrence of weak content is
+        refused: the temporal competition needs activation above the
+        threshold, whatever novelty and the neutral relevance gave it."""
+        workspace = _fast_workspace(
+            competition_mode="flat",
+            thalamic_gate_enabled=False,
+            temporal_config=TemporalWorkspaceConfig(refractory_period_ms=0.0),
+        )
+        weak = WorkspaceCandidate(
+            content="same_low_content",
+            content_type="noise",
+            summary="same_low_activation_noise",
+            source=WorkspaceCandidateSource.SENSORY,
+            activation_level=0.05,
+            emotional_salience=0.0,
+        )
+        state = await workspace.process_consciousness_cycle([weak])
+
+        assert state.workspace_contents == []
+        assert state.ignition_events == 0
+        assert not state.is_conscious
+
+    @pytest.mark.asyncio
+    async def test_authored_template_winner_gets_no_hot(self):
+        """A winner marked as an authored template competes, ignites and
+        appears in the workspace, but is registered as no first-order state
+        and targeted by no higher-order thought; the same candidate without
+        the mark gets one."""
+        flagged = _strong("an authored line", metadata={"authored_template": True})
+        workspace = _fast_workspace(
+            temporal_config=TemporalWorkspaceConfig(refractory_period_ms=0.0)
+        )
+        state = await workspace.process_consciousness_cycle([flagged])
+
+        assert state.is_conscious
+        assert state.ignition_events == 1
+        assert [w.candidate for w in state.workspace_contents] == [flagged]
+        assert state.higher_order_thoughts == []
+        assert len(workspace.metacognition.first_order_states) == 0
+
+        plain = _strong("an authored line")
+        other = _fast_workspace(
+            temporal_config=TemporalWorkspaceConfig(refractory_period_ms=0.0)
+        )
+        state = await other.process_consciousness_cycle([plain])
+
+        assert state.ignition_events == 1
+        assert len(state.higher_order_thoughts) == 1
+        assert len(other.metacognition.first_order_states) == 1
 
 
 # ============================================================================
@@ -883,7 +1186,7 @@ class TestGWTPerformance:
 
 
 # ============================================================================
-# TEMPORAL DYNAMICS TESTS (Task 5 - Biologically-plausible ignition timing)
+# TEMPORAL DYNAMICS TESTS (biologically plausible ignition timing)
 # ============================================================================
 
 
@@ -1205,6 +1508,382 @@ class TestTemporalIgnition:
         assert workspace._simulated_time_ms == 0.0
         assert workspace._last_ignition_time_ms == -1000.0
         assert workspace.cycle_count == 0
+
+
+# ============================================================================
+# UNMEASURED STATE FIELDS (binding, protoself, feeling of knowing, identity)
+# ============================================================================
+
+
+class TestUnmeasuredStateFields:
+    """The state carries None where a module measured nothing, and the
+    workspace's own readers (the cycle log line) accept it."""
+
+    @pytest.mark.asyncio
+    async def test_cycle_log_line_formats_unmeasured_fields(self, monkeypatch, caplog):
+        """A damasio result and a loop moment that measured nothing leave the
+        state fields None, and the cycle completes with 'unmeasured' in its
+        log line instead of a formatting error."""
+        workspace = _fast_workspace(
+            temporal_config=TemporalWorkspaceConfig(refractory_period_ms=0.0)
+        )
+        damasio_process = workspace.damasio.process
+        loop_process = workspace.beautiful_loop.process_conscious_moment
+
+        async def unmeasured_damasio(*args, **kwargs):
+            result = await damasio_process(*args, **kwargs)
+            result["protoself_stability"] = None
+            result["feeling_of_knowing"] = None
+            result["autobiographic_continuity"] = None
+            return result
+
+        async def unmeasured_loop(*args, **kwargs):
+            # A copy: the loop's own history keeps the moment it recorded
+            moment = await loop_process(*args, **kwargs)
+            return dataclasses.replace(moment, binding_quality=None)
+
+        monkeypatch.setattr(workspace.damasio, "process", unmeasured_damasio)
+        monkeypatch.setattr(
+            workspace.beautiful_loop, "process_conscious_moment", unmeasured_loop
+        )
+
+        with caplog.at_level(
+            logging.INFO, logger="mtc.consciousness.enhanced_global_workspace"
+        ):
+            state = await workspace.process_consciousness_cycle([_strong()])
+
+        assert state.is_conscious
+        assert state.binding_quality is None
+        assert state.protoself_stability is None
+        assert state.feeling_of_knowing is None
+        assert state.autobiographic_continuity is None
+        cycle_lines = [
+            r.getMessage() for r in caplog.records if "complete" in r.getMessage()
+        ]
+        assert len(cycle_lines) == 1
+        assert "bind=unmeasured" in cycle_lines[0]
+        assert "fok=unmeasured" in cycle_lines[0]
+
+    @pytest.mark.asyncio
+    async def test_default_cycle_leaves_binding_unmeasured(self):
+        """Salience-only winners carry no vector of their own, so the loop
+        binds nothing and the state's binding quality is None."""
+        workspace = _fast_workspace(
+            temporal_config=TemporalWorkspaceConfig(refractory_period_ms=0.0)
+        )
+        state = await workspace.process_consciousness_cycle(
+            [_strong("first thought"), _strong("second thought")]
+        )
+        assert len(state.workspace_contents) == 2
+        assert state.binding_quality is None
+
+    @pytest.mark.asyncio
+    async def test_first_cycle_leaves_protoself_stability_unmeasured(self):
+        """The first protoself update has no previous body state, so the
+        first cycle reports no stability and no feeling of knowing."""
+        workspace = _fast_workspace()
+        first = await workspace.process_consciousness_cycle([_strong()])
+        assert first.protoself_stability is None
+        assert first.feeling_of_knowing is None
+        second = await workspace.process_consciousness_cycle([_strong("another")])
+        assert second.protoself_stability is not None
+
+
+# ============================================================================
+# REFRACTORY CLOCK (per_cycle by default, elapsed on an injected clock)
+# ============================================================================
+
+
+async def _cadence(workspace, clock, cycles: int, gap_s: float):
+    """Admitted and ignition counts per cycle, the clock advanced between
+    cycles by ``gap_s`` seconds."""
+    admitted, ignitions = [], []
+    for i in range(cycles):
+        state = await workspace.process_consciousness_cycle([_strong(f"thought {i}")])
+        admitted.append(len(state.workspace_contents))
+        ignitions.append(state.ignition_events)
+        clock.advance(gap_s)
+    return admitted, ignitions
+
+
+class TestRefractoryClock:
+    """The refractory period runs on the simulated clock; ``elapsed`` also
+    credits the real time between cycles."""
+
+    @pytest.mark.asyncio
+    async def test_default_clock_is_per_cycle(self):
+        """The library default is the simulated per-cycle clock: sixty real
+        seconds between cycles do not clear the refractory period."""
+        assert TemporalWorkspaceConfig().refractory_clock == "per_cycle"
+        clock = _FakeClock()
+        workspace = _fast_workspace(clock=clock)
+        assert workspace.temporal_config.refractory_clock == "per_cycle"
+        assert workspace.refractory_clock == "per_cycle"
+        admitted, ignitions = await _cadence(workspace, clock, 4, 60.0)
+        assert admitted == [1, 0, 0, 1]
+        assert ignitions == [1, 0, 0, 1]
+
+    @pytest.mark.asyncio
+    async def test_per_cycle_clock_keeps_the_simulated_cadence(self):
+        clock = _FakeClock()
+        workspace = _fast_workspace(
+            temporal_config=TemporalWorkspaceConfig(refractory_clock="per_cycle"),
+            clock=clock,
+        )
+        admitted, ignitions = await _cadence(workspace, clock, 4, 60.0)
+        assert admitted == [1, 0, 0, 1]
+        assert ignitions == [1, 0, 0, 1]
+        # The simulated clock advanced by the competition duration alone
+        assert workspace._simulated_time_ms == pytest.approx(4 * 250.0)
+
+    @pytest.mark.asyncio
+    async def test_refractory_clears_when_cycles_are_far_apart(self):
+        clock = _FakeClock()
+        workspace = _fast_workspace(
+            temporal_config=TemporalWorkspaceConfig(refractory_clock="elapsed"),
+            clock=clock,
+        )
+        assert workspace.refractory_clock == "elapsed"
+        admitted, ignitions = await _cadence(workspace, clock, 3, 60.0)
+        assert admitted == [1, 1, 1]
+        assert ignitions == [1, 1, 1]
+        # Two gaps of sixty seconds joined the simulated clock
+        assert workspace._simulated_time_ms == pytest.approx(3 * 250.0 + 2 * 60000.0)
+
+    @pytest.mark.asyncio
+    async def test_rapid_cycles_stay_refractory_under_elapsed_clock(self):
+        clock = _FakeClock()
+        workspace = _fast_workspace(
+            temporal_config=TemporalWorkspaceConfig(refractory_clock="elapsed")
+        )
+        workspace.set_clock(clock)
+        assert workspace.clock is clock
+        admitted, ignitions = await _cadence(workspace, clock, 4, 0.001)
+        assert admitted == [1, 0, 0, 1]
+        assert ignitions == [1, 0, 0, 1]
+
+    @pytest.mark.asyncio
+    async def test_elapsed_clock_records_and_resets_the_cycle_end(self):
+        clock = _FakeClock(now=500.0)
+        workspace = _fast_workspace(
+            temporal_config=TemporalWorkspaceConfig(refractory_clock="elapsed"),
+            clock=clock,
+        )
+        assert workspace._last_cycle_end_s is None
+        await workspace.process_consciousness_cycle([_strong()])
+        assert workspace._last_cycle_end_s == 500.0
+        workspace.reset()
+        assert workspace._last_cycle_end_s is None
+
+    def test_unknown_refractory_clock_rejected(self):
+        with pytest.raises(ValueError):
+            TemporalWorkspaceConfig(refractory_clock="wall")
+
+
+# ============================================================================
+# DROPPED WINNERS (refractory period, temporal competition)
+# ============================================================================
+
+
+class TestDroppedWinners:
+    """A bottleneck winner that the refractory period or the temporal
+    competition drops is recorded in the unconscious buffer and counted."""
+
+    @pytest.mark.asyncio
+    async def test_refractory_dropped_winner_goes_to_the_unconscious_buffer(self):
+        workspace = _fast_workspace(
+            temporal_config=TemporalWorkspaceConfig(refractory_clock="per_cycle")
+        )
+        first = await workspace.process_consciousness_cycle([_strong("first")])
+        assert first.ignition_events == 1
+        assert workspace.get_unconscious_buffer() == []
+
+        second = await workspace.process_consciousness_cycle([_strong("second")])
+        assert second.workspace_contents == []
+        assert second.ignition_events == 0
+        assert [c.summary for c in workspace.get_unconscious_buffer()] == ["second"]
+        stats = workspace.get_statistics()
+        assert stats["refractory_dropped"] == 1
+        assert stats["temporal_dropped"] == 0
+
+    @pytest.mark.asyncio
+    async def test_temporal_competition_loser_is_buffered(self):
+        workspace = _fast_workspace(
+            competition_mode="flat",
+            thalamic_gate_enabled=False,
+            temporal_config=TemporalWorkspaceConfig(refractory_period_ms=0.0),
+        )
+        weak = WorkspaceCandidate(
+            content="faint",
+            content_type="noise",
+            summary="a faint first occurrence",
+            source=WorkspaceCandidateSource.SENSORY,
+            activation_level=0.05,
+            emotional_salience=0.0,
+        )
+        state = await workspace.process_consciousness_cycle([weak])
+        # It won the bottleneck on novelty and the neutral relevance ...
+        assert workspace.bottleneck.last_competition.winners_count == 1
+        # ... and the temporal competition dropped it
+        assert state.workspace_contents == []
+        assert state.ignition_events == 0
+        assert [c.summary for c in workspace.get_unconscious_buffer()] == [
+            "a faint first occurrence"
+        ]
+        stats = workspace.get_statistics()
+        assert stats["temporal_dropped"] == 1
+        assert stats["refractory_dropped"] == 0
+
+
+# ============================================================================
+# PENDING IGNITIONS (bounded) AND THE HOT TRIGGER OF AN ADMITTED WINNER
+# ============================================================================
+
+
+def _repeated_message() -> WorkspaceCandidate:
+    """The same moderate message every cycle: above the threshold on its
+    first occurrence, between the threshold and 1.5 times it afterwards."""
+    return WorkspaceCandidate(
+        content="the same message",
+        content_type="conversation",
+        summary="the same message",
+        source=WorkspaceCandidateSource.LLM,
+        activation_level=0.35,
+        emotional_salience=0.0,
+    )
+
+
+async def _repeated_run(cycles: int = 40, step_s: float = 2.0):
+    """``cycles`` cycles of the repeated message on a workspace whose
+    ignition detector reads a clock stepped ``step_s`` past each cycle."""
+    workspace = _fast_workspace(
+        thalamic_gate_enabled=False,
+        temporal_config=TemporalWorkspaceConfig(refractory_period_ms=0.0),
+    )
+    clock = _FakeClock(now=1_000_000.0)
+    workspace.ignition_detector.clock = clock
+    states = []
+    for _ in range(cycles):
+        states.append(
+            await workspace.process_consciousness_cycle([_repeated_message()])
+        )
+        clock.advance(step_s)
+    return workspace, states
+
+
+class TestPendingIgnitions:
+    @pytest.mark.asyncio
+    async def test_pending_ignitions_stay_bounded(self):
+        workspace, states = await _repeated_run()
+
+        # The first occurrence ignites; the repeats are admitted and park in
+        # the pending path, whose stale entries are dropped
+        assert [s.ignition_events for s in states] == [1] + [0] * 39
+        assert [len(s.workspace_contents) for s in states] == [1] * 40
+        assert len(workspace.ignition_detector.pending_ignitions) <= 1
+        assert workspace.get_statistics()["ignition"]["pending_count"] <= 1
+
+    @pytest.mark.asyncio
+    async def test_hot_trigger_names_admission_without_ignition(self):
+        workspace, states = await _repeated_run()
+
+        triggers = [[h.trigger for h in s.higher_order_thoughts] for s in states]
+        assert triggers[0] == ["workspace_ignition"]
+        assert triggers[1:] == [["workspace_admission"]] * 39
+        assert sum(s.ignition_events for s in states) == 1
+
+
+# ============================================================================
+# INTEGRATION LEVEL (None without two usable signals)
+# ============================================================================
+
+
+class TestIntegrationLevel:
+    """integration_level is a measurement over at least two usable signals
+    and None otherwise; the internal consumers read 0.0 for None."""
+
+    @pytest.mark.asyncio
+    async def test_integration_level_is_none_when_unmeasurable(self, monkeypatch):
+        """No signals, one signal and two constant signals give None, with
+        no numpy warning; the homeostasis activity and channel 0 of the
+        compact observation read 0.0 for the unmeasured level."""
+        workspace = _fast_workspace(
+            temporal_config=TemporalWorkspaceConfig(refractory_period_ms=0.0)
+        )
+        activities = []
+        update = workspace.active_inference.update_homeostasis
+
+        async def spy_update(activity):
+            activities.append(dict(activity))
+            return await update(activity)
+
+        monkeypatch.setattr(
+            workspace.active_inference, "update_homeostasis", spy_update
+        )
+
+        cases = {
+            "none": None,
+            "one": {"snn": np.random.rand(20)},
+            "constant": {"snn": np.ones(20), "lsm": np.ones(20)},
+        }
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            for name, signals in cases.items():
+                state = await workspace.process_consciousness_cycle(
+                    [_strong(f"thought {name}")], neural_signals=signals
+                )
+                assert state.integration_level is None, name
+        assert [a["intensity"] for a in activities] == [0.0, 0.0, 0.0]
+
+        # Channel 0 carries no mass for an unmeasured level (one winner, so
+        # the vector is not empty and the uniform fallback does not apply)
+        winner = WorkspaceContent(candidate=_strong("observed"), salience=0.6)
+        observation = workspace._compact_observation([winner], [], None, None)
+        assert observation[0] == 0.0
+        assert observation.sum() == pytest.approx(1.0)
+
+        # Two varying signals are a measurement, as before
+        measured = await workspace._measure_integration(
+            {"snn": np.arange(20.0), "lsm": np.arange(20.0) ** 2}
+        )
+        assert measured is not None and measured > 0.0
+
+    @pytest.mark.asyncio
+    async def test_short_or_degenerate_signals_are_unmeasured(self):
+        workspace = _fast_workspace()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            # A common length under 2
+            assert (
+                await workspace._measure_integration(
+                    {"snn": np.array([1.0]), "lsm": np.arange(5.0)}
+                )
+                is None
+            )
+            # One zero-variance vector beside a varying one: one usable signal
+            assert (
+                await workspace._measure_integration(
+                    {"snn": np.zeros(10), "lsm": np.arange(10.0)}
+                )
+                is None
+            )
+
+    @pytest.mark.asyncio
+    async def test_constant_signal_is_dropped_not_fatal(self):
+        """A zero-variance vector beside two varying ones is left out of the
+        statistic; the level is the mean over the usable pairs, the number
+        the two varying signals give on their own, with no numpy warning."""
+        workspace = _fast_workspace()
+        varying = {"snn": np.arange(20.0), "lsm": np.arange(20.0) ** 2}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            two = await workspace._measure_integration(varying)
+            three = await workspace._measure_integration(
+                {**varying, "reservoir": np.ones(20)}
+            )
+        assert two is not None and two > 0.0
+        assert three is not None
+        assert three == pytest.approx(two)
 
 
 if __name__ == "__main__":

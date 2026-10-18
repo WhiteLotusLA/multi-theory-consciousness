@@ -913,6 +913,82 @@ async def test_sustain_check_after_restore():
     detector.get_statistics()
 
 
+@pytest.mark.asyncio
+async def test_sustain_checked_survives_a_round_trip():
+    """Whether a sustain check ran on an ignition event persists, so a
+    restored detector reports the same sustain statistics."""
+    source = await _run(_workspace(), 2)
+    detector = source.ignition_detector
+    events = detector.ignition_events
+    assert len(events) >= 2
+    assert all(e.sustain_checked is False for e in events)
+    assert detector.get_statistics()["sustain_rate"] is None
+
+    await detector.check_sustain(events[-1].content)
+    assert events[-1].sustain_checked is True
+    expected = detector.get_statistics()
+
+    restored = _workspace()
+    restored.from_state_dict(_json_round_trip(source.to_state_dict()))
+    restored_events = restored.ignition_detector.ignition_events
+    assert [e.sustain_checked for e in restored_events] == [
+        e.sustain_checked for e in events
+    ]
+    stats = restored.ignition_detector.get_statistics()
+    for key in ("sustain_rate", "sustain_checked_count", "sustained_count"):
+        assert stats[key] == expected[key]
+
+    # A record saved before the field existed restores as unchecked
+    saved = _json_round_trip(source.to_state_dict())
+    for record in saved["histories"]["ignition_detector.ignition_events"]:
+        del record["sustain_checked"]
+    older = _workspace()
+    older.from_state_dict(saved)
+    assert all(
+        e.sustain_checked is False for e in older.ignition_detector.ignition_events
+    )
+
+
+class _ManualClock:
+    def __init__(self, now: float):
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.mark.asyncio
+async def test_last_cycle_end_survives_a_round_trip():
+    """The end time of the last cycle persists, so a workspace restored on
+    the elapsed clock credits its downtime to the refractory period."""
+    clock = _ManualClock(now=2000.0)
+    source = _workspace(
+        temporal_config=TemporalWorkspaceConfig(refractory_clock="elapsed"),
+        clock=clock,
+    )
+    await source.process_consciousness_cycle([_candidate("before the save")])
+    saved = _json_round_trip(source.to_state_dict())
+    assert saved["scalars"]["last_cycle_end_s"] == 2000.0
+
+    clock.now = 2060.0  # a minute of downtime
+    restored = _workspace(
+        temporal_config=TemporalWorkspaceConfig(refractory_clock="elapsed"),
+        clock=clock,
+    )
+    restored.from_state_dict(saved)
+    assert restored._last_cycle_end_s == 2000.0
+    before = restored._simulated_time_ms
+    state = await restored.process_consciousness_cycle([_candidate("after restore")])
+    assert state.ignition_events == 1
+    assert restored._simulated_time_ms == pytest.approx(before + 60000.0 + 250.0)
+
+    # A state saved before the field existed restores with no end time
+    del saved["scalars"]["last_cycle_end_s"]
+    older = _workspace()
+    older.from_state_dict(saved)
+    assert older._last_cycle_end_s is None
+
+
 def test_restore_skips_malformed_records_and_foreign_hashes():
     workspace = _workspace()
     workspace.from_state_dict(

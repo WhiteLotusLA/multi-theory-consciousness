@@ -22,10 +22,47 @@ modules (row = target, column = source):
     FEP: reads GWT + HOT (prediction uses workspace and metacognition)
     BLT: reads AST + HOT + FEP (the beautiful loop integrates the rest)
 
+The five nodes are named after theories, but two of them read other layers.
+The signal behind each default node (``_module_signals``):
+
+    GWT: ``integration_level`` when it is measured and above zero, else a
+         composite of ``is_conscious`` and the ignition count
+    AST: the protoself stability (``protoself_stability``), not the
+         attention schema; 0.7 when an attention focus is set, else 0.0,
+         when the stability is absent or None
+    HOT: the core layer's feeling of knowing (``feeling_of_knowing``), not
+         the higher-order thought module; the higher-order thought count
+         over three, capped at 1.0, when the feeling of knowing is absent
+         or None
+    FEP: the most urgent drive's urgency (``homeostatic_urgency``), else the
+         prediction error
+    BLT: the binding quality (``binding_quality``), else the loop quality
+         (``beautiful_loop_quality``) when the binding quality is absent or
+         None
+
+Each AST, HOT and BLT fallback applies when its field is absent or None, and
+a measured 0.0 is read as 0.0; the GWT composite applies when
+``integration_level`` is absent, None or 0.0. Under the v0.5.0 defaults a
+workspace state reaches the fallbacks. On the first cycle the protoself has
+no previous body state to measure against (``damasio.first_delta``
+"unmeasured"), so the stability and the feeling of knowing are None and AST
+reads the attention focus and HOT the higher-order thought count. Binding is
+measured only between winners that carry their own numeric vector (numeric
+content or an embedding in their metadata; ``blt.binding_evidence``
+"candidate_vectors"), so with fewer than two such winners the binding
+quality is None and BLT reads the loop quality; for text winners without an
+embedding that is every cycle. A partition that separates the AST or HOT
+node therefore separates the protoself and core-layer signals once they are
+measured, and the attention focus or the thought count on a cycle where they
+are not; one that separates the BLT node separates the binding quality or,
+when binding is unmeasured, the loop quality.
+
 Each module's continuous signal is binarized probabilistically with a
 deterministic per-cycle hash threshold, so a module with signal 0.8 is ON in
 about 80 percent of cycles. The TPM uses Laplace smoothing; rows are indexed
-big-endian (the first label is the most significant bit).
+big-endian (the first label is the most significant bit). The matrix is
+empirical: rows for module states that were never visited read 0.5, and
+``tpm_coverage`` gives the share of rows that were observed.
 """
 
 import hashlib
@@ -54,6 +91,11 @@ class PhiResult:
 
     Holds the computed Phi (or None while warming up or on error) plus
     metadata about the computation and the TPM it was computed from.
+
+    ``is_exact`` says that the exact IIT 4.0 analysis ran on the empirical
+    matrix; it is a property of the algorithm, not of the data, and says
+    nothing about how much of the matrix was observed, which
+    ``tpm_coverage`` reports (unvisited rows are smoothing filler).
     """
 
     phi: Optional[float]
@@ -257,14 +299,19 @@ class PhiTracker:
 
     @staticmethod
     def _module_signals(cs: Any) -> Dict[str, float]:
-        """Continuous 0 to 1 signal per default module, read via getattr."""
+        """Continuous 0 to 1 signal per default module, read via getattr.
+
+        The sources are those listed in the module docstring: AST is the
+        protoself stability and HOT the core layer's feeling of knowing.
+        """
         signals: Dict[str, float] = {}
 
-        # GWT: integration_level when the neural signals are wired. When it
-        # stays at 0.0, fall back to a composite of is_conscious and the
-        # ignition count, both of which vary per cycle. broadcast_coverage is
-        # deliberately not used: it is a success rate that can read 1.0 while
-        # the workspace is idle, which would pin the GWT bit on.
+        # GWT: integration_level when the neural signals are wired and it was
+        # measured. None (not measured) or 0.0 falls back to a composite of
+        # is_conscious and the ignition count, both of which vary per cycle.
+        # broadcast_coverage is deliberately not used: it is a success rate
+        # that can read 1.0 while the workspace is idle, which would pin the
+        # GWT bit on.
         integration = float(getattr(cs, "integration_level", 0.0) or 0.0)
         if integration > 0.0:
             signals["GWT"] = min(integration, 1.0)
@@ -282,7 +329,10 @@ class PhiTracker:
                     + 0.3 * min(1.0, ignitions / 3.0)
                 )
 
-        # AST: protoself stability, else presence of an attention focus.
+        # AST: the protoself stability (a damasio-layer quantity, not the
+        # attention schema). The attention-focus fallback applies when the
+        # field is absent or None, which a workspace state reaches on its
+        # first cycle under damasio.first_delta "unmeasured".
         protoself = getattr(cs, "protoself_stability", None)
         if protoself is not None:
             signals["AST"] = float(protoself)
@@ -292,7 +342,9 @@ class PhiTracker:
                 0.7 if attn and getattr(attn, "current_focus", None) else 0.0
             )
 
-        # HOT: feeling of knowing, else the higher-order thought count.
+        # HOT: the core layer's feeling of knowing (not the higher-order
+        # thought module). The thought-count fallback applies when the field
+        # is absent or None (the first cycle, as for AST).
         fok = getattr(cs, "feeling_of_knowing", None)
         if fok is not None:
             signals["HOT"] = float(fok)
@@ -300,14 +352,16 @@ class PhiTracker:
             hots = getattr(cs, "higher_order_thoughts", None) or []
             signals["HOT"] = min(1.0, float(len(hots)) / 3.0)
 
-        # FEP: homeostatic urgency, else prediction error.
+        # FEP: the most urgent drive's urgency, else the prediction error.
         urgency = getattr(cs, "homeostatic_urgency", None)
         if isinstance(urgency, (tuple, list)) and len(urgency) >= 2:
             signals["FEP"] = float(urgency[1])
         else:
             signals["FEP"] = min(1.0, float(getattr(cs, "prediction_error", 0.0)))
 
-        # BLT: binding quality, else the loop quality.
+        # BLT: binding quality, else the loop quality when the binding is
+        # absent or None (unmeasured under blt.binding_evidence
+        # "candidate_vectors" unless two winners carry their own vector).
         binding = getattr(cs, "binding_quality", None)
         if binding is not None:
             signals["BLT"] = float(binding)
@@ -403,6 +457,15 @@ class PhiTracker:
         Returns None while warming up, when no transition has been seen, or
         when the computation fails (the failure is logged as a warning).
         Use ``compute_architectural_phi`` for exact IIT 4.0 Phi.
+
+        Sampling floor: the estimate is a plug-in mutual information, so it
+        is positive for a system with no dynamics. On module signals that
+        never change (every transition comes from the hash thresholds) it
+        reads about 0.5 bits when the 128-transition warm-up ends and falls
+        roughly as one over the number of transitions (about 0.37 at 256,
+        0.10 at 1,024, 0.03 at 4,096). A positive value soon after warm-up is
+        therefore not evidence of integration, and a falling value is not
+        evidence of change. No bias correction is applied.
         """
         if self.warming_up:
             return None
@@ -529,7 +592,10 @@ class PhiTracker:
             A warming-up result before ``min_transitions``; a structured
             error (``error`` set, ``phi`` None) when PyPhi is missing, the
             state is invalid or the analysis raises; otherwise the clamped
-            non-negative Phi with partition info and timing.
+            non-negative Phi with partition info and timing. ``is_exact``
+            True says the exact analysis ran on the empirical matrix, not
+            that the matrix was observed: ``tpm_coverage`` gives the share of
+            rows that were visited, and the rest are smoothing filler.
         """
         coverage = self.get_tpm_coverage()
         transitions = self.transitions_recorded
@@ -652,17 +718,29 @@ class PhiTracker:
         Restore tracker state produced by ``to_state_dict``.
 
         Arrays and history entries whose shape does not match this tracker's
-        module count are skipped with a warning. The output calibration
-        (``phi_scale``, ``phi_clamp``, ``phi_warmup_reference``) stays as
-        constructed.
+        module count are skipped with a warning. The configuration stays as
+        constructed: ``min_transitions``, ``history_size`` and
+        ``laplace_alpha`` in the snapshot are written for inspection only and
+        are not restored (a difference is logged at INFO), and neither is the
+        output calibration (``phi_scale``, ``phi_clamp``,
+        ``phi_warmup_reference``).
         """
         s = state.get("scalars", {})
         a = state.get("arrays", {})
         h = state.get("histories", {})
 
-        self.min_transitions = int(s.get("min_transitions", self.min_transitions))
-        self.history_size = int(s.get("history_size", self.history_size))
-        self.laplace_alpha = float(s.get("laplace_alpha", self.laplace_alpha))
+        for key in ("min_transitions", "history_size", "laplace_alpha"):
+            persisted = s.get(key)
+            current = getattr(self, key)
+            if persisted is not None and persisted != current:
+                logger.info(
+                    "PhiTracker: snapshot %s=%s differs from the constructed "
+                    "%s=%s; keeping the constructed value",
+                    key,
+                    persisted,
+                    key,
+                    current,
+                )
         self._cycle_counter = int(s.get("cycle_counter", 0))
 
         if "transition_counts" in a:
@@ -713,16 +791,18 @@ class PhiTracker:
         snn_state: np.ndarray,
         lsm_state: np.ndarray,
         htm_state: np.ndarray,
-    ) -> float:
+    ) -> Optional[float]:
         """
-        Estimate neural integration from the spectrum of cross-correlations.
+        How concentrated the correlation matrix of three vectors is.
 
-        Coarse-grains three substrate state vectors into three macro-nodes,
-        computes their 3x3 correlation matrix and returns ``log(3)`` minus the
-        spectral entropy of its eigenvalues. Correlated substrates concentrate
-        variance in fewer eigenvalues (lower entropy), so a higher value means
-        more integrated; independent substrates spread variance evenly and
-        score near 0.
+        Takes the first 50 entries of three substrate vectors, truncates them
+        to a common length, computes their 3 by 3 correlation matrix and
+        returns ``log(3)`` minus the spectral entropy of its eigenvalues:
+        vectors that move together concentrate the variance in fewer
+        eigenvalues and score higher, unrelated vectors score near 0.
+        The vectors are compared across unit index (unit i of one substrate
+        against unit i of another), not over time samples, so this is not a
+        time-series integration measure. Nothing in the package calls it.
 
         Args:
             snn_state: 1-D SNN activations.
@@ -730,8 +810,10 @@ class PhiTracker:
             htm_state: 1-D HTM column activations.
 
         Returns:
-            Non-negative float in [0, log(3)]. 0.0 for fewer than two common
-            samples, constant inputs, or any numerical failure.
+            Non-negative float in [0, log(3)]; None when nothing could be
+            computed: fewer than two common entries, a vector with zero
+            variance, an undefined correlation, or a numerical failure (logged
+            as a warning).
         """
         try:
             max_samples = 50
@@ -742,20 +824,20 @@ class PhiTracker:
             # Truncate to the common length.
             n = min(len(snn), len(lsm), len(htm))
             if n < 2:
-                return 0.0
+                return None
             stacked = np.vstack([snn[:n], lsm[:n], htm[:n]])
 
             # Constant signals have zero variance and no defined correlation.
             if np.any(np.std(stacked, axis=1) == 0.0):
-                return 0.0
+                return None
             corr = np.corrcoef(stacked)
             if np.any(np.isnan(corr)):
-                return 0.0
+                return None
 
             eigenvalues = np.abs(np.linalg.eigvalsh(corr))
             total = eigenvalues.sum()
-            if total == 0.0:
-                return 0.0
+            if not np.isfinite(total) or total == 0.0:
+                return None
             probs = eigenvalues / total
             probs = probs[probs > 0]
             entropy = -np.sum(probs * np.log(probs))
@@ -764,4 +846,4 @@ class PhiTracker:
             return max(0.0, float(max_entropy - entropy))
         except Exception as exc:
             logger.warning("Neural integration computation failed: %s", exc)
-            return 0.0
+            return None

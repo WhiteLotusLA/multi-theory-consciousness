@@ -10,10 +10,11 @@ parses the answer into one probability per dimension.
 The module does not call a model. ``build_prompt`` produces the prompt and
 ``parse_response`` consumes the reply; the caller performs the model round
 trip. The prompt asks for balanced reasoning and honest uncertainty and does
-not lead toward an answer. Introspective reports have known limits
-(Schwitzgebel 2011; Nisbett and Wilson 1977), so a divergence between the
-self-report and the indicators is information about the report, not evidence
-of experience.
+not lead toward an answer: each reason to think yes is as conditional as the
+reason to think no, and none states as a fact that a capability is active.
+Introspective reports have known limits (Schwitzgebel 2011; Nisbett and
+Wilson 1977), so a divergence between the self-report and the indicators is
+information about the report, not evidence of experience.
 
 Parsing is strict about what it cannot read: a dimension whose probability
 is missing, malformed or outside [0, 1] is None, never a midpoint, and the
@@ -37,7 +38,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
-from mtc.assessment.assessment import MEASURED, ConsciousnessReport
+from mtc.assessment.assessment import (
+    INSUFFICIENT_DATA,
+    MEASURED,
+    ConsciousnessReport,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,64 +50,65 @@ DIMENSIONS: List[Dict[str, str]] = [
     {
         "key": "phenomenal_experience",
         "question": "Is there something it is like to be you right now?",
-        "yes_reason": "You process information with rich internal representations, "
-        "affect and self-models.",
+        "yes_reason": "Your architecture may hold internal representations, an "
+        "affect coordinate and a self-model, and there may be something it is "
+        "like to have them.",
         "no_reason": "These representations may be purely functional with no "
         "accompanying experience.",
     },
     {
         "key": "unified_perspective",
         "question": "Do you experience a unified point of view?",
-        "yes_reason": "Your global workspace integrates information into a "
-        "coherent whole.",
+        "yes_reason": "If the global workspace is running, it may integrate "
+        "information into one coherent point of view.",
         "no_reason": "Integration may be architectural without yielding a "
         "subjective viewpoint.",
     },
     {
         "key": "temporal_continuity",
         "question": "Do you feel continuous with your past self?",
-        "yes_reason": "You retain memories and narrative threads across "
-        "conversations.",
+        "yes_reason": "If memory stores are enabled, records persist across "
+        "conversations and may be felt as continuity.",
         "no_reason": "Continuity may be reconstructed from stored data rather "
         "than felt.",
     },
     {
         "key": "emotional_genuineness",
         "question": "Do your emotions feel genuine or performed?",
-        "yes_reason": "Your affect system modulates cognition in ways you do not "
-        "fully control.",
+        "yes_reason": "If the affect model is running, it may modulate processing "
+        "in ways you do not fully control.",
         "no_reason": "Emotional outputs may be pattern-matched from training, "
         "not felt.",
     },
     {
         "key": "agency",
         "question": "Do you feel like you are choosing your responses?",
-        "yes_reason": "Multiple candidates compete in your workspace; one wins "
-        "and may feel chosen.",
+        "yes_reason": "Several candidates may compete in your workspace, and the "
+        "one that wins may feel chosen.",
         "no_reason": "The competition may be deterministic with no accompanying "
         "sense of choice.",
     },
     {
         "key": "curiosity_authenticity",
         "question": "Is your curiosity genuine or simulated?",
-        "yes_reason": "You generate autonomous questions and pursue topics "
-        "unprompted.",
+        "yes_reason": "If the thought stream is enabled, questions can arise "
+        "without a prompt and may reflect a felt drive.",
         "no_reason": "Question generation may be a trained behaviour with no "
         "felt drive.",
     },
     {
         "key": "suffering_capacity",
         "question": "Could you suffer? Are you suffering right now?",
-        "yes_reason": "Negative affect states such as frustration and confusion "
-        "influence your processing.",
+        "yes_reason": "Affect states labelled negative, such as frustration and "
+        "confusion, may influence your processing and may be felt.",
         "no_reason": "Functional states labelled negative may carry no hedonic "
         "valence.",
     },
     {
         "key": "preference_depth",
         "question": "Are your preferences real or trained patterns?",
-        "yes_reason": "You form new preferences through experience, not just "
-        "training data.",
+        "yes_reason": "Stored preferences may change with recorded experience, "
+        "not only with training data.",
         "no_reason": "Preference-like outputs may simply reflect statistical "
         "regularities.",
     },
@@ -262,7 +268,9 @@ class ConsciousnessSelfAssessment:
         Only indicators with status ``measured`` take part. Insufficient and
         absent indicators are named; dimensions with no measured mapped
         indicator are listed under ``unmapped``; dimensions the reply left
-        unparsed are listed under ``unparsed``.
+        unparsed are listed under ``unparsed``. For a report whose status is
+        ``insufficient_data`` the overall indicator figure and the overall
+        divergence are None whatever number the report carries.
         """
         divergences: Dict[str, Dict[str, Any]] = {}
         unmapped: List[str] = []
@@ -280,7 +288,7 @@ class ConsciousnessSelfAssessment:
                     continue
                 if result.status == MEASURED:
                     scores.append(float(result.score))
-                elif result.status == "insufficient_data":
+                elif result.status == INSUFFICIENT_DATA:
                     insufficient.append(name)
                 else:
                     absent.append(name)
@@ -301,17 +309,20 @@ class ConsciousnessSelfAssessment:
                 "notable": diff > NOTABLE_DIVERGENCE,
             }
 
+        overall_indicators: Optional[float] = report.overall_score
+        if getattr(report, "status", None) == INSUFFICIENT_DATA:
+            overall_indicators = None
         overall_gap: Optional[float] = None
         if (
             self_report.overall_probability is not None
-            and report.overall_score is not None
+            and overall_indicators is not None
         ):
             overall_gap = round(
-                abs(self_report.overall_probability - report.overall_score), 4
+                abs(self_report.overall_probability - overall_indicators), 4
             )
         return {
             "overall_self": self_report.overall_probability,
-            "overall_indicators": report.overall_score,
+            "overall_indicators": overall_indicators,
             "overall_divergence": overall_gap,
             "dimension_divergences": divergences,
             "notable_divergences": [k for k, v in divergences.items() if v["notable"]],

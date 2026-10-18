@@ -35,8 +35,9 @@ exist only when configured.
 
 Config: ``EmotionDynamicsConfig``. Persisted state (``to_state_dict``): the
 smoothed and mood values, the acute layer, the previous cycle and recent
-deltas; labels are conversation-derived and private. The Phase 6 orchestrator
-registers the module with the persistence hub as ``emotion_dynamics``.
+deltas; labels are conversation-derived and private. The pipeline runtime
+(``mtc.pipeline.runtime``) registers the module with the persistence hub as
+``emotion_dynamics``.
 """
 
 import logging

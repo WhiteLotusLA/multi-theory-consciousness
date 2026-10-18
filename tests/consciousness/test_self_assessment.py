@@ -222,3 +222,39 @@ def test_history_is_bounded():
     for _ in range(6):
         sa.parse_response(FULL_ANSWER)
     assert len(sa._history) == 3
+
+
+def test_overall_divergence_is_none_for_an_insufficient_report():
+    report = make_report({}, overall=0.0)
+    report.status = "insufficient_data"
+    self_report = SelfReport(
+        dimensions={key: 0.6 for key in DIMENSION_KEYS},
+        reasoning={},
+        overall_probability=0.6,
+        uncertainty=None,
+        meta_note="",
+    )
+    out = ConsciousnessSelfAssessment().compare_with_indicators(report, self_report)
+    assert out["overall_self"] == 0.6
+    assert out["overall_indicators"] is None
+    assert out["overall_divergence"] is None
+    # A measured report with the same numbers is compared.
+    measured = make_report({}, overall=0.0)
+    out = ConsciousnessSelfAssessment().compare_with_indicators(measured, self_report)
+    assert out["overall_indicators"] == 0.0
+    assert out["overall_divergence"] == pytest.approx(0.6)
+
+
+def test_yes_reasons_do_not_assert_capabilities():
+    from mtc.consciousness.self_assessment import DIMENSIONS
+
+    for dimension in DIMENSIONS:
+        reason = dimension["yes_reason"]
+        assert " may " in f" {reason} " or reason.startswith("If "), reason
+    prompt = ConsciousnessSelfAssessment().build_prompt()
+    for assertion in (
+        "You retain memories and narrative threads across conversations",
+        "You generate autonomous questions and pursue topics unprompted",
+        "You form new preferences through experience, not just training data",
+    ):
+        assert assertion not in prompt

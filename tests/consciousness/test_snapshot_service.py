@@ -345,6 +345,31 @@ def test_delta_none_without_older_snapshot(tmp_path):
     assert current["delta_24h"] == delta
 
 
+def test_delta_has_no_passing_count_against_an_insufficient_snapshot(tmp_path):
+    clock = _Clock()
+    service, store = _service(tmp_path, clock)
+    _run(service.take_snapshot("manual", _report(0.6, passing=12, coverage=0.8)))
+    clock.advance(hours=25)
+    _run(
+        service.take_snapshot(
+            "manual",
+            _report(0.0, status="insufficient_data", coverage=0.0, passing=0),
+        )
+    )
+    delta = _run(service.get_delta(hours=24))
+    assert delta["passing_count"] is None
+    assert delta["overall_score"] is None
+    assert delta["coverage"] == pytest.approx(0.0 - 0.8)
+
+    # The other way round: an insufficient older snapshot, a measured latest.
+    clock.advance(hours=25)
+    _run(service.take_snapshot("manual", _report(0.7, passing=9, coverage=0.9)))
+    delta = _run(service.get_delta(hours=24))
+    assert delta["passing_count"] is None
+    assert delta["overall_score"] is None
+    assert delta["coverage"] == pytest.approx(0.9)
+
+
 def test_developmental_hook_optional_and_stored_in_metadata(tmp_path):
     async def hook():
         return {"status": "measured", "stage": 3}

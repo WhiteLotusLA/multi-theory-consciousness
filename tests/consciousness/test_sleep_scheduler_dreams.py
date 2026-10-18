@@ -10,7 +10,7 @@ import pytest
 
 from mtc.brain.protocol import BrainReply, FakeBrain, NoAnswerError
 from mtc.consciousness.dream_engine import DreamEngine, dream_sentence_allowance
-from mtc.consciousness.pad_affect import PADState
+from mtc.consciousness.pad_affect import PADAffectModel, PADSources, PADState
 from mtc.consciousness.sleep_scheduler import (
     AffectSource,
     GoalSource,
@@ -35,6 +35,21 @@ RECORD_FIELDS = {
     "trim_result",
     "output_tokens",
 }
+
+
+# Inputs that cover every PAD dimension: a state that carries them is a
+# measured reading.
+MEASURED = ("somatic_valence", "protoself_arousal", "agency_score")
+
+
+def measured_pad(pleasure, arousal, dominance, label):
+    return PADState(
+        pleasure=pleasure,
+        arousal=arousal,
+        dominance=dominance,
+        label=label,
+        measured_inputs=MEASURED,
+    )
 
 
 def at(hour, minute=0, zone="UTC", day=1):
@@ -182,7 +197,7 @@ async def test_dream_interval_at_night():
 async def test_dream_context_from_themes_affect_and_goals():
     clock = Clock(at(12, 0))
     themes = Themes(["tide pools", "a chess endgame", "rain on glass", "maps"])
-    pad = PADState(pleasure=0.6, arousal=0.8, dominance=0.7, label="Exhilarated")
+    pad = measured_pad(0.6, 0.8, 0.7, "Exhilarated")
     goals = Goals([Goal("understand recursion"), Goal("finish the essay")])
     assert isinstance(themes, ThemeSource)
     assert isinstance(Affect(pad), AffectSource)
@@ -198,7 +213,7 @@ async def test_dream_context_from_themes_affect_and_goals():
     assert "Emotional undertone: exhilarated." in prompt
     assert brain.calls[0]["thinking_mode"] is False
 
-    faint = PADState(pleasure=0.1, arousal=0.5, dominance=0.5, label="Content")
+    faint = measured_pad(0.1, 0.5, 0.5, "Content")
     quiet_brain = FakeBrain()
     quiet_clock = Clock(at(12, 0))
     quiet = make(quiet_clock, brain=quiet_brain, affect=Affect(faint))
@@ -338,7 +353,7 @@ async def test_reasoning_stripped_from_dream():
     assert "think" not in stream.injected[0][1]
 
 
-HEAVY = PADState(pleasure=-0.8, arousal=0.8, dominance=0.2, label="Anxious")
+HEAVY = measured_pad(-0.8, 0.8, 0.2, "Anxious")
 
 
 @pytest.mark.asyncio
@@ -376,12 +391,12 @@ async def test_gentle_floor_softens_heavy_valence_when_enabled():
     await enter_nap(scheduler, clock)
     prompt = brain.calls[0]["prompt"]
     assert "anxious" not in prompt.lower()
-    assert f"Emotional undertone: {config.gentle_floor_emotion}." in prompt
+    assert "Emotional undertone" not in prompt
     assert spy.biases == [True]
     (record,) = await store.recent_dreams(1)
     assert record["parameters"]["gentle_floor"] is True
 
-    mild = PADState(pleasure=-0.3, arousal=0.8, dominance=0.2, label="Anxious")
+    mild = measured_pad(-0.3, 0.8, 0.2, "Anxious")
     spy_mild = engine(cls=SpyEngine)
     mild_brain = FakeBrain()
     other_clock = Clock(at(12, 0))
@@ -395,6 +410,110 @@ async def test_gentle_floor_softens_heavy_valence_when_enabled():
     await enter_nap(other, other_clock)
     assert spy_mild.biases == [None]
     assert "Emotional undertone: anxious." in mild_brain.calls[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_neutral_label_gives_no_undertone():
+    """A measured state labelled Neutral names no emotion, however strong."""
+    neutral = measured_pad(0.05, 0.95, 0.95, "Neutral")
+    clock = Clock(at(12, 0))
+    brain = FakeBrain()
+    stream = FakeStream()
+    scheduler = make(clock, brain=brain, affect=Affect(neutral), thought_stream=stream)
+    await enter_nap(scheduler, clock)
+    assert "Emotional undertone" not in brain.calls[0]["prompt"]
+    assert "neutral" not in brain.calls[0]["prompt"].lower()
+    assert stream.injected[0][3] == ""
+
+    # The label the PAD model gives a near-zero pleasure is Neutral too.
+    computed = PADAffectModel().compute(
+        PADSources(somatic_valence=0.05, protoself_arousal=1.0, agency_score=1.0),
+        measured=MEASURED,
+    )
+    assert computed.label == "Neutral"
+    other_clock = Clock(at(12, 0))
+    other_brain = FakeBrain()
+    other = make(other_clock, brain=other_brain, affect=Affect(computed))
+    await enter_nap(other, other_clock)
+    assert "Emotional undertone" not in other_brain.calls[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_state_of_unknown_provenance_gives_no_undertone():
+    """A state without measured inputs is not a reading: no emotion, no floor."""
+    unknown = PADState(pleasure=-0.8, arousal=0.8, dominance=0.2, label="Anxious")
+    assert unknown.measured_inputs is None
+    clock = Clock(at(12, 0))
+    spy = engine(cls=SpyEngine)
+    brain = FakeBrain()
+    stream = FakeStream()
+    store = InMemoryDreamStore()
+    scheduler = make(
+        clock,
+        brain=brain,
+        dream_engine=spy,
+        affect=Affect(unknown),
+        thought_stream=stream,
+        dream_store=store,
+        config=SleepSchedulerConfig(gentle_floor_enabled=True),
+    )
+    await enter_nap(scheduler, clock)
+    prompt = brain.calls[0]["prompt"]
+    assert "Emotional undertone" not in prompt
+    assert "anxious" not in prompt.lower()
+    assert spy.biases == [None]
+    assert stream.injected[0][3] == ""
+    (record,) = await store.recent_dreams(1)
+    assert record["parameters"]["gentle_floor"] is False
+
+    # Measured inputs that leave out pleasure or arousal do not make a reading.
+    no_arousal = PADState(
+        pleasure=-0.8,
+        arousal=0.8,
+        dominance=0.2,
+        label="Anxious",
+        measured_inputs=("somatic_valence", "agency_score"),
+    )
+    other_clock = Clock(at(12, 0))
+    other_brain = FakeBrain()
+    other = make(other_clock, brain=other_brain, affect=Affect(no_arousal))
+    await enter_nap(other, other_clock)
+    assert "Emotional undertone" not in other_brain.calls[0]["prompt"]
+
+    # The PAD model's own unlisted state is of unknown provenance as well.
+    unlisted = PADAffectModel().compute(PADSources(somatic_valence=-0.9))
+    assert unlisted.measured_inputs is None
+    third_clock = Clock(at(12, 0))
+    third_brain = FakeBrain()
+    third = make(third_clock, brain=third_brain, affect=Affect(unlisted))
+    await enter_nap(third, third_clock)
+    assert "Emotional undertone" not in third_brain.calls[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_gentle_floor_passes_comfort_bias_and_no_emotion():
+    """Under the gentle floor the dream context holds no emotion word at all."""
+    config = SleepSchedulerConfig(gentle_floor_enabled=True)
+    clock = Clock(at(12, 0))
+    spy = engine(cls=SpyEngine)
+    brain = FakeBrain()
+    stream = FakeStream()
+    scheduler = make(
+        clock,
+        brain=brain,
+        dream_engine=spy,
+        affect=Affect(HEAVY),
+        thought_stream=stream,
+        config=config,
+    )
+    context, gentle = scheduler._dream_context("nap")
+    assert gentle is True
+    assert context.dominant_emotion is None
+    assert not hasattr(config, "gentle_floor_emotion")
+    await enter_nap(scheduler, clock)
+    assert spy.biases == [True]
+    assert "Emotional undertone" not in brain.calls[0]["prompt"]
+    assert stream.injected[0][3] == ""
 
 
 @pytest.mark.asyncio
@@ -432,7 +551,7 @@ async def test_dream_record_fields():
 async def test_dream_injected_into_thought_stream():
     clock = Clock(at(12, 0))
     stream = FakeStream()
-    pad = PADState(pleasure=0.6, arousal=0.8, dominance=0.7, label="Exhilarated")
+    pad = measured_pad(0.6, 0.8, 0.7, "Exhilarated")
     store = InMemoryDreamStore()
     scheduler = make(
         clock,

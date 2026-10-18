@@ -482,7 +482,11 @@ class SnapshotService:
         """Latest snapshot minus the newest one taken more than ``hours`` ago.
 
         None without both snapshots. Each value is None when either side
-        lacks it (an insufficient overall, an unmeasured Phi).
+        lacks it (an insufficient overall, an unmeasured Phi). The passing
+        count difference is None as well when either snapshot is
+        ``insufficient_data``: nothing was measured on that side, so its zero
+        count is not a reading. The coverage difference is kept, because
+        coverage is a measured share on both sides.
         """
         latest = await self.store.latest_snapshot()
         if latest is None:
@@ -495,9 +499,14 @@ class SnapshotService:
             a, b = _finite(a), _finite(b)
             return a - b if a is not None and b is not None else None
 
+        insufficient = INSUFFICIENT_DATA in (latest.status, older.status)
         return {
             "overall_score": diff(latest.overall_score, older.overall_score),
             "phi_value": diff(latest.phi_value, older.phi_value),
-            "passing_count": diff(latest.passing_count, older.passing_count),
+            "passing_count": (
+                None
+                if insufficient
+                else diff(latest.passing_count, older.passing_count)
+            ),
             "coverage": diff(latest.coverage, older.coverage),
         }

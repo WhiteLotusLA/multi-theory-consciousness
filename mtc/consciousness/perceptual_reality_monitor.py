@@ -16,17 +16,21 @@ absent from the registry is counted as unknown and is never treated as
 external or internal.
 
 ``discrimination()`` is source diversity (1 at an even external and internal
-mix, 0 when one-sided) times the mean attribution confidence of the classified
-signals in the window. It is None until the window holds at least one
-external and one internal signal, because there is nothing to discriminate
-before then. When a caller records a signal without an attribution
-confidence, the class prior ``DEFAULT_ATTRIBUTION`` stands in for it and the
-statistics report the share of such signals as ``default_attribution_fraction``.
+mix, 0 when one-sided) times the mean of the attribution confidences that
+callers supplied for the classified signals in the window. It is None until
+the window holds at least one external and one internal signal, because there
+is nothing to discriminate before then, and None while no classified signal
+carries a supplied confidence. No prior stands in for a missing attribution:
+a signal recorded without one is stored unattributed (confidence None,
+``attribution_is_default`` True) and enters only the source diversity and the
+share that ``get_statistics()`` reports as ``default_attribution_fraction``.
 
 ``get_context_string()`` is a neutral bracketed line and is empty while
-discrimination is None. The Phase 6 orchestrator fills
-``ConsciousnessState.prm_discrimination`` from ``discrimination()``; nothing
-calls the monitor yet.
+discrimination is None. The conversation orchestrator
+(``mtc.pipeline.consciousness_orchestrator``) records user messages and
+thoughts without an attribution confidence and fills
+``ConsciousnessState.prm_discrimination`` from ``discrimination()``, so the
+pipeline's value is None until an attribution source exists.
 
 Config: constructor arguments ``sources`` and ``window``. Persisted state
 (``to_state_dict``): the signal counter and the bounded signal window, whose
@@ -37,7 +41,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, Optional
+from typing import Any, Deque, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +74,6 @@ class Signal:
 class PerceptualRealityMonitor:
     """Tracks the external and internal signal mix and how well it is labelled."""
 
-    DEFAULT_ATTRIBUTION = 0.9
-
     def __init__(
         self, sources: Optional[Dict[str, str]] = None, window: int = 100
     ) -> None:
@@ -97,17 +99,18 @@ class PerceptualRealityMonitor:
         summary: str = "",
         attribution_confidence: Optional[float] = None,
     ) -> None:
-        """Record one signal; the confidence is clamped to [0, 1]."""
+        """Record one signal; a supplied confidence is clamped to [0, 1].
+
+        A classified signal recorded without a confidence is stored with
+        confidence None and ``attribution_is_default`` True.
+        """
         kind = self.sources.get(source, UNKNOWN)
-        confidence: Optional[float]
+        confidence: Optional[float] = None
         is_default = False
         if attribution_confidence is not None:
             confidence = max(0.0, min(1.0, float(attribution_confidence)))
         elif kind != UNKNOWN:
-            confidence = self.DEFAULT_ATTRIBUTION
             is_default = True
-        else:
-            confidence = None
         self._signals.append(
             Signal(
                 summary=summary,
@@ -129,19 +132,28 @@ class PerceptualRealityMonitor:
             out[signal.kind].append(signal)
         return out
 
+    @staticmethod
+    def _supplied(signals: List[Signal]) -> List[float]:
+        """Attribution confidences that a caller supplied."""
+        return [
+            float(s.attribution_confidence)
+            for s in signals
+            if not s.attribution_is_default and s.attribution_confidence is not None
+        ]
+
     def discrimination(self) -> Optional[float]:
-        """Diversity times mean attribution; None until both kinds were seen."""
+        """Diversity times the mean supplied attribution.
+
+        None until both kinds were seen, and None while no classified signal
+        carries a supplied attribution confidence.
+        """
         groups = self._classified()
         ext, internal = groups[EXTERNAL], groups[INTERNAL]
         if not ext or not internal:
             return None
         total = len(ext) + len(internal)
         diversity = 1.0 - abs(len(ext) / total - 0.5) * 2.0
-        confidences = [
-            s.attribution_confidence
-            for s in ext + internal
-            if s.attribution_confidence is not None
-        ]
+        confidences = self._supplied(ext + internal)
         if not confidences:
             return None
         return float(diversity * (sum(confidences) / len(confidences)))
@@ -159,15 +171,16 @@ class PerceptualRealityMonitor:
         )
 
     def get_statistics(self) -> Dict[str, Any]:
-        """Counts, diversity, attribution and the discrimination score."""
+        """Counts, diversity, attribution and the discrimination score.
+
+        ``mean_attribution`` is the mean of the supplied confidences (None
+        when there are none); ``default_attribution_fraction`` is the share
+        of classified signals recorded without one.
+        """
         groups = self._classified()
         ext, internal = len(groups[EXTERNAL]), len(groups[INTERNAL])
         classified = groups[EXTERNAL] + groups[INTERNAL]
-        confidences = [
-            s.attribution_confidence
-            for s in classified
-            if s.attribution_confidence is not None
-        ]
+        confidences = self._supplied(classified)
         diversity: Optional[float] = None
         if ext and internal:
             diversity = 1.0 - abs(ext / (ext + internal) - 0.5) * 2.0
@@ -235,21 +248,24 @@ class PerceptualRealityMonitor:
         }
 
     def from_state_dict(self, state: Dict[str, Any]) -> None:
-        """Restore the counter and the bounded signal window."""
+        """Restore the counter and the bounded signal window.
+
+        A signal persisted with the default flag (older states stored a
+        class prior as its confidence) restores unattributed.
+        """
         self.signal_count = int(state.get("scalars", {}).get("signal_count", 0))
-        self._signals = deque(
-            (
+        signals = []
+        for entry in state.get("histories", {}).get("signals", []):
+            is_default = bool(entry.get("attribution_is_default", False))
+            confidence = None if is_default else entry.get("attribution_confidence")
+            signals.append(
                 Signal(
                     summary=str(entry.get("summary", "")),
                     source=str(entry["source"]),
                     kind=str(entry["kind"]),
-                    attribution_confidence=entry.get("attribution_confidence"),
-                    attribution_is_default=bool(
-                        entry.get("attribution_is_default", False)
-                    ),
+                    attribution_confidence=confidence,
+                    attribution_is_default=is_default,
                     timestamp=float(entry.get("timestamp", 0.0)),
                 )
-                for entry in state.get("histories", {}).get("signals", [])
-            ),
-            maxlen=self.window,
-        )
+            )
+        self._signals = deque(signals, maxlen=self.window)

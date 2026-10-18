@@ -59,15 +59,68 @@ def test_discrimination_rises_with_diversity_and_confidence():
     assert balanced.discrimination() == pytest.approx(0.9)
 
 
-def test_missing_attribution_is_a_documented_prior():
+def test_missing_attribution_is_not_measured():
     mon = PerceptualRealityMonitor()
     mon.record_signal("user_message")
     mon.record_signal("dream")
     stats = mon.get_statistics()
+    assert stats["external_count"] == 1
+    assert stats["internal_count"] == 1
     assert stats["default_attribution_fraction"] == 1.0
-    assert mon.discrimination() == pytest.approx(
-        PerceptualRealityMonitor.DEFAULT_ATTRIBUTION
-    )
+    assert stats["mean_attribution"] is None
+    assert stats["discrimination"] is None
+    assert mon.discrimination() is None
+    assert mon.get_context_string() == ""
+    assert "not measurable" in mon.generate_report()
+    assert not hasattr(PerceptualRealityMonitor, "DEFAULT_ATTRIBUTION")
+    assert all(s.attribution_confidence is None for s in mon._signals)
+    assert all(s.attribution_is_default for s in mon._signals)
+
+
+def test_supplied_attribution_alone_enters_the_product():
+    mon = PerceptualRealityMonitor()
+    mon.record_signal("user_message", attribution_confidence=0.6)
+    mon.record_signal("dream")
+    stats = mon.get_statistics()
+    assert stats["source_diversity"] == 1.0
+    assert stats["mean_attribution"] == pytest.approx(0.6)
+    assert stats["default_attribution_fraction"] == 0.5
+    assert mon.discrimination() == pytest.approx(0.6)
+
+
+def test_restored_default_attribution_is_not_a_measurement():
+    """A signal persisted with the old 0.9 prior restores as unattributed."""
+    state = {
+        "scalars": {"signal_count": 2},
+        "arrays": {},
+        "histories": {
+            "signals": [
+                {
+                    "summary": "",
+                    "source": "user_message",
+                    "kind": "external",
+                    "attribution_confidence": 0.9,
+                    "attribution_is_default": True,
+                    "timestamp": 1.0,
+                },
+                {
+                    "summary": "",
+                    "source": "dream",
+                    "kind": "internal",
+                    "attribution_confidence": 0.7,
+                    "attribution_is_default": False,
+                    "timestamp": 2.0,
+                },
+            ]
+        },
+    }
+    mon = PerceptualRealityMonitor()
+    mon.from_state_dict(state)
+    stats = mon.get_statistics()
+    assert stats["default_attribution_fraction"] == 0.5
+    assert stats["mean_attribution"] == pytest.approx(0.7)
+    assert mon.discrimination() == pytest.approx(0.7)
+    assert mon._signals[0].attribution_confidence is None
 
 
 def test_unknown_source_is_never_external():

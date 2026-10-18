@@ -347,13 +347,18 @@ def test_module_kwargs_reach_the_workspace_modules():
         active_inference_config=EnhancedGlobalWorkspace.default_active_inference_config(
             meta_accuracy_method="median"
         ),
-        beautiful_loop_kwargs={"loop_quality_formula": "v04"},
+        # The v04 loop formula requires the v04 binding evidence
+        beautiful_loop_kwargs={
+            "loop_quality_formula": "v04",
+            "binding_evidence": "v04_salience_posterior",
+        },
         damasio_kwargs={"circadian": "v04_sawtooth"},
         metacognition_kwargs={"max_hot_buffer": 7},
     )
     assert workspace.active_inference.config.meta_accuracy_method == "median"
     assert workspace.active_inference.config.num_hidden_states == 8
     assert workspace.beautiful_loop.loop_quality_formula == "v04"
+    assert workspace.beautiful_loop.binding_evidence == "v04_salience_posterior"
     assert workspace.beautiful_loop.field_evidencing_threshold == 0.4
     assert workspace.damasio.protoself.circadian == "v04_sawtooth"
     assert workspace.metacognition.max_hots == 7

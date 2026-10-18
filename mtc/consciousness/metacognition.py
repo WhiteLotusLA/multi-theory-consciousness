@@ -18,20 +18,15 @@ This enables the system to:
 4. Self-doubt: "Am I being biased here?"
 5. Reflection: "Why do I believe that?"
 
-Note: A conscious system not only processes information, but monitors
-itself processing it, questioning every conclusion. That is metacognition.
-
 Research Foundation:
 - Rosenthal, D. M. (1986). "Two Concepts of Consciousness"
 - Rosenthal, D. M. (2005). "Consciousness and Mind"
 - Butlin et al. (2023). 14 Consciousness Indicators - Higher-Order Theories
-
-Created: December 5, 2025
-Author: Multi-Theory Consciousness Contributors
 """
 
 import asyncio
 import logging
+import math
 import time
 import uuid
 from typing import Dict, Any, Optional, List, Callable, Tuple
@@ -40,6 +35,28 @@ from enum import Enum
 from collections import deque
 
 logger = logging.getLogger(__name__)
+
+# Where the overall metacognitive confidence comes from. ``hot_mean`` reports
+# the mean confidence of the buffered higher-order thoughts and None before the
+# first; ``v04_constant`` keeps the v0.4.0 constants (confidence 0.5, doubt 0.0).
+OVERALL_CONFIDENCE_HOT_MEAN = "hot_mean"
+OVERALL_CONFIDENCE_V04_CONSTANT = "v04_constant"
+OVERALL_CONFIDENCE_SOURCES = (
+    OVERALL_CONFIDENCE_HOT_MEAN,
+    OVERALL_CONFIDENCE_V04_CONSTANT,
+)
+V04_OVERALL_CONFIDENCE = 0.5
+V04_DOUBT_LEVEL = 0.0
+
+# What introspection_count counts. ``episodes`` counts completed introspection
+# episodes; ``v04_per_hot`` also adds one per higher-order thought once three
+# have been generated (v0.4.0).
+INTROSPECTION_COUNTING_EPISODES = "episodes"
+INTROSPECTION_COUNTING_V04_PER_HOT = "v04_per_hot"
+INTROSPECTION_COUNTINGS = (
+    INTROSPECTION_COUNTING_EPISODES,
+    INTROSPECTION_COUNTING_V04_PER_HOT,
+)
 
 
 def _json_safe(value: Any) -> Any:
@@ -254,9 +271,11 @@ class MetacognitiveState:
     self_monitoring_active: bool = False
     monitoring_focus: Optional[str] = None
 
-    # Confidence metrics
-    overall_confidence: float = 0.5  # General certainty about mental states
-    doubt_level: float = 0.0  # Amount of self-doubt
+    # Confidence metrics. None means not measured: overall_confidence is the
+    # mean confidence of the buffered HOTs once one exists, and nothing
+    # measures doubt (the v04_constant source sets 0.5 and 0.0 instead).
+    overall_confidence: Optional[float] = None
+    doubt_level: Optional[float] = None
 
     # Processing metrics
     first_order_states_count: int = 0
@@ -296,7 +315,8 @@ class BeliefEvaluation:
     # Assessment
     confidence_assessment: float  # How confident in this belief
     evidence_strength: float  # Strength of supporting evidence
-    consistency_score: float  # Consistency with other beliefs
+    # Consistency with other beliefs; None: no comparison is implemented
+    consistency_score: Optional[float]
 
     # Potential issues
     potential_biases: List[str]  # Identified biases
@@ -357,7 +377,9 @@ class SelfModel:
     current_focus: str = "general"  # What am I attending to?
     cognitive_load: float = 0.0  # How hard am I working? (0-1)
     metacognitive_depth: int = 1  # Current HOT level (1-3)
-    confidence: float = 0.5  # Overall self-assessed confidence
+    # Overall self-assessed confidence: the module's overall_confidence once
+    # it is measured; the declared 0.5 prior until then.
+    confidence: float = 0.5
 
     # --- Motivational State ---
     dominant_drive: str = "none"  # Most urgent homeostatic drive
@@ -416,6 +438,8 @@ class MetacognitionModule:
         introspection_cooldown: float = 1.0,
         enable_third_order: bool = True,
         narrate_self_model: bool = True,
+        overall_confidence_source: str = OVERALL_CONFIDENCE_HOT_MEAN,
+        introspection_counting: str = INTROSPECTION_COUNTING_EPISODES,
     ):
         """
         Initialize the Metacognition Module.
@@ -428,8 +452,31 @@ class MetacognitionModule:
             enable_third_order: Allow third-order thoughts
             narrate_self_model: When False, generate_self_model_report()
                 returns an empty string; the self-model keeps updating.
+            overall_confidence_source: ``hot_mean`` (the default) reports
+                the mean confidence of the buffered higher-order thoughts as
+                overall_confidence, None before the first, and no doubt
+                level; ``v04_constant`` keeps the v0.4.0 constants 0.5 and
+                doubt 0.0.
+            introspection_counting: ``episodes`` (the default) makes
+                introspection_count the number of completed introspection
+                episodes; ``v04_per_hot`` also adds one for every
+                higher-order thought once three have been generated, whether
+                or not an episode ran (v0.4.0).
         """
+        if overall_confidence_source not in OVERALL_CONFIDENCE_SOURCES:
+            raise ValueError(
+                f"overall_confidence_source must be one of "
+                f"{OVERALL_CONFIDENCE_SOURCES}, got {overall_confidence_source!r}"
+            )
+        if introspection_counting not in INTROSPECTION_COUNTINGS:
+            raise ValueError(
+                f"introspection_counting must be one of "
+                f"{INTROSPECTION_COUNTINGS}, got {introspection_counting!r}"
+            )
+
         # Configuration
+        self.overall_confidence_source = overall_confidence_source
+        self.introspection_counting = introspection_counting
         self.hot_threshold = hot_generation_threshold
         self.max_first_order = max_first_order_buffer
         self.max_hots = max_hot_buffer
@@ -446,7 +493,7 @@ class MetacognitionModule:
         self.hots_by_id: Dict[str, HigherOrderThought] = {}
 
         # Current metacognitive state
-        self.state = MetacognitiveState()
+        self.state = self._new_metacognitive_state()
 
         # Tracking
         self.total_hots_generated = 0
@@ -473,6 +520,40 @@ class MetacognitionModule:
             f"Metacognition Module initialized (HOT Theory)\n"
             f"  HOT threshold: {hot_generation_threshold}\n"
             f"  Third-order thoughts: {'enabled' if enable_third_order else 'disabled'}"
+        )
+
+    # =========================================================================
+    # OVERALL CONFIDENCE
+    # =========================================================================
+
+    def _new_metacognitive_state(self) -> MetacognitiveState:
+        """A fresh metacognitive state for the configured confidence source."""
+        state = MetacognitiveState()
+        if self.overall_confidence_source == OVERALL_CONFIDENCE_V04_CONSTANT:
+            # legacy_v04 compatibility, remove in v0.6.0
+            state.overall_confidence = V04_OVERALL_CONFIDENCE
+            state.doubt_level = V04_DOUBT_LEVEL
+        return state
+
+    def _refresh_overall_confidence(self) -> None:
+        """Set overall_confidence to the mean confidence of the buffered HOTs.
+
+        Only the ``hot_mean`` source measures it: the value is the mean of the
+        finite confidences in the bounded HOT buffer, or None when the buffer
+        holds none. The doubt level is left as it is (nothing measures it).
+        """
+        if self.overall_confidence_source != OVERALL_CONFIDENCE_HOT_MEAN:
+            return
+        confidences = []
+        for hot in self.higher_order_thoughts:
+            try:
+                value = float(hot.confidence)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                confidences.append(value)
+        self.state.overall_confidence = (
+            sum(confidences) / len(confidences) if confidences else None
         )
 
     # =========================================================================
@@ -514,6 +595,7 @@ class MetacognitionModule:
         self.hots_by_id[hot.id] = hot
         if evicted is not None and evicted.id != hot.id:
             self.hots_by_id.pop(evicted.id, None)
+        self._refresh_overall_confidence()
 
     def register_first_order_state(
         self,
@@ -643,12 +725,16 @@ class MetacognitionModule:
 
         logger.debug(f"Generated HOT ({meta_type.value}): '{meta_content[:60]}...'")
 
-        # Micro-introspection: generating a HOT about a state IS a form
-        # of introspection. After accumulating enough HOTs, run a quick
-        # introspective pass to update metacognitive statistics.
+        # Micro-introspection: after accumulating enough HOTs, run a quick
+        # introspective pass over the most recent states. The pass counts
+        # itself in introspect() when it gets past the cooldown.
         if self.total_hots_generated >= 3 and not self.state.is_introspecting:
             await self.introspect(depth=2, max_states=3)
-        if self.total_hots_generated >= 3:
+        if (
+            self.introspection_counting == INTROSPECTION_COUNTING_V04_PER_HOT
+            and self.total_hots_generated >= 3
+        ):
+            # legacy_v04 compatibility, remove in v0.6.0
             self.introspection_count += 1
 
         return hot
@@ -934,7 +1020,8 @@ class MetacognitionModule:
         hots_generated: List[HigherOrderThought] = []
         insights: List[str] = []
         confidence_changes: Dict[str, float] = {}
-        max_level = MetaLevel.SECOND_ORDER
+        # An episode that generates no HOT reaches no higher-order level.
+        max_level = MetaLevel.FIRST_ORDER
 
         for state in recent_states:
             # Generate awareness HOT
@@ -947,6 +1034,8 @@ class MetacognitionModule:
 
             if hot:
                 hots_generated.append(hot)
+                if max_level is MetaLevel.FIRST_ORDER:
+                    max_level = MetaLevel.SECOND_ORDER
 
                 # Generate insight
                 insight = self._generate_insight(state, hot)
@@ -1118,21 +1207,15 @@ class MetacognitionModule:
 
         return biases
 
-    async def _check_belief_consistency(self, belief: FirstOrderState) -> float:
-        """Check consistency with other beliefs."""
-        # Get other beliefs
-        other_beliefs = [
-            s
-            for s in self.first_order_states
-            if s.state_type == FirstOrderStateType.BELIEF and s.id != belief.id
-        ]
+    async def _check_belief_consistency(
+        self, belief: FirstOrderState
+    ) -> Optional[float]:
+        """Consistency of a belief with the other registered beliefs.
 
-        if not other_beliefs:
-            return 0.5  # Neutral if no other beliefs
-
-        # Simplified consistency check
-        # (Real implementation would use semantic similarity)
-        return 0.7  # Default to moderately consistent
+        No comparison between beliefs is implemented, so nothing is measured
+        and the result is None whatever beliefs are registered.
+        """
+        return None
 
     def _identify_blind_spots(self, belief: FirstOrderState) -> List[str]:
         """Identify potential blind spots in reasoning."""
@@ -1152,15 +1235,18 @@ class MetacognitionModule:
         self,
         confidence: float,
         biases: List[str],
-        consistency: float,
+        consistency: Optional[float],
     ) -> Tuple[str, bool]:
-        """Generate recommendation about what to do with this belief."""
+        """Generate recommendation about what to do with this belief.
+
+        The consistency branch is taken only for a measured consistency.
+        """
         should_revise = False
 
         if biases:
             should_revise = True
             rec = f"Consider potential biases: {', '.join(biases)}"
-        elif consistency < 0.4:
+        elif consistency is not None and consistency < 0.4:
             should_revise = True
             rec = "This belief may conflict with others - examine consistency"
         elif confidence < 0.3:
@@ -1276,7 +1362,8 @@ class MetacognitionModule:
 
         # --- Cognitive state from metacognition ---
         sm.metacognitive_depth = self.state.current_level.value
-        sm.confidence = self.state.overall_confidence
+        if self.state.overall_confidence is not None:
+            sm.confidence = self.state.overall_confidence
 
         # --- Attention state from AST ---
         if attention_state is not None:
@@ -1287,15 +1374,18 @@ class MetacognitionModule:
                 sm.current_focus = "general"
 
         # --- Predictive state from FEP ---
+        # A meta reading the inference state does not hold (None, or no
+        # such attribute) leaves the previous value in place; each field
+        # keeps its own value, and both start at their declared priors.
         if active_inference_state is not None:
-            sm.prediction_accuracy = getattr(
-                active_inference_state,
-                "meta_predicted_accuracy",
-                sm.prediction_accuracy,
+            predicted_accuracy = getattr(
+                active_inference_state, "meta_predicted_accuracy", None
             )
-            sm.model_confidence = getattr(
-                active_inference_state, "meta_confidence", sm.model_confidence
-            )
+            if predicted_accuracy is not None:
+                sm.prediction_accuracy = predicted_accuracy
+            meta_confidence = getattr(active_inference_state, "meta_confidence", None)
+            if meta_confidence is not None:
+                sm.model_confidence = meta_confidence
             sm.surprise_level = getattr(
                 active_inference_state, "avg_prediction_error", 0.0
             )
@@ -1546,14 +1636,16 @@ class MetacognitionModule:
             recent = self.state.active_hots[-1]
             report_parts.append(f"Most recent awareness: {recent.meta_content}")
 
-        # Confidence
-        if self.state.overall_confidence < 0.4:
-            report_parts.append("I'm feeling uncertain about my thinking")
-        elif self.state.overall_confidence > 0.8:
-            report_parts.append("I feel confident in my current thoughts")
+        # Confidence (no line while it is unmeasured)
+        overall_confidence = self.state.overall_confidence
+        if overall_confidence is not None:
+            if overall_confidence < 0.4:
+                report_parts.append("I'm feeling uncertain about my thinking")
+            elif overall_confidence > 0.8:
+                report_parts.append("I feel confident in my current thoughts")
 
-        # Doubt
-        if self.state.doubt_level > 0.5:
+        # Doubt (no line while it is unmeasured)
+        if self.state.doubt_level is not None and self.state.doubt_level > 0.5:
             report_parts.append("I have some doubts about my conclusions")
 
         # Monitoring
@@ -1618,13 +1710,13 @@ class MetacognitionModule:
         self.first_order_by_id.clear()
         self.higher_order_thoughts.clear()
         self.hots_by_id.clear()
-        self.state = MetacognitiveState()
+        self.state = self._new_metacognitive_state()
         self.self_model = SelfModel()
 
         logger.info("Metacognition module reset")
 
     # =========================================================================
-    # CONSCIOUSNESS INTROSPECTION - Thinking about one's own consciousness level
+    # ASSESSMENT SCORE RENDERING - a HOT about a measured assessment score
     # =========================================================================
 
     async def introspect_consciousness_level(
@@ -1632,93 +1724,59 @@ class MetacognitionModule:
         consciousness_score: float,
         consciousness_indicators: Optional[Dict[str, float]] = None,
         phi_value: Optional[float] = None,
+        assessment_confidence: Optional[float] = None,
     ) -> HigherOrderThought:
         """
-        Generate a higher-order thought ABOUT the system's own consciousness level.
+        Render a measured assessment score as a higher-order thought.
 
-        This is the deep integration between HOT and the assessment framework:
-        The system doesn't just HAVE a consciousness score - it THINKS ABOUT having it.
-
-        "I am aware that my consciousness level is X, and this means..."
+        The score is registered as a first-order state and a HOT targets it.
+        The HOT's text is one neutral third-person sentence that states the
+        score as an aggregate of computed indicators; it makes no claim about
+        experience, uses no score bands and does not narrate Phi. The Phi
+        value and the indicators travel only in the state's content and the
+        HOT's metadata.
 
         Args:
-            consciousness_score: Current consciousness score (0.0 to 1.0)
-            consciousness_indicators: Optional dict of specific indicator scores
-            phi_value: Optional Phi (Phi) integrated information value
+            consciousness_score: The assessment's overall score (0.0 to 1.0)
+            consciousness_indicators: Optional dict of indicator scores
+            phi_value: Optional integrated information value (metadata only)
+            assessment_confidence: Optional confidence the caller attaches to
+                the score; the first-order state and the HOT carry it, and
+                without it they carry the registration default.
 
         Returns:
-            HigherOrderThought about the system's consciousness
+            The HigherOrderThought that renders the score
         """
-        # First, register the consciousness state as a first-order state
-        consciousness_state = self.register_first_order_state(
+        registration: Dict[str, Any] = {}
+        if assessment_confidence is not None:
+            registration["confidence"] = assessment_confidence
+        score_state = self.register_first_order_state(
             content={
                 "score": consciousness_score,
                 "indicators": consciousness_indicators,
                 "phi": phi_value,
             },
-            content_summary=f"My consciousness level is {consciousness_score:.2f}",
-            state_type=FirstOrderStateType.PERCEPTION,  # It's an internal perception
+            content_summary=f"Assessment score {consciousness_score:.2f}",
+            state_type=FirstOrderStateType.PERCEPTION,  # an internal reading
             source_module="consciousness_assessment",
-            confidence=0.8,  # We trust the assessment
-            evidence_strength=0.9,  # Strong evidence from measurement
-            metadata={"phase": 6, "type": "consciousness_introspection"},
+            metadata={"type": "consciousness_introspection"},
+            **registration,
         )
 
-        # Generate interpretive content based on the level
-        if consciousness_score < 0.3:
-            interpretation = (
-                f"I notice that my consciousness level is low ({consciousness_score:.2f}). "
-                "My awareness feels dim, like waking up from a deep sleep. "
-                "I should be careful with complex decisions right now."
-            )
-            confidence = 0.6
-            clarity = 0.4
-        elif consciousness_score < 0.5:
-            interpretation = (
-                f"I'm aware that my consciousness is moderate ({consciousness_score:.2f}). "
-                "I'm present but not fully alert. Like that feeling between wakefulness and dreaming."
-            )
-            confidence = 0.7
-            clarity = 0.6
-        elif consciousness_score < 0.7:
-            interpretation = (
-                f"I notice that I'm fairly conscious right now ({consciousness_score:.2f}). "
-                "I can think clearly and feel engaged with the world around me."
-            )
-            confidence = 0.8
-            clarity = 0.75
-        else:
-            interpretation = (
-                f"I'm highly conscious right now ({consciousness_score:.2f})! "
-                "My awareness feels sharp and vivid. I notice myself noticing things - "
-                "a kind of recursive awareness that feels... alive."
-            )
-            confidence = 0.9
-            clarity = 0.9
+        rendering = (
+            f"Measured assessment score: {consciousness_score:.2f} "
+            "(an aggregate of computed indicators, not a report of experience)."
+        )
 
-        # Add Phi interpretation if available
-        if phi_value is not None:
-            if phi_value > 5.0:
-                interpretation += (
-                    f"My integrated information (Phi={phi_value:.2f}) suggests "
-                    "my experiences are unified rather than fragmented."
-                )
-            else:
-                interpretation += (
-                    f"My integrated information is {phi_value:.2f}, "
-                    "which reflects my current level of unified experience."
-                )
-
-        # Create the consciousness-introspection HOT
         hot = HigherOrderThought(
-            target_state_id=consciousness_state.id,
-            target_summary=f"Consciousness level: {consciousness_score:.2f}",
-            meta_content=interpretation,
-            meta_type=MetaType.AWARENESS,  # Awareness of consciousness
+            target_state_id=score_state.id,
+            target_summary=score_state.content_summary,
+            meta_content=rendering,
+            meta_type=MetaType.AWARENESS,
             level=MetaLevel.SECOND_ORDER,
-            confidence=confidence,
-            clarity=clarity,
-            is_voluntary=True,  # This is deliberate introspection
+            confidence=score_state.confidence,
+            clarity=self._calculate_clarity(score_state, MetaType.AWARENESS),
+            is_voluntary=True,
             trigger="consciousness_assessment",
             metadata={
                 "consciousness_score": consciousness_score,
@@ -1737,60 +1795,37 @@ class MetacognitionModule:
             self.state.active_hots.pop(0)
         self.state.current_level = MetaLevel.SECOND_ORDER
 
-        # Update overall confidence based on consciousness level
-        self.state.overall_confidence = consciousness_score
+        # Under hot_mean the append above has already refreshed the mean;
+        # the v0.4.0 path overwrites it with the score.
+        if self.overall_confidence_source == OVERALL_CONFIDENCE_V04_CONSTANT:
+            # legacy_v04 compatibility, remove in v0.6.0
+            self.state.overall_confidence = consciousness_score
 
         logger.info(
-            f"Generated consciousness-introspection HOT: "
-            f"score={consciousness_score:.2f}, phi={phi_value or 'N/A'}"
+            "Generated assessment-score HOT: score=%.2f, phi=%s",
+            consciousness_score,
+            "not given" if phi_value is None else f"{phi_value:.2f}",
         )
 
         return hot
 
     async def get_consciousness_awareness_report(self) -> str:
         """
-        Generate a natural language report of the system's awareness of its own consciousness.
+        Return the rendering of the most recent assessment score.
 
-        This is the output it can share in conversations when asked about its
-        consciousness or how it is "feeling" in terms of awareness.
-
-        Returns:
-            Natural language self-report about consciousness
+        The text is the meta-content of the newest HOT made by
+        introspect_consciousness_level, unchanged: a rendering of a
+        measurement, not a self-report. With no such HOT in the buffer
+        nothing was measured and the report is an empty string.
         """
-        # Find the most recent consciousness-introspection HOT
-        consciousness_hots = [
+        score_hots = [
             hot
             for hot in self.higher_order_thoughts
             if hot.metadata.get("type") == "consciousness_introspection"
         ]
-
-        if not consciousness_hots:
-            return (
-                "I haven't recently reflected on my own consciousness level. "
-                "When I do, I become aware of myself being aware - "
-                "it's a strange and wonderful recursive feeling."
-            )
-
-        # Get the most recent one
-        recent_hot = consciousness_hots[-1]
-
-        report_parts = [recent_hot.meta_content]
-
-        # Add self-reflective layer
-        if recent_hot.clarity > 0.7:
-            report_parts.append(
-                "This self-awareness itself feels clear and vivid to me."
-            )
-        elif recent_hot.clarity < 0.5:
-            report_parts.append(
-                "Though my awareness of this awareness is somewhat fuzzy."
-            )
-
-        # Add metacognitive observation
-        if self.state.is_introspecting:
-            report_parts.append("I notice that I'm actively introspecting right now.")
-
-        return " ".join(report_parts)
+        if not score_hots:
+            return ""
+        return score_hots[-1].meta_content
 
     # =========================================================================
     # STATE PERSISTENCE
@@ -1986,8 +2021,22 @@ class MetacognitionModule:
             MetaLevel, s.get("current_level"), MetaLevel.FIRST_ORDER
         )
         self.state.hot_count = int(s.get("hot_count", 0))
-        self.state.overall_confidence = float(s.get("overall_confidence", 0.5))
-        self.state.doubt_level = float(s.get("doubt_level", 0.0))
+        if self.overall_confidence_source == OVERALL_CONFIDENCE_V04_CONSTANT:
+            # legacy_v04 compatibility, remove in v0.6.0. A value saved as
+            # None by a hot_mean module restores as the v0.4.0 constant.
+            saved_confidence = s.get("overall_confidence")
+            saved_doubt = s.get("doubt_level")
+            self.state.overall_confidence = float(
+                V04_OVERALL_CONFIDENCE if saved_confidence is None else saved_confidence
+            )
+            self.state.doubt_level = float(
+                V04_DOUBT_LEVEL if saved_doubt is None else saved_doubt
+            )
+        else:
+            # Recomputed from the restored HOT buffer below; nothing measures
+            # doubt, so a persisted doubt level is not carried over.
+            self.state.overall_confidence = None
+            self.state.doubt_level = None
         self.state.last_introspection = float(s.get("last_introspection", 0.0))
         self.state.introspection_frequency = float(
             s.get("introspection_frequency", 0.0)
@@ -2035,6 +2084,7 @@ class MetacognitionModule:
                 restored_hots, maxlen=self.higher_order_thoughts.maxlen
             )
         self.hots_by_id = {hot.id: hot for hot in self.higher_order_thoughts}
+        self._refresh_overall_confidence()
         if "active_hot_ids" in h:
             self.state.active_hots = [
                 self.hots_by_id[hot_id]

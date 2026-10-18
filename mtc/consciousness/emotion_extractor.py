@@ -7,7 +7,8 @@ Maps measured consciousness data to a named emotional state. Inputs:
 - ``state.damasio_state`` (the Damasio layers' output): the primordial
   feelings ``pleasure_pain`` (valence), ``arousal`` and ``vitality`` from
   ``protoself.primordial_feelings``, and the mean valence and intensity of
-  ``core.somatic_markers``;
+  ``core.somatic_markers`` (the intensity mean is over the markers whose
+  intensity is a finite number, None when no marker has one);
 - ``state.protoself_stability`` and ``state.epistemic_depth``;
 - an optional ``drives`` callable returning the ``get_drive_state()`` shape
   (drive name to a dict with ``urgency``).
@@ -35,8 +36,15 @@ only when the vocabulary supplies them.
 
 Config: constructor arguments (provider, drives, vocabulary,
 ``min_baseline_samples``). Persisted state (``to_state_dict``): the default
-in-memory averages; another provider persists itself. The Phase 6
-orchestrator registers the module with the hub as ``emotion_extractor``.
+in-memory averages; another provider persists itself. The pipeline
+runtime (``mtc.pipeline.runtime``) registers the module with the hub as
+``emotion_extractor``.
+
+Confidence is the margin of the dominant candidate over the runner-up,
+relative to the dominant score. ``neutral`` at 0.1 is the fallback candidate
+added after every rule; when it is the dominant candidate no rule won, and
+the result is ``neutral`` with no runner-up and confidence 0.0. As a runner-up
+the fallback stays in the margin.
 """
 
 import logging
@@ -91,6 +99,14 @@ PRIOR_MEANS: Dict[str, float] = {
 }
 PRIOR_STD = 0.25
 MIN_STD = 0.05
+
+
+def _is_finite_number(value: Any) -> bool:
+    """True for a finite int or float (a bool or None is not a measurement)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return math.isfinite(float(value))
+
 
 DRIVE_NAMES = (
     "curiosity",
@@ -199,6 +215,7 @@ class ExtractedEmotion:
 
     label: Optional[str]
     secondary: Optional[str]
+    # Margin over the runner-up; 0.0 when the label is the fallback.
     confidence: float
     baseline: str  # "prior" or "running"
     raw: Dict[str, Any]
@@ -239,9 +256,13 @@ class EmotionExtractor:
                 somatic_valence = sum(m.get("valence", 0.0) for m in markers) / len(
                     markers
                 )
-                somatic_intensity = sum(m.get("intensity", 0.0) for m in markers) / len(
-                    markers
-                )
+                intensities = [
+                    float(m["intensity"])
+                    for m in markers
+                    if _is_finite_number(m.get("intensity"))
+                ]
+                if intensities:
+                    somatic_intensity = sum(intensities) / len(intensities)
 
         drive_state: Optional[Dict[str, Dict[str, float]]] = None
         if self._drives is not None:
@@ -281,6 +302,11 @@ class EmotionExtractor:
         """Return (dominant, secondary, confidence) from relative rules.
 
         ``averages`` maps a dimension to ``{"mean": m, "stddev": s}``.
+        Confidence is the margin of the dominant score over the runner-up's,
+        relative to the dominant score (1.0 without a scored runner-up). When
+        the fallback ``neutral`` candidate is dominant (no rule won) the
+        result is ``("neutral", None, 0.0)``; as a runner-up the fallback
+        stays in the margin.
         """
 
         def known(dim: str) -> bool:
@@ -395,13 +421,17 @@ class EmotionExtractor:
             else:
                 candidates.append(("resting", 0.35))
 
-        candidates.append(("neutral", 0.1))
+        fallback = ("neutral", 0.1)
+        candidates.append(fallback)
 
         allowed = set(self.vocabulary.labels)
         candidates = [c for c in candidates if c[0] in allowed]
         if not candidates:
             return None, None, 0.0
         candidates.sort(key=lambda c: c[1], reverse=True)
+        if candidates[0] is fallback:
+            # No rule won: the fallback label is not a measured emotion.
+            return fallback[0], None, 0.0
         dominant, dominant_score = candidates[0]
         secondary: Optional[str] = None
         secondary_score = 0.0

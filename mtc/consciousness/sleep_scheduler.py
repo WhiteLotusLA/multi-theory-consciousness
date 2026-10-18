@@ -59,11 +59,18 @@ injected into the thought stream as a ``dream_<type>`` thought. Dream records
 can echo recent themes and goals, which hold real people's names at runtime,
 and are private data.
 
+Affect in the dream context: the latest PAD state counts as a reading only
+when its measured inputs cover pleasure and arousal
+(``measured_dimensions``); a state of unknown provenance (no measured list)
+names no emotion and does not trigger the gentle floor. A reading names its
+label as the dream's undertone when the label is not Neutral and the state
+lies far enough from neutral (``emotion_min_strength``).
+
 The gentle floor is an optional welfare setting, off by default. When
-enabled and the latest pleasure is at or below
-``gentle_floor_valence_threshold``, the raw affect label never reaches the
-prompt (``gentle_floor_emotion`` stands in) and the dream engine is asked to
-bias its draw toward comforting types.
+enabled and the latest measured pleasure is at or below
+``gentle_floor_valence_threshold``, no emotion word reaches the prompt and
+the dream engine is asked to bias its draw toward comforting types; no
+configured word stands in for an emotion that was not measured.
 
 ``tick()`` performs one evaluation and is what tests call; ``start()`` runs
 it every ``tick_seconds`` in one task and ``stop()`` cancels that task.
@@ -99,7 +106,7 @@ from mtc.consciousness.dream_engine import (
     dream_sentence_allowance,
     trim_to_sentence_end,
 )
-from mtc.consciousness.pad_affect import PADState
+from mtc.consciousness.pad_affect import PADState, measured_dimensions
 from mtc.consciousness.temporal_context import in_night_window
 from mtc.core.config import get_settings
 from mtc.memory.inmemory import InMemoryDreamStore
@@ -144,6 +151,8 @@ _ERROR_KEYS = (
 )
 _SKIP_KEYS = ("consolidation", "pruning", "thought_stream", "dream")
 _DREAM_KEYS = ("attempted", "stored", "no_answer", "woken")
+# PAD dimensions a state must have measured inputs for to count as a reading.
+_READING_DIMENSIONS = frozenset({"pleasure", "arousal"})
 
 
 # ----------------------------------------------------------------------------
@@ -159,8 +168,12 @@ class SleepSchedulerConfig:
     as the nap idle threshold); ``prune_dry_run`` False prunes for real at
     night. ``emotion_min_strength`` is the distance of the latest PAD state
     from neutral (``|P| + |A - 0.5| + |D - 0.5|``, capped at 1) above which
-    its label becomes the dream's undertone. ``context_items`` is how many
-    themes and goals are read for a dream.
+    its label becomes the dream's undertone; only a state whose measured
+    inputs cover pleasure and arousal and whose label is not Neutral is
+    named. ``gentle_floor_enabled`` with ``gentle_floor_valence_threshold``
+    passes the comfort bias, and no emotion, for a measured pleasure at or
+    below the threshold. ``context_items`` is how many themes and goals are
+    read for a dream.
     """
 
     tick_seconds: float = 60.0
@@ -172,7 +185,6 @@ class SleepSchedulerConfig:
     prune_dry_run: bool = False
     gentle_floor_enabled: bool = False
     gentle_floor_valence_threshold: float = -0.4
-    gentle_floor_emotion: str = "tender"
     emotion_min_strength: float = 0.3
     context_items: int = 3
 
@@ -191,8 +203,6 @@ class SleepSchedulerConfig:
                 raise ValueError(f"{name} must be >= 0")
         if not -1.0 <= float(self.gentle_floor_valence_threshold) <= 1.0:
             raise ValueError("gentle_floor_valence_threshold must be within [-1, 1]")
-        if not str(self.gentle_floor_emotion).strip():
-            raise ValueError("gentle_floor_emotion must be a non-empty word")
         if not 0.0 <= float(self.emotion_min_strength) <= 1.0:
             raise ValueError("emotion_min_strength must be within [0, 1]")
         if int(self.context_items) < 1:
@@ -556,7 +566,7 @@ class SleepScheduler:
         if self.affect is not None:
             try:
                 pad = self.affect.get_latest()
-                if pad is not None:
+                if pad is not None and _READING_DIMENSIONS <= measured_dimensions(pad):
                     values = (
                         float(pad.pleasure),
                         float(pad.arousal),
@@ -567,9 +577,7 @@ class SleepScheduler:
                         gentle = bool(cfg.gentle_floor_enabled) and (
                             pleasure <= cfg.gentle_floor_valence_threshold
                         )
-                        if gentle:
-                            emotion = str(cfg.gentle_floor_emotion).strip()
-                        else:
+                        if not gentle:
                             strength = min(
                                 1.0,
                                 abs(pleasure)
@@ -577,7 +585,11 @@ class SleepScheduler:
                                 + abs(dominance - 0.5),
                             )
                             label = (getattr(pad, "label", "") or "").strip().lower()
-                            if label and strength > cfg.emotion_min_strength:
+                            if (
+                                label
+                                and label != "neutral"
+                                and strength > cfg.emotion_min_strength
+                            ):
                                 emotion = label
             except Exception as exc:
                 self._errors["context"] += 1

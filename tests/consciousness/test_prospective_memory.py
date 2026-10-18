@@ -82,11 +82,57 @@ def test_candidates_are_internal_source(cfg):
     assert candidate.timestamp == T0.timestamp()
 
 
+def test_candidates_are_marked_as_authored_templates(cfg):
+    sim = simulator(cfg)
+    candidate = sim.maybe_generate(context())[0]
+    assert candidate.metadata["authored_template"] is True
+    assert candidate.metadata["sim_type"] in SIMULATION_TYPES
+    assert candidate.metadata["prompt"]
+    # Every kind the simulator draws carries the marker.
+    for seed in range(2, 12):
+        drawn = simulator(cfg, seed=seed).maybe_generate(context())
+        assert [c.metadata["authored_template"] for c in drawn] == [True]
+
+
 def test_confidence_is_deterministic(cfg):
+    one, two = simulator(cfg, seed=1), simulator(cfg, seed=2)
+    for kind in SIMULATION_TYPES:
+        assert one.confidence(kind, context()) == two.confidence(kind, context())
+    # One recent message, no topics, goals or arousal: base 0.4 plus 0.04.
+    assert one.confidence("temporal", context()) == pytest.approx(0.44)
+    # Two simulators built with the same seed produce the same candidate.
     first = simulator(cfg, seed=1).maybe_generate(context())[0]
     second = simulator(cfg, seed=1).maybe_generate(context())[0]
     assert first.activation_level == second.activation_level
     assert first.summary == second.summary
+    assert first.metadata["sim_type"] == second.metadata["sim_type"]
+
+
+def _drawn_simulations(cfg, seed, global_seed, count=12):
+    """(kind, summary) of ``count`` simulations, with the global stream reseeded."""
+    saved = random.getstate()
+    try:
+        random.seed(global_seed)
+        clock = Clock()
+        sim = simulator(cfg, clock, seed=seed, min_interval_s=1.0)
+        drawn = []
+        for step in range(count):
+            clock.now = T0 + timedelta(seconds=10 * step)
+            sim._simulation_history.clear()  # an exact repeat is a separate guard
+            candidate = sim.maybe_generate(context(now=clock.now))[0]
+            drawn.append((candidate.metadata["sim_type"], candidate.summary))
+        return drawn
+    finally:
+        random.setstate(saved)
+
+
+def test_same_seed_draws_the_same_simulations_whatever_the_global_stream(cfg):
+    """The kind and the sentence come from the injected rng only."""
+    first = _drawn_simulations(cfg, seed=1, global_seed=100)
+    second = _drawn_simulations(cfg, seed=1, global_seed=200)
+    assert first == second
+    # The sequence is a real draw: more than one kind appears in twelve.
+    assert len({kind for kind, _ in first}) > 1
 
 
 def test_speaker_label_passes_through_unchanged(cfg):
