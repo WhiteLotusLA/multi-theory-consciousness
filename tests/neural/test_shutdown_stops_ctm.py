@@ -3,6 +3,7 @@ built orchestrator, run without torch, and close sync or async data managers."""
 
 import asyncio
 import gc
+import logging
 import sys
 import warnings
 from types import SimpleNamespace
@@ -46,9 +47,21 @@ def test_shutdown_awaits_ctm_stop():
     assert not [w for w in caught if "never awaited" in str(w.message)]
 
 
-def test_shutdown_tolerates_partially_built_instance():
+def test_shutdown_tolerates_partially_built_instance(caplog):
     orchestrator = NeuralOrchestrator.__new__(NeuralOrchestrator)
-    asyncio.run(orchestrator.shutdown())
+
+    with caplog.at_level(logging.INFO, logger="mtc.neural.orchestrator"):
+        result = asyncio.run(orchestrator.shutdown())
+
+    assert result is None
+    messages = [record.getMessage() for record in caplog.records]
+    assert "Neural Orchestrator shutdown complete" in messages
+    # Every guarded step ran on the bare instance without a complaint
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+    # Nothing was invented on the instance it was given
+    assert not hasattr(orchestrator, "experience_buffer")
+    assert "continuous_thought_machine" not in vars(orchestrator)
+    assert "state" not in vars(orchestrator)
 
 
 def test_shutdown_without_torch(monkeypatch):

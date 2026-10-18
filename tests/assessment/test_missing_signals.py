@@ -1,5 +1,7 @@
 """Missing-signal semantics: measured, absent and insufficient_data."""
 
+import copy
+
 import numpy as np
 import pytest
 
@@ -312,18 +314,11 @@ async def test_absent_modules_score_zero_with_status_absent():
         assert result.score == 0.0
         assert result.confidence == 0.0
         assert result.passes_threshold is False
-    assert report.overall_score == 0.0
-    assert set(report.theory_scores) == {
-        "GWT",
-        "IIT",
-        "AST",
-        "HOT",
-        "FEP",
-        "RPT",
-        "BLT",
-        "AE",
-    }
-    assert all(score == 0.0 for score in report.theory_scores.values())
+    # Nothing measured: no overall and no theory score (absent indicators
+    # alone are not a measurement of anything)
+    assert report.overall_score is None
+    assert report.theory_scores == {}
+    assert report.status == INSUFFICIENT_DATA
     assert report.passing_count == 0
     # Missing modules keep their rule levels (an ablation is penalized)
     assert report.negative_indicators["purely_reactive"]["status"] == ABSENT
@@ -387,8 +382,112 @@ async def test_overall_none_only_when_nothing_included():
     assert report.theory_scores == {}
     assert report.to_dict()["overall_score"] is None
 
+
+@pytest.mark.asyncio
+async def test_overall_none_when_nothing_measured():
+    # Absent indicators are included in the averages, but an average over
+    # nothing measured is not a number: the overall is None and the report
+    # exports it as null.
     all_absent = await ConsciousnessAssessment().run_full_assessment(normalize=False)
-    assert all_absent.overall_score == 0.0
+    assert all(r.status == ABSENT for r in all_absent.indicator_results.values())
+    assert all_absent.overall_score is None
+    assert all_absent.theory_scores == {}
+    assert all_absent.to_dict()["overall_score"] is None
+    assert all_absent.architecture_functional is False
+    assert isinstance(all_absent.passing_count, int)
+    # Present modules without data plus absent ones: still nothing measured
+    idle = await ConsciousnessAssessment().run_full_assessment(
+        global_workspace=_ZeroWorkspace(), normalize=False
+    )
+    assert MEASURED not in {r.status for r in idle.indicator_results.values()}
+    assert idle.overall_score is None
+    assert idle.theory_scores == {}
+
+
+@pytest.mark.asyncio
+async def test_one_measured_indicator_gives_a_number():
+    assessment = ConsciousnessAssessment()
+    report = await assessment.run_full_assessment(
+        causal_emergence_analyzer=FixtureCE(0.25), normalize=False
+    )
+    measured = [n for n, r in report.indicator_results.items() if r.status == MEASURED]
+    assert measured == ["causal_emergence"]
+    included = [
+        name
+        for name, r in report.indicator_results.items()
+        if r.status in (MEASURED, ABSENT)
+    ]
+    assert len(included) == len(report.indicator_results)
+    # The one measured indicator and every absent one enter the weighted mean
+    # (the three absent negative indicators then take their penalties)
+    mean = _weighted_mean(assessment, report, included)
+    assert mean > 0.0
+    penalty = sum(v["penalty"] for v in report.negative_indicators.values())
+    assert report.overall_score is not None
+    assert report.overall_score == pytest.approx(max(0.0, mean - penalty))
+    assert set(report.theory_scores) == {"IIT"}
+    iit = [
+        report.indicator_results[n].score
+        for n in included
+        if report.indicator_results[n].theory.name == "IIT"
+    ]
+    assert report.theory_scores["IIT"] == pytest.approx(float(np.mean(iit)))
+
+
+@pytest.mark.asyncio
+async def test_theory_without_a_measured_member_is_omitted():
+    # The RPT indicators are measured, the loop is present but idle (its
+    # indicators are insufficient) and every other module is absent: only
+    # RPT has a measured member.
+    class _ZeroLoop:
+        def get_loop_statistics(self):
+            return {
+                "cycle_count": 0,
+                "average_loop_quality": 0.0,
+                "average_binding_quality": 0.0,
+                "field_evidencing_count": 0,
+                "epistemic_depth": {"average_depth": 0.0, "peak_depth": 0},
+            }
+
+    report = await ConsciousnessAssessment().run_full_assessment(
+        rpt_measurement=FixtureRPT(), beautiful_loop=_ZeroLoop(), normalize=False
+    )
+    statuses = {n: r.status for n, r in report.indicator_results.items()}
+    assert statuses["algorithmic_recurrence"] == MEASURED
+    assert statuses["global_broadcast"] == ABSENT
+    assert statuses["bayesian_binding_quality"] == INSUFFICIENT_DATA
+    assert set(report.theory_scores) == {"RPT"}
+    rpt_members = [
+        r.score
+        for r in report.indicator_results.values()
+        if r.theory.name == "RPT" and r.status in (MEASURED, ABSENT)
+    ]
+    assert report.theory_scores["RPT"] == pytest.approx(float(np.mean(rpt_members)))
+    assert report.overall_score is not None
+
+
+@pytest.mark.asyncio
+async def test_v04_constants_keeps_overall_and_theory_scores_with_nothing_measured():
+    legacy = ConsciousnessAssessment(**V04_SETTINGS)
+    absent = await legacy.run_full_assessment(normalize=False)
+    assert absent.overall_score == 0.0
+    assert set(absent.theory_scores) == {
+        "GWT",
+        "IIT",
+        "AST",
+        "HOT",
+        "FEP",
+        "RPT",
+        "BLT",
+        "AE",
+    }
+    # The v0.4.0 constants: 0.1 for an absent module, 0.0 for the IIT three
+    assert absent.theory_scores["IIT"] == pytest.approx(0.0)
+    assert absent.theory_scores["GWT"] == pytest.approx(0.1)
+    constants = ConsciousnessAssessment(missing_signal_policy="v04_constants")
+    report = await constants.run_full_assessment(normalize=False)
+    assert report.overall_score == 0.0
+    assert len(report.theory_scores) == 8
 
 
 @pytest.mark.asyncio
@@ -501,6 +600,237 @@ async def test_noise_baseline_skips_insufficient_runs(monkeypatch):
     assert "global_broadcast" in baselines
 
 
+# ---------------------------------------------------------------------------
+# Real producers that leave a statistic unmeasured
+# ---------------------------------------------------------------------------
+
+
+def _attention_state(summary, module, salience=0.8):
+    """A workspace state whose focus moved to ``module`` (a habitual shift)."""
+    from mtc.consciousness.enhanced_global_workspace import (
+        ConsciousnessState,
+        WorkspaceCandidate,
+        WorkspaceCandidateSource,
+        WorkspaceContent,
+    )
+
+    candidate = WorkspaceCandidate(
+        content=summary,
+        content_type="thought",
+        summary=summary,
+        source=WorkspaceCandidateSource.CTM,
+        source_module=module,
+    )
+    content = WorkspaceContent(candidate=candidate, salience=salience)
+    return ConsciousnessState(
+        is_conscious=True,
+        primary_content=content,
+        workspace_contents=[content],
+        ignition_events=1,
+        integration_level=0.5,
+        broadcast_coverage=1.0,
+        attention_focus=module,
+        attention_distribution={module: salience},
+        stream_position=1,
+    )
+
+
+async def _attention_after_ordinary_updates(updates=6):
+    from mtc.consciousness.attention_schema import AttentionSchemaModule
+
+    schema = AttentionSchemaModule()
+    for i in range(updates):
+        await schema.update_schema(_attention_state(f"topic {i}", f"module_{i}"))
+    return schema
+
+
+async def _workspace_after_ignitions(cycles=7):
+    from mtc.consciousness.enhanced_global_workspace import (
+        EnhancedGlobalWorkspace,
+        WorkspaceCandidate,
+        WorkspaceCandidateSource,
+    )
+
+    workspace = EnhancedGlobalWorkspace(body_metrics_enabled=False)
+    for i in range(cycles):
+        candidate = WorkspaceCandidate(
+            content=f"message number {i}",
+            content_type="conversation",
+            summary=f"message number {i}",
+            source=WorkspaceCandidateSource.LLM,
+            activation_level=0.9,
+            emotional_salience=0.5,
+        )
+        await workspace.process_consciousness_cycle([candidate])
+    stats = workspace.get_statistics()
+    assert _count_of(stats["ignition"].get("total_ignitions")) > 0
+    return workspace
+
+
+def _count_of(value):
+    return int(value) if isinstance(value, (int, float)) else 0
+
+
+@pytest.mark.asyncio
+async def test_embodiment_insufficient_without_a_classifiable_shift():
+    schema = await _attention_after_ordinary_updates()
+    stats = schema.get_statistics()
+    assert stats["total_updates"] == 6
+    assert stats["voluntary_shifts"] == 0 and stats["captured_shifts"] == 0
+    assert stats["voluntary_ratio"] is None
+    report = await ConsciousnessAssessment().run_full_assessment(
+        attention_schema=schema, normalize=False
+    )
+    result = report.indicator_results["embodiment"]
+    assert result.status == INSUFFICIENT_DATA
+    assert result.evidence["missing"] == "attention_schema.voluntary_ratio"
+    constants = await ConsciousnessAssessment(
+        missing_signal_policy="v04_constants"
+    ).run_full_assessment(attention_schema=schema, normalize=False)
+    legacy = constants.indicator_results["embodiment"]
+    assert legacy.status == MEASURED
+    assert legacy.evidence["voluntary_ratio"] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_attention_schema_insufficient_without_a_scored_prediction():
+    schema = await _attention_after_ordinary_updates()
+    assert schema.get_statistics()["prediction_accuracy"] is None
+    report = await ConsciousnessAssessment().run_full_assessment(
+        attention_schema=schema, normalize=False
+    )
+    result = report.indicator_results["attention_schema"]
+    assert result.status == INSUFFICIENT_DATA
+    assert result.evidence["missing"] == "attention_schema.prediction_accuracy"
+    constants = await ConsciousnessAssessment(
+        missing_signal_policy="v04_constants"
+    ).run_full_assessment(attention_schema=schema, normalize=False)
+    legacy = constants.indicator_results["attention_schema"]
+    assert legacy.status == MEASURED
+    assert legacy.evidence["prediction_accuracy"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_global_broadcast_insufficient_without_receivers():
+    workspace = await _workspace_after_ignitions()
+    stats = workspace.get_statistics()
+    assert stats["broadcast"]["coverage_ratio"] is None
+    report = await ConsciousnessAssessment().run_full_assessment(
+        global_workspace=workspace, normalize=False
+    )
+    for name in ("global_broadcast", "recurrent_processing"):
+        result = report.indicator_results[name]
+        assert result.status == INSUFFICIENT_DATA, name
+        assert result.evidence["missing"] == "global_workspace.broadcast.coverage_ratio"
+        assert name in report.insufficient_indicators
+    constants = await ConsciousnessAssessment(
+        missing_signal_policy="v04_constants"
+    ).run_full_assessment(global_workspace=workspace, normalize=False)
+    assert constants.indicator_results["global_broadcast"].status == MEASURED
+    assert constants.indicator_results["global_broadcast"].evidence["coverage"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_ignition_indicators_insufficient_without_sustain_check():
+    workspace = await _workspace_after_ignitions()
+    stats = workspace.get_statistics()
+    assert stats["ignition"]["sustain_rate"] is None
+    report = await ConsciousnessAssessment().run_full_assessment(
+        global_workspace=workspace, normalize=False
+    )
+    for name in ("ignition_dynamics", "global_ignition_nuanced"):
+        result = report.indicator_results[name]
+        assert result.status == INSUFFICIENT_DATA, name
+        assert result.evidence["missing"] == "global_workspace.ignition.sustain_rate"
+    # A producer that did measure a sustain rate stays measured
+    stub = await ConsciousnessAssessment().run_full_assessment(
+        global_workspace=FixtureWorkspace(), normalize=False
+    )
+    for name in ("ignition_dynamics", "global_ignition_nuanced"):
+        assert stub.indicator_results[name].status == MEASURED, name
+        assert stub.indicator_results[name].evidence["sustain_rate"] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_binding_quality_insufficient_without_candidate_vectors():
+    from types import SimpleNamespace
+
+    from mtc.consciousness.beautiful_loop import BeautifulLoop
+
+    def winners(saliences):
+        return [
+            SimpleNamespace(
+                candidate=SimpleNamespace(
+                    id=f"c{i}",
+                    summary=f"content {i}",
+                    content_type="thought",
+                    source_module=f"m{i}",
+                ),
+                salience=salience,
+            )
+            for i, salience in enumerate(saliences)
+        ]
+
+    loop = BeautifulLoop()
+    for saliences in ([0.9, 0.4, 0.6], [0.3, 0.8], [0.7, 0.2, 0.5, 0.6]):
+        moment = await loop.process_conscious_moment(
+            workspace_winners=winners(saliences)
+        )
+        assert moment.binding_quality is None
+    stats = loop.get_loop_statistics()
+    assert stats["cycle_count"] == 3
+    assert stats["average_binding_quality"] is None
+    report = await ConsciousnessAssessment().run_full_assessment(
+        beautiful_loop=loop, normalize=False
+    )
+    result = report.indicator_results["bayesian_binding_quality"]
+    assert result.status == INSUFFICIENT_DATA
+    assert result.evidence["missing"] == "beautiful_loop.average_binding_quality"
+    # The loop's other indicators keep measuring
+    assert report.indicator_results["epistemic_depth"].status == MEASURED
+
+
+@pytest.mark.asyncio
+async def test_indicator_failure_is_counted_and_raised_under_debug(monkeypatch):
+    # A clean run carries an empty mapping, not a missing key
+    clean = await ConsciousnessAssessment().run_full_assessment(
+        beautiful_loop=FixtureLoop(), normalize=False
+    )
+    assert clean.failures == {}
+    assert clean.to_dict()["failures"] == {}
+    assert "failed" not in clean.indicator_results["epistemic_depth"].evidence
+
+    original = ConsciousnessAssessment._measure_indicator
+
+    async def broken(self, name, config, **kw):
+        if name == "epistemic_depth":
+            raise RuntimeError("indicator body deleted")
+        return await original(self, name, config, **kw)
+
+    monkeypatch.setattr(ConsciousnessAssessment, "_measure_indicator", broken)
+    assessment = ConsciousnessAssessment()
+    report = await assessment.run_full_assessment(
+        beautiful_loop=FixtureLoop(), normalize=False
+    )
+    result = report.indicator_results["epistemic_depth"]
+    assert result.status == INSUFFICIENT_DATA
+    assert result.evidence["failed"] is True
+    assert "indicator body deleted" in result.evidence["error"]
+    assert report.failures == {"indicator:epistemic_depth": 1}
+    assert assessment.failures["indicator:epistemic_depth"] == 1
+    assert report.to_dict()["failures"] == {"indicator:epistemic_depth": 1}
+    # The other indicators of the same module are untouched
+    assert report.indicator_results["genuine_implementation"].status == MEASURED
+
+    from mtc.core.config import Settings
+
+    monkeypatch.setattr(assessment_module, "get_settings", lambda: Settings(DEBUG=True))
+    with pytest.raises(RuntimeError, match="indicator body deleted"):
+        await ConsciousnessAssessment().run_full_assessment(
+            beautiful_loop=FixtureLoop(), normalize=False
+        )
+
+
 def test_invalid_choices_name_the_field():
     for field_name, value in (
         ("indicator_formulas", "v03"),
@@ -547,3 +877,187 @@ async def test_hot_with_idle_workspace_is_insufficient():
         result = report.indicator_results[name]
         assert result.status == INSUFFICIENT_DATA, name
         assert result.evidence["missing"] == "global_workspace.cycle_count"
+
+
+# ---------------------------------------------------------------------------
+# A statistic the producer reports as None (it has not measured it yet)
+# ---------------------------------------------------------------------------
+
+_STAT_METHODS = {
+    "global_workspace": "get_statistics",
+    "attention_schema": "get_statistics",
+    "metacognition": "get_statistics",
+    "active_inference": "get_statistics",
+    "beautiful_loop": "get_loop_statistics",
+    "rpt_measurement": "get_statistics",
+    "rpt_measurement.oscillatory_binding": "get_oscillatory_binding_stats",
+}
+
+
+def _with_statistic(module, method, path, value):
+    """A copy of a fixture module whose ``method`` reports ``path`` as ``value``."""
+    base = getattr(module, method)
+    parts = path.split(".")
+
+    def patched():
+        stats = copy.deepcopy(base())
+        target = stats
+        for part in parts[:-1]:
+            target = target[part]
+        target[parts[-1]] = value
+        return stats
+
+    clone = copy.copy(module)
+    setattr(clone, method, patched)
+    return clone
+
+
+def _modules_with(contract_key, path, value):
+    modules = fixture_modules()
+    module_key = contract_key.split(".")[0]
+    modules[module_key] = _with_statistic(
+        modules[module_key], _STAT_METHODS[contract_key], path, value
+    )
+    return modules
+
+
+def _same_result(left, right):
+    return (left.status, left.score, left.confidence, left.passes_threshold) == (
+        right.status,
+        right.score,
+        right.confidence,
+        right.passes_threshold,
+    )
+
+
+# (contract key, statistic path, indicator that reads it, the v04_constants
+# default the v05 formula falls back to). The fixture leaves every activity
+# counter above zero, so each statistic is read.
+MISSING_STATISTIC_CASES = [
+    (
+        "global_workspace",
+        "bottleneck.avg_candidates",
+        "sequential_module_querying",
+        0.0,
+    ),
+    ("global_workspace", "broadcast.coverage_ratio", "global_broadcast", 0.0),
+    ("global_workspace", "broadcast.coverage_ratio", "recurrent_processing", 0.0),
+    ("global_workspace", "ignition.sustain_rate", "ignition_dynamics", 0.0),
+    ("global_workspace", "ignition.sustain_rate", "global_ignition_nuanced", 0.0),
+    ("attention_schema", "prediction_accuracy", "attention_schema", 0.0),
+    ("attention_schema", "capacity_used", "embodiment", 0.0),
+    ("attention_schema", "voluntary_ratio", "embodiment", 0.5),
+    ("attention_schema", "voluntary_ratio", "attention_control", 0.0),
+    ("metacognition", "overall_confidence", "metacognition", 0.0),
+    ("active_inference", "variational_free_energy", "agency", 0.0),
+    ("rpt_measurement", "average_local", "local_recurrence", 0.0),
+    ("rpt_measurement", "average_local", "algorithmic_recurrence", 0.0),
+    ("rpt_measurement", "average_global", "algorithmic_recurrence", 0.0),
+    (
+        "rpt_measurement.oscillatory_binding",
+        "global_order_parameter",
+        "oscillatory_binding_coherence",
+        0.0,
+    ),
+    ("beautiful_loop", "average_binding_quality", "bayesian_binding_quality", 0.0),
+    ("beautiful_loop", "epistemic_depth.average_depth", "epistemic_depth", 0.0),
+    ("beautiful_loop", "average_loop_quality", "genuine_implementation", 0.0),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("contract_key,path,indicator,default", MISSING_STATISTIC_CASES)
+async def test_missing_statistic_is_insufficient_and_names_the_key(
+    contract_key, path, indicator, default
+):
+    with_none = _modules_with(contract_key, path, None)
+    honest = await ConsciousnessAssessment().run_full_assessment(
+        **with_none, normalize=False
+    )
+    result = honest.indicator_results[indicator]
+    assert result.status == INSUFFICIENT_DATA, result.evidence
+    assert f"{contract_key}.{path}" in result.evidence["missing"]
+    assert indicator in honest.insufficient_indicators
+    assert honest.to_dict()["indicator_results"][indicator]["score"] is None
+
+    # v04_constants reads the missing statistic as the v0.4.0 default
+    constants = ConsciousnessAssessment(missing_signal_policy="v04_constants")
+    seen = await constants.run_full_assessment(**with_none, normalize=False)
+    expected = await constants.run_full_assessment(
+        **_modules_with(contract_key, path, default), normalize=False
+    )
+    assert seen.indicator_results[indicator].status == MEASURED
+    assert _same_result(
+        seen.indicator_results[indicator], expected.indicator_results[indicator]
+    )
+
+
+# (contract key, statistic path, the value the v0.4.0 formulas saw there)
+V04_NONE_READS = [
+    ("global_workspace", "broadcast.coverage_ratio", 0.0),
+    ("global_workspace", "ignition.sustain_rate", 0.0),
+    ("attention_schema", "prediction_accuracy", 0.0),
+    ("attention_schema", "voluntary_ratio", 0.5),
+    ("metacognition", "overall_confidence", 0.5),
+    ("rpt_measurement", "average_local", 0.0),
+    ("rpt_measurement", "average_global", 0.0),
+    ("beautiful_loop", "average_binding_quality", 0.0),
+    ("beautiful_loop", "average_loop_quality", 0.0),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("contract_key,path,v04_value", V04_NONE_READS)
+async def test_v04_formulas_read_none_as_the_v04_value(contract_key, path, v04_value):
+    legacy = ConsciousnessAssessment(**V04_SETTINGS)
+    with_none = await legacy.run_full_assessment(
+        **_modules_with(contract_key, path, None), normalize=False
+    )
+    with_value = await legacy.run_full_assessment(
+        **_modules_with(contract_key, path, v04_value), normalize=False
+    )
+    for name, result in with_value.indicator_results.items():
+        seen = with_none.indicator_results[name]
+        assert _same_result(seen, result), name
+        assert seen.evidence == result.evidence, name
+    assert with_none.overall_score == with_value.overall_score
+    assert with_none.passing_count == with_value.passing_count
+    assert with_none.confidence == with_value.confidence
+
+
+@pytest.mark.asyncio
+async def test_v04_attention_formula_reads_none_as_zero():
+    legacy = ConsciousnessAssessment(indicator_formulas="v04")
+    with_none = await legacy.run_full_assessment(
+        **_modules_with("attention_schema", "prediction_accuracy", None),
+        normalize=False,
+    )
+    with_zero = await legacy.run_full_assessment(
+        **_modules_with("attention_schema", "prediction_accuracy", 0.0),
+        normalize=False,
+    )
+    seen = with_none.indicator_results["attention_schema"]
+    expected = with_zero.indicator_results["attention_schema"]
+    assert expected.status == MEASURED
+    assert seen.evidence == expected.evidence
+    assert _same_result(seen, expected)
+    assert seen.score == pytest.approx(0.15 * 0.8 + 0.15 + 0.20 * 0.8)
+
+
+@pytest.mark.asyncio
+async def test_v04_binding_formula_reads_none_as_zero():
+    legacy = ConsciousnessAssessment(indicator_formulas="v04")
+    with_none = await legacy.run_full_assessment(
+        **_modules_with("beautiful_loop", "average_binding_quality", None),
+        normalize=False,
+    )
+    with_zero = await legacy.run_full_assessment(
+        **_modules_with("beautiful_loop", "average_binding_quality", 0.0),
+        normalize=False,
+    )
+    seen = with_none.indicator_results["bayesian_binding_quality"]
+    expected = with_zero.indicator_results["bayesian_binding_quality"]
+    assert expected.status == MEASURED and expected.score == 0.0
+    assert seen.evidence == expected.evidence
+    assert _same_result(seen, expected)
+    assert "bayesian_binding_quality" not in with_none.insufficient_indicators

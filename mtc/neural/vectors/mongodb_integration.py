@@ -113,14 +113,14 @@ class IntegratedMemorySystem:
         """Store a memory as a vector and as a thought and link them.
 
         ``emotional_weight`` of the vector is the mean intensity of
-        ``emotional_state`` (0.0 without one). Returns ``point_id``,
-        ``stream_id``, ``thought_id`` (None when the thought was not stored),
-        ``thought_stored``, ``vector_ms``, ``thought_ms``, ``latency_ms`` and
-        ``target_met``.
+        ``emotional_state`` (None without one: nothing was measured).
+        Returns ``point_id``, ``stream_id``, ``thought_id`` (None when the
+        thought was not stored), ``thought_stored``, ``vector_ms``,
+        ``thought_ms``, ``latency_ms`` and ``target_met``.
         """
         vectors, thoughts = self._vectors(), self._thoughts()
         emotions = dict(emotional_state or {})
-        weight = sum(emotions.values()) / len(emotions) if emotions else 0.0
+        weight = sum(emotions.values()) / len(emotions) if emotions else None
         started = self._clock()
 
         point_id = await asyncio.to_thread(
@@ -283,10 +283,18 @@ class IntegratedMemorySystem:
 
     def status(self) -> Dict[str, Any]:
         """Return ``backend``, ``available`` and ``last_error`` plus both stores'
-        own status (a store that is not configured reads as None)."""
+        own status (a store that is not configured reads as None).
+
+        ``available`` is False when a store is missing or reports False, None
+        when a store does not know yet (the data manager before its first
+        contact) and none reports False, and True otherwise.
+        """
         parts: Dict[str, Any] = {}
         errors: List[str] = []
-        available = self.vector_store is not None and self.data_manager is not None
+        available: Optional[bool] = (
+            self.vector_store is not None and self.data_manager is not None
+        )
+        unknown = False
         for name, store in (
             ("vector_store", self.vector_store),
             ("data_manager", self.data_manager),
@@ -294,9 +302,15 @@ class IntegratedMemorySystem:
             report = store.status() if hasattr(store, "status") else None
             parts[name] = report
             if isinstance(report, dict):
-                available = available and bool(report.get("available", True))
+                reported = report.get("available", True)
+                if reported is None:
+                    unknown = True
+                else:
+                    available = available and bool(reported)
                 if report.get("last_error"):
                     errors.append(f"{name}: {report['last_error']}")
+        if available and unknown:
+            available = None
         return {
             "backend": "integrated",
             "available": available,

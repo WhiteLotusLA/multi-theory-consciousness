@@ -197,3 +197,18 @@ def test_registry_lookup_by_id_and_type():
     registry.unregister("missing")
     assert registry.get_system("snn_a") is None
     assert len(registry.get_all_systems()) == 1
+
+
+def test_docstrings_make_no_claim_of_use_or_measurement():
+    """The layer says the orchestrator does not use it, and the emotional
+    state's two defaults are described as an omitted argument's midpoint."""
+    import mtc.neural.base_interfaces as interfaces
+    from mtc.neural.protocols.message_format import EmotionalState
+
+    doc = " ".join((interfaces.__doc__ or "").split())
+    assert "enables the NeuralOrchestrator" not in doc
+    assert "does not use" in doc
+    state_doc = " ".join((EmotionalState.__doc__ or "").split())
+    assert "midpoint" in state_doc and "not a measurement" in state_doc
+    omitted = EmotionalState(valence=0.1, arousal=0.2)
+    assert (omitted.dominance, omitted.intensity) == (0.5, 0.5)

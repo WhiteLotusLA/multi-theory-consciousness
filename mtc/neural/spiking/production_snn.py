@@ -122,9 +122,17 @@ class STDPLayer(nn.Module):
     """
     Linear layer with spike-timing-dependent plasticity.
 
-    In training mode each forward call decays the pre- and postsynaptic
-    traces by exp(-dt / tau), adds the batch-mean spikes, applies the
-    potentiation and depression update and counts it in ``update_count``.
+    In training mode each forward call is one simulation step. The pre- and
+    postsynaptic traces decay by exp(-dt / tau) and then add this step's
+    batch-mean spikes. The weight update pairs this step's spikes with the
+    other side's trace: potentiation is ``a_plus`` times the outer product of
+    this step's postsynaptic spikes and the presynaptic trace (a presynaptic
+    spike before a postsynaptic one strengthens the synapse), depression is
+    ``a_minus`` times the outer product of the postsynaptic trace and this
+    step's presynaptic spikes (a postsynaptic spike before a presynaptic one
+    weakens it). Spikes of the same step carry no order and enter both terms,
+    so at equal amplitudes they cancel. ``update_count`` counts only the steps
+    whose applied change, after the weight bounds, is nonzero.
     """
 
     def __init__(self, in_features: int, out_features: int, config: SNNConfig):
@@ -175,33 +183,33 @@ class STDPLayer(nn.Module):
             # Update traces (detach to prevent gradient accumulation). The
             # decay is per step: exp(-dt / tau) with both in seconds.
             with torch.no_grad():
-                self.pre_trace = (
-                    self.pre_trace * self.pre_trace_decay + pre_spikes.mean(0).detach()
-                )
-                self.post_trace = (
-                    self.post_trace * self.post_trace_decay
-                    + post_spikes.mean(0).detach()
-                )
+                pre_now = pre_spikes.mean(0).detach()
+                post_now = post_spikes.mean(0).detach()
+                self.pre_trace = self.pre_trace * self.pre_trace_decay + pre_now
+                self.post_trace = self.post_trace * self.post_trace_decay + post_now
 
                 # STDP weight update (all in no_grad to prevent memory explosion)
-                # Potentiation: post fires after pre
+                # Potentiation: a postsynaptic spike now, after presynaptic
+                # activity held in the presynaptic trace
                 potentiation = self.config.a_plus * torch.outer(
-                    self.post_trace, self.pre_trace
+                    post_now, self.pre_trace
                 )
-                # Depression: post fires before pre
-                depression = (
-                    -self.config.a_minus
-                    * torch.outer(self.pre_trace, self.post_trace).t()
+                # Depression: a presynaptic spike now, after postsynaptic
+                # activity held in the postsynaptic trace
+                depression = -self.config.a_minus * torch.outer(
+                    self.post_trace, pre_now
                 )
 
+                before = self.weight.detach().clone()
                 # Apply weight change
                 self.weight += potentiation + depression
                 # Enforce weight bounds
                 self.weight.clamp_(-2.0, 2.0)
-                self.update_count += 1
+                if bool(torch.any(self.weight != before)):
+                    self.update_count += 1
 
                 # Explicitly delete large tensors
-                del potentiation, depression
+                del potentiation, depression, before
 
         return syn_current
 

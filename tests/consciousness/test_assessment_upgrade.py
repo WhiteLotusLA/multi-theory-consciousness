@@ -38,9 +38,15 @@ class TestRPTMeasurement:
         assert rpt.global_recurrence_threshold == 0.4
 
     def test_measure_local_recurrence_no_input(self):
+        # No SNN or LSM state: nothing to measure local recurrence from,
+        # so the score is unmeasured (None), not 0.0.
         rpt = RPTMeasurement()
         score = rpt.measure_local_recurrence()
-        assert score == 0.0
+        assert score is None
+        metrics = rpt.measure_full()
+        assert metrics.local_recurrence_score is None
+        assert rpt.get_statistics()["average_local"] is None
+        assert rpt.get_statistics()["local_measurement_count"] == 0
 
     def test_measure_local_recurrence_snn_only(self):
         rpt = RPTMeasurement()
@@ -132,8 +138,8 @@ class TestRPTMeasurement:
         assert isinstance(metrics, RecurrenceMetrics)
         assert 0.0 <= metrics.local_recurrence_score <= 1.0
         assert 0.0 <= metrics.global_recurrence_score <= 1.0
-        assert 0.0 <= metrics.phenomenal_consciousness <= 1.0
-        assert 0.0 <= metrics.access_consciousness <= 1.0
+        assert 0.0 <= metrics.local_recurrence_index <= 1.0
+        assert 0.0 <= metrics.combined_recurrence_index <= 1.0
         assert metrics.recurrence_type in RecurrenceType
         assert metrics.measurement_time_ms >= 0
         assert rpt.measurement_count == 1
@@ -200,8 +206,8 @@ class TestRPTMeasurement:
         )
         assert score_optimal > score_low
 
-    def test_access_consciousness_requires_both(self):
-        """Access consciousness should require both local AND global recurrence."""
+    def test_combined_recurrence_index_requires_both(self):
+        """The combined index needs both local AND global recurrence."""
         rpt = RPTMeasurement()
         # Only local recurrence (no workspace)
         metrics_local = rpt.measure_full(
@@ -218,7 +224,10 @@ class TestRPTMeasurement:
                 "ignition": {"total_ignitions": 3},
             },
         )
-        assert metrics_both.access_consciousness >= metrics_local.access_consciousness
+        assert (
+            metrics_both.combined_recurrence_index
+            >= metrics_local.combined_recurrence_index
+        )
 
 
 # ========================================================================

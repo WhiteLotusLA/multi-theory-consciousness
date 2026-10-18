@@ -10,9 +10,6 @@ Routes neural messages based on configurable rules. Supports:
 Rules are matched by source/target glob patterns and priority
 thresholds. The router is designed for sub-millisecond decisions
 (1000 routes in <100ms).
-
-Created: March 7, 2026
-Authors: Multi-Theory Consciousness Contributors
 """
 
 from enum import Enum

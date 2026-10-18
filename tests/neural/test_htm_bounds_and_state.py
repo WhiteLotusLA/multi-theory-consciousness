@@ -51,8 +51,10 @@ def test_process_keeps_history_bounded():
     htm = ProductionHTM(cfg)
     pattern = _pattern(cfg.input_bits, 0)
 
+    # Learning passes fill the anomaly history; inference-only passes keep
+    # their own (test_live_history_is_bounded).
     for _ in range(ANOMALY_HISTORY_LIMIT + 5):
-        htm.process(pattern, learn=False)
+        htm.process(pattern, learn=True)
 
     assert len(htm.anomaly_history) == ANOMALY_HISTORY_LIMIT
 
@@ -93,8 +95,9 @@ def test_restore_drops_nonfinite_tail_values_and_keeps_live_history():
     assert fresh.anomaly_history == [0.2, 0.4]
 
     live = ProductionHTM(cfg)
-    live.process(_pattern(cfg.input_bits, 0), learn=False)
+    live.process(_pattern(cfg.input_bits, 0), learn=True)
     before = list(live.anomaly_history)
+    assert before
     live.from_state_dict(state)
     assert live.anomaly_history == before
 
@@ -133,3 +136,109 @@ def test_reset_clears_measured_metrics():
     metrics = htm.get_metrics()
     assert metrics["anomaly_score"] is None
     assert metrics["active_columns"] is None
+
+
+def _segments(htm: ProductionHTM):
+    return {
+        cell: [
+            (
+                sorted(int(s) for s in seg["synapses"]),
+                sorted(seg["permanences"].items()),
+            )
+            for seg in segments
+        ]
+        for cell, segments in htm.temporal_memory.segments.items()
+    }
+
+
+def _trained(seed: int, steps: int = 5) -> ProductionHTM:
+    np.random.seed(seed)
+    cfg = _tiny_config()
+    htm = ProductionHTM(cfg)
+    for i in range(steps):
+        htm.process(_pattern(cfg.input_bits, (i % 3) * 20), learn=True)
+    return htm
+
+
+def test_inference_pass_leaves_learning_state():
+    htm = _trained(seed=7)
+    tm = htm.temporal_memory
+    assert tm.active_cells and tm.winner_cells
+    before = (
+        set(tm.active_cells),
+        set(tm.winner_cells),
+        set(tm.predicted_cells),
+        list(htm.anomaly_history),
+        htm._last_active_columns.copy(),
+    )
+
+    result = htm.process(_pattern(htm.config.input_bits, 40), learn=False)
+
+    assert tm.active_cells == before[0]
+    assert tm.winner_cells == before[1]
+    assert tm.predicted_cells == before[2]
+    assert htm.anomaly_history == before[3]
+    assert np.array_equal(htm._last_active_columns, before[4])
+    assert htm.live_anomaly_history == [result["anomaly_score"]]
+    assert np.array_equal(htm._last_live_active_columns, result["active_columns"])
+    metrics = htm.get_metrics()
+    assert metrics["anomaly_score"] == pytest.approx(before[3][-1])
+    assert metrics["live_anomaly_score"] == pytest.approx(result["anomaly_score"])
+
+
+def test_live_anomaly_none_before_a_live_pass():
+    htm = _trained(seed=8)
+    assert htm.get_metrics()["live_anomaly_score"] is None
+    assert htm.live_anomaly_history == []
+
+
+def test_live_context_carries_between_live_passes():
+    np.random.seed(9)
+    cfg = _tiny_config()
+    htm = ProductionHTM(cfg)
+    first, second = _pattern(cfg.input_bits, 0), _pattern(cfg.input_bits, 30)
+    for _ in range(6):
+        htm.process(first, learn=True)
+        htm.process(second, learn=True)
+    learned = htm.temporal_memory.predicted_cells
+
+    live_first = htm.process(first, learn=False)["anomaly_score"]
+    live_second = htm.process(second, learn=False)["anomaly_score"]
+
+    # The live context starts empty, so its first pass has nothing predicted;
+    # the second pass is scored against what the first live pass predicted.
+    assert live_first == 1.0
+    assert live_second < live_first
+    assert htm.temporal_memory.predicted_cells == learned
+    assert htm.live_anomaly_history == [live_first, live_second]
+
+
+def test_live_pass_does_not_change_what_is_learned():
+    control = _trained(seed=11)
+    probed = _trained(seed=11)
+    assert _segments(control) == _segments(probed)
+    bits = control.config.input_bits
+
+    np.random.seed(99)
+    probed.process(_pattern(bits, 50), learn=False)
+
+    np.random.seed(12)
+    control.process(_pattern(bits, 10), learn=True)
+    np.random.seed(12)
+    probed.process(_pattern(bits, 10), learn=True)
+
+    assert _segments(probed) == _segments(control)
+    assert probed.anomaly_history == control.anomaly_history
+
+
+def test_live_history_is_bounded():
+    np.random.seed(0)
+    cfg = _tiny_config()
+    htm = ProductionHTM(cfg)
+    pattern = _pattern(cfg.input_bits, 0)
+
+    for _ in range(ANOMALY_HISTORY_LIMIT + 5):
+        htm.process(pattern, learn=False)
+
+    assert len(htm.live_anomaly_history) == ANOMALY_HISTORY_LIMIT
+    assert htm.anomaly_history == []

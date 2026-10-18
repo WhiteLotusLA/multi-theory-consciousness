@@ -12,9 +12,8 @@ after this file (the unit, synchrony and restore tests skip when they see the
 double).
 """
 
+import math
 import sys
-
-
 import types
 import torch
 import torch.nn as nn
@@ -207,6 +206,64 @@ class TestSTDPLayer:
         assert torch.all(layer.pre_trace == 0)
         assert torch.all(layer.post_trace == 0)
 
+    def test_stdp_default_amplitudes_are_timing_dependent(self):
+        """At the default (equal) amplitudes, pre before post strengthens the
+        affected synapses and post before pre weakens them."""
+        cfg = _tiny_config(stdp_enabled=True)
+        assert cfg.a_plus == cfg.a_minus
+        pre_idx, post_idx = [1, 4], [2, 7]
+        pre = torch.zeros(4, 32)
+        pre[:, pre_idx] = 1.0
+        post = torch.zeros(4, 16)
+        post[:, post_idx] = 1.0
+        silent_pre, silent_post = torch.zeros(4, 32), torch.zeros(4, 16)
+
+        causal = STDPLayer(32, 16, cfg)
+        causal.train()
+        before = causal.weight.data.clone()
+        causal(pre, silent_post)  # step 1: presynaptic spikes only
+        causal(silent_pre, post)  # step 2: postsynaptic spikes only
+        change = causal.weight.data - before
+        affected = change[post_idx][:, pre_idx]
+        assert torch.all(affected > 0)
+        mask = torch.ones_like(change, dtype=torch.bool)
+        mask[torch.tensor(post_idx)[:, None], torch.tensor(pre_idx)[None, :]] = False
+        assert torch.all(change[mask] == 0)
+
+        anti = STDPLayer(32, 16, cfg)
+        anti.train()
+        before = anti.weight.data.clone()
+        anti(silent_pre, post)  # step 1: postsynaptic spikes only
+        anti(pre, silent_post)  # step 2: presynaptic spikes only
+        change = anti.weight.data - before
+        assert torch.all(change[post_idx][:, pre_idx] < 0)
+        assert torch.all(change[mask] == 0)
+
+    def test_update_count_counts_only_changes(self):
+        """Training steps that change no weight are not counted, so
+        plasticity is not reported for them."""
+        cfg = _tiny_config(stdp_enabled=True)
+        model = ProductionSNN(cfg)
+        model.train()
+        for layer in model.stdp_layers:
+            silent_pre = torch.zeros(4, layer.in_features)
+            silent_post = torch.zeros(4, layer.out_features)
+            for _ in range(3):
+                layer(silent_pre, silent_post)
+            assert int(layer.update_count.item()) == 0
+        assert model.get_stdp_statistics()["plasticity_active"] is False
+
+        layer = model.stdp_layers[0]
+        pre = torch.zeros(4, layer.in_features)
+        pre[:, 0] = 1.0
+        post = torch.zeros(4, layer.out_features)
+        post[:, 0] = 1.0
+        layer(pre, torch.zeros(4, layer.out_features))
+        assert int(layer.update_count.item()) == 0
+        layer(torch.zeros(4, layer.in_features), post)
+        assert int(layer.update_count.item()) == 1
+        assert model.get_stdp_statistics()["plasticity_active"] is True
+
 
 # ---------------------------------------------------------------------------
 # ProductionSNN tests
@@ -301,23 +358,27 @@ class TestProductionSNN:
         assert metrics["processing_time_ms"] >= 0.0
 
     def test_train_on_batch_computes_loss(self):
-        """Forward pass should produce a valid MSE loss against targets."""
+        """train_on_batch returns a finite float loss and steps the optimizer."""
+        torch.manual_seed(0)
         cfg = _tiny_config()
         model = ProductionSNN(cfg)
 
-        inputs = torch.randn(4, cfg.input_dim)
-        targets = torch.randn(4, cfg.output_dim)
+        inputs = torch.rand(4, cfg.input_dim) * 4.0
+        targets = torch.rand(4, cfg.output_dim)
+        before = {
+            name: param.detach().clone() for name, param in model.named_parameters()
+        }
 
-        with torch.no_grad():
-            outputs, _ = model(inputs)
-            if outputs.dim() > 2:
-                outputs = outputs.mean(dim=0)
-            if outputs.dim() > 2:
-                outputs = outputs.mean(dim=1)
-            loss = nn.functional.mse_loss(outputs, targets)
+        loss = model.train_on_batch(inputs, targets)
 
-        assert isinstance(loss.item(), float)
-        assert loss.item() >= 0.0
+        assert isinstance(loss, float)
+        assert math.isfinite(loss) and loss >= 0.0
+        changed = [
+            name
+            for name, param in model.named_parameters()
+            if not torch.equal(param.detach(), before[name])
+        ]
+        assert changed, "the optimizer did not change any parameter"
 
     def test_count_neurons(self):
         """_count_neurons should sum all layer sizes."""

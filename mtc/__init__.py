@@ -77,7 +77,8 @@ __all__ = [
     "RPTMeasurement",
     "RecurrenceMetrics",
     "RecurrenceType",
-    # DCM Benchmark (Bayesian, Shiller & Duffy 2026)
+    # DCM benchmark (Shiller & Duffy 2026): collected indicator evidence;
+    # its posterior is experimental and does not respond to the evidence
     "BenchmarkRunner",
     "DCMBenchmarkResult",
     "DCMEvidenceAdapter",

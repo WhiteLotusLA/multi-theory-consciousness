@@ -124,3 +124,28 @@ def test_restore_rejects_seed_mismatch(caplog):
 
     assert not getattr(target.rls_readout, "initialized", False)
     assert any("seed" in r.getMessage() for r in caplog.records)
+
+
+def test_restore_marks_the_readout_trained():
+    source = _trained()
+    assert source.readout_trained is True
+
+    target = _lsm()
+    x = np.random.default_rng(3).standard_normal((12, INPUT_DIM))
+    assert target.readout_trained is False
+    assert target.process_subconscious(x)["emotional_valence"] is None
+
+    target.from_state_dict(source.to_state_dict())
+    assert target.readout_trained is True
+    result = target.process_subconscious(x)
+    assert result["emotional_valence"] == pytest.approx(result["readout_mean"])
+    assert result["emotional_arousal"] == pytest.approx(result["readout_std"])
+
+
+def test_rejected_restore_leaves_the_readout_untrained():
+    state = _trained().to_state_dict()
+    state["scalars"]["seed"] = 999
+
+    target = _lsm()
+    target.from_state_dict(state)
+    assert target.readout_trained is False

@@ -300,6 +300,34 @@ def test_store_memories_upserts_once(clean_env):
         coordinator.store_memories(["a", "b"], importances=[1.0])
 
 
+def test_missing_emotional_weight_is_stored_as_null(clean_env):
+    coordinator, _, _ = _coordinator()
+    single = coordinator.store_memory("river")
+    payload = coordinator.get_memory_by_id(single)
+    assert payload["emotional_weight"] is None
+    assert payload["importance"] == 1.0  # importance keeps its default
+
+    batch = coordinator.store_memories(["stone bridge", "garden path"])
+    assert [coordinator.get_memory_by_id(i)["emotional_weight"] for i in batch] == [
+        None,
+        None,
+    ]
+    mixed = coordinator.store_memories(
+        ["team budget", "lantern"], emotional_weights=[0.3, None]
+    )
+    assert coordinator.get_memory_by_id(mixed[0])["emotional_weight"] == 0.3
+    assert coordinator.get_memory_by_id(mixed[1])["emotional_weight"] is None
+
+
+def test_supplied_values_are_stored_unchanged(clean_env):
+    coordinator, _, _ = _coordinator()
+    given = coordinator.store_memory("river", importance=2.5, emotional_weight=0.4)
+    payload = coordinator.get_memory_by_id(given)
+    assert payload["importance"] == 2.5 and payload["emotional_weight"] == 0.4
+    zero = coordinator.store_memory("stone", emotional_weight=0.0)
+    assert coordinator.get_memory_by_id(zero)["emotional_weight"] == 0.0
+
+
 def test_search_uses_vector_search_limit_default(clean_env, monkeypatch):
     monkeypatch.setenv("MTC_VECTOR_SEARCH_LIMIT", "2")
     limited = Settings()

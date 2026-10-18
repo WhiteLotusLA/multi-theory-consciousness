@@ -288,3 +288,106 @@ class TestNumericalGuards:
         restored = OscillatoryBinding()
         restored.from_state_dict(ob.to_state_dict())
         assert restored._last_cross_coherence == ob._last_cross_coherence
+
+
+class TestZeroStimulusFloor:
+    """Each bind also measures the layer's own zero-stimulus order parameter
+    from a copy of the phases it started from, without touching the live
+    phases, the random generator or the learned coupling."""
+
+    def test_bind_reports_zero_stimulus_floor(self, monkeypatch):
+        metrics = {name: float(i + 1) / 31 for i, name in enumerate(OSCILLATOR_NAMES)}
+        measured = OscillatoryBinding(seed=11)
+        patched = OscillatoryBinding(seed=11)
+        monkeypatch.setattr(
+            patched, "_zero_stimulus_order_parameter", lambda start, coupling: None
+        )
+
+        for _ in range(3):
+            result = measured.bind(metrics)
+            reference = patched.bind(metrics)
+
+            assert isinstance(result.zero_stimulus_order_parameter, float)
+            assert 0.0 <= result.zero_stimulus_order_parameter <= 1.0
+            assert reference.zero_stimulus_order_parameter is None
+            assert measured.phases.tobytes() == patched.phases.tobytes()
+            assert measured.J_learned.tobytes() == patched.J_learned.tobytes()
+            assert result.global_order_parameter == reference.global_order_parameter
+            assert result.salience_modifiers == reference.salience_modifiers
+            assert result.cross_coherence == reference.cross_coherence
+            assert measured._rng.bit_generator.state == patched._rng.bit_generator.state
+
+        assert len(measured._null_order_history) == 3
+        assert list(patched._null_order_history) == []
+        assert measured._null_order_history[-1] == result.zero_stimulus_order_parameter
+        assert measured._null_order_history.maxlen == measured._history_window
+
+    def test_floor_is_the_order_parameter_of_a_zero_stimulus_bind(self):
+        zero = {name: 0.0 for name in OSCILLATOR_NAMES}
+        ob = OscillatoryBinding(seed=5)
+        first = ob.bind(zero)
+        second = ob.bind(zero)
+        # With no input the live bind is itself a zero-stimulus run from the
+        # same start and the same coupling, so the two values agree exactly.
+        assert first.zero_stimulus_order_parameter == first.global_order_parameter
+        assert second.zero_stimulus_order_parameter == second.global_order_parameter
+
+    def test_floor_differs_from_a_driven_order_parameter(self):
+        ob = OscillatoryBinding(seed=5)
+        driven = ob.bind({name: 0.9 for name in OSCILLATOR_NAMES})
+        assert driven.zero_stimulus_order_parameter != driven.global_order_parameter
+
+    def test_floor_history_empty_before_first_bind(self):
+        ob = OscillatoryBinding(history_window=4)
+        assert list(ob._null_order_history) == []
+        assert ob._null_order_history.maxlen == 4
+        for _ in range(6):
+            ob.bind({name: 0.5 for name in OSCILLATOR_NAMES})
+        assert len(ob._null_order_history) == 4
+
+    def test_floor_history_round_trips(self):
+        source = OscillatoryBinding(history_window=5)
+        for _ in range(3):
+            source.bind({name: 0.4 for name in OSCILLATOR_NAMES})
+        state = source.to_state_dict()
+        assert state["histories"]["null_order_history"] == list(
+            source._null_order_history
+        )
+
+        restored = OscillatoryBinding(history_window=5)
+        restored.from_state_dict(state)
+        assert list(restored._null_order_history) == list(source._null_order_history)
+        assert restored._null_order_history.maxlen == 5
+
+    def test_older_state_restores_an_empty_floor_history(self):
+        source = OscillatoryBinding()
+        source.bind({name: 0.4 for name in OSCILLATOR_NAMES})
+        state = source.to_state_dict()
+        del state["histories"]["null_order_history"]
+
+        restored = OscillatoryBinding()
+        restored.bind({name: 0.4 for name in OSCILLATOR_NAMES})
+        restored.from_state_dict(state)
+        assert list(restored._null_order_history) == []
+        assert list(restored._order_history) == list(source._order_history)
+
+    def test_restore_drops_non_finite_floor_values(self):
+        source = OscillatoryBinding()
+        source.bind({name: 0.4 for name in OSCILLATOR_NAMES})
+        state = source.to_state_dict()
+        kept = state["histories"]["null_order_history"][0]
+        state["histories"]["null_order_history"] = [kept, float("nan"), 2.0, "x"]
+
+        restored = OscillatoryBinding()
+        restored.from_state_dict(state)
+        assert list(restored._null_order_history) == [kept]
+
+    def test_non_finite_start_reports_no_floor(self):
+        ob = OscillatoryBinding()
+        ob.phases[3] = np.nan
+
+        result = ob.bind({name: 0.5 for name in OSCILLATOR_NAMES})
+
+        assert result.zero_stimulus_order_parameter is None
+        assert list(ob._null_order_history) == []
+        assert 0.0 <= result.global_order_parameter <= 1.0

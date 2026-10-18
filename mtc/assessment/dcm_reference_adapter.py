@@ -7,7 +7,13 @@ for MTC's own module set. Every value it reports comes from a measurement:
 
 - Module evidence (tier 1) is read from the supplied modules' statistics, the
   same producer keys the 30-indicator assessment reads. An indicator whose
-  inputs are missing is omitted, never filled with a constant.
+  inputs are missing is omitted, never filled with a constant or with
+  configuration (the planning horizon is not reported as evidence).
+- Binding indicators come only from oscillatory binding statistics. They are
+  omitted when the binding layer reports its zero-stimulus order parameter
+  (the floor it reaches with no input) and that floor leaves less than
+  ``BINDING_FLOOR_MIN_HEADROOM`` below 1.0: the layer then synchronizes
+  whatever the substrates produce, so its order parameter is no evidence.
 - Structural indicators (number of layers, nodes, connections) come only from
   counts the caller supplies in ``substrate_sizes`` under the keys
   ``layers``, ``nodes`` and ``connections``, through
@@ -94,6 +100,10 @@ STRUCTURAL_COUNT_KEYS: Dict[str, str] = {
     "Number of Connections": "connections",
 }
 
+# The binding indicators are omitted when the zero-stimulus order parameter
+# of the binding layer leaves less than this headroom below 1.0.
+BINDING_FLOOR_MIN_HEADROOM = 0.1
+
 # Calibration of the structural indicators: a count equal to the reference
 # scores 1.0. These are display scales, not measurements; override them with
 # ``structural_references``.
@@ -127,10 +137,6 @@ _HOT_NAMES = (
     "Undercutting Defeaters",
 )
 _FEP_NAMES = (
-    "Coherent Goal-directed Behavior",
-    "Anticipation Gradient",
-    "Simulations of Future",
-    "Plans for Future Needs",
     "Compressibility",
     "Adaptive Learning",
     "Curiosity",
@@ -359,9 +365,10 @@ class ReferenceDCMAdapter:
         coverage = gwt["coverage"]
         if coverage is not None:
             evidence["Information Transfer"] = coverage
-            # Capacity-limited competition: partial coverage shows it. Full
-            # coverage leaves the question undetermined, so it is omitted.
-            if coverage < 1.0:
+            # Capacity-limited competition: partial coverage of a broadcast
+            # shows it. No broadcast, no coverage or full coverage leaves the
+            # question undetermined, so it is omitted.
+            if gwt["broadcasts"] > 0 and 0.0 < coverage < 1.0:
                 evidence["Informational Bottleneck"] = 1.0
         return evidence
 
@@ -420,12 +427,6 @@ class ReferenceDCMAdapter:
         if _count(stats.get("total_inferences")) == 0:
             return {}
         evidence: Dict[str, float] = {}
-        horizon = _real(getattr(getattr(ai, "config", None), "planning_horizon", None))
-        if horizon is not None:
-            evidence["Coherent Goal-directed Behavior"] = 1.0 if horizon > 0 else 0.0
-            evidence["Anticipation Gradient"] = 1.0 if horizon > 0 else 0.0
-            evidence["Simulations of Future"] = 1.0 if horizon > 1 else 0.0
-            evidence["Plans for Future Needs"] = 1.0 if horizon > 1 else 0.0
         error = _real(stats.get("avg_prediction_error"))
         if error is not None:
             evidence["Compressibility"] = 1.0 - min(1.0, error)
@@ -474,32 +475,42 @@ class ReferenceDCMAdapter:
         return {}
 
     def _binding_evidence(self, gwt: Optional[Dict[str, Any]]) -> Dict[str, float]:
-        coverage = gwt["coverage"] if gwt is not None else None
+        """Binding indicators from the oscillatory binding statistics only.
+
+        Nothing without binding data (no bind or no order parameter); nothing
+        when the zero-stimulus floor is known and leaves less than
+        ``BINDING_FLOOR_MIN_HEADROOM``; Holistic Dependency only with a
+        workspace coverage to combine with.
+        """
         stats = self._binding_stats()
         order = _real(stats.get("global_order_parameter")) if stats else None
-        if stats and _count(stats.get("binding_count")) > 0 and order is not None:
-            evidence = {"Feature Binding": order}
-            evidence["Holistic Dependency"] = (
-                coverage * order if coverage is not None else order
-            )
-            cross = [
-                value
-                for value in (
-                    _real(v) for v in _mapping(stats.get("cross_coherence")).values()
-                )
-                if value is not None
-            ]
-            if cross:
-                evidence["Wiring Convergence"] = max(0.0, sum(cross) / len(cross))
-            return evidence
-        if coverage is None:
+        if not stats or _count(stats.get("binding_count")) == 0 or order is None:
             return {}
-        # No binding data: workspace coverage is the integration evidence
-        return {
-            "Feature Binding": coverage,
-            "Holistic Dependency": coverage,
-            "Wiring Convergence": coverage,
-        }
+        # The floor is optional: a producer without a bind history omits it,
+        # and an absent floor is unknown (the indicators are then emitted).
+        floor = (
+            _real(stats["zero_stimulus_order_parameter"])
+            if "zero_stimulus_order_parameter" in stats
+            else None
+        )
+        # The comparison is on the floor itself: 1.0 - 0.9 is 0.0999... in
+        # floating point, while 1.0 - 0.1 is exactly 0.9.
+        if floor is not None and floor > 1.0 - BINDING_FLOOR_MIN_HEADROOM:
+            return {}
+        evidence = {"Feature Binding": order}
+        coverage = gwt["coverage"] if gwt is not None else None
+        if coverage is not None:
+            evidence["Holistic Dependency"] = coverage * order
+        cross = [
+            value
+            for value in (
+                _real(v) for v in _mapping(stats.get("cross_coherence")).values()
+            )
+            if value is not None
+        ]
+        if cross:
+            evidence["Wiring Convergence"] = max(0.0, sum(cross) / len(cross))
+        return evidence
 
     def _recurrence_evidence(self) -> Dict[str, float]:
         rpt = self.modules.get("rpt_measurement")

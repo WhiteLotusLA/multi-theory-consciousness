@@ -178,21 +178,29 @@ class TestTemporalMemory:
         assert cells[0] == 2 * cfg.cells_per_column
 
     def test_reset_clears_state(self):
-        """After processing, resetting should clear all cell sets."""
+        """ProductionHTM.reset clears the three cell sets and the learned
+        segments after learning steps have filled them."""
+        np.random.seed(3)
         cfg = _small_config()
-        tm = TemporalMemory(cfg)
-        cols = np.zeros(cfg.num_columns, dtype=bool)
-        cols[0] = True
-        tm.compute(cols, learn=True)
+        htm = ProductionHTM(cfg)
+        first = np.zeros(cfg.input_bits)
+        first[:12] = 1
+        second = np.zeros(cfg.input_bits)
+        second[64:76] = 1
+        for pattern in (first, second, first):
+            htm.process(pattern, learn=True)
 
-        # Manually reset
-        tm.active_cells = set()
-        tm.winner_cells = set()
-        tm.predicted_cells = set()
+        tm = htm.temporal_memory
+        assert tm.active_cells and tm.winner_cells and tm.predicted_cells
+        assert any(tm.segments.values()) and tm.segment_counter > 0
 
-        assert len(tm.active_cells) == 0
-        assert len(tm.winner_cells) == 0
-        assert len(tm.predicted_cells) == 0
+        htm.reset()
+
+        assert tm.active_cells == set()
+        assert tm.winner_cells == set()
+        assert tm.predicted_cells == set()
+        assert tm.segments == {}
+        assert tm.segment_counter == 0
 
 
 # ---------------------------------------------------------------------------

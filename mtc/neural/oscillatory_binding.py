@@ -12,10 +12,10 @@ order parameter measures binding quality as a consciousness metric.
 
 Position in pipeline:
   NeuralOrchestrator.process_experience()
-    Phase 1: Parallel neural processing (SNN, LSM, HTM)
-    Phase 2: Recurrent feedback
-    >>> Phase 2.5: Oscillatory binding (THIS MODULE) <<<
-    Phase 3: Create workspace candidates (with salience modifiers)
+    Stage 1: Parallel neural processing (SNN, LSM, HTM)
+    Stage 2: Recurrent feedback
+    >>> Stage 2.5: Oscillatory binding (THIS MODULE) <<<
+    Stage 3: Create workspace candidates (with salience modifiers)
 
 Coupling: Hybrid static (architectural priors) + Hebbian (experience-dependent).
 Computation: pure NumPy on CPU.
@@ -94,6 +94,10 @@ class BindingResult:
     salience_modifiers: Dict[str, float]
     context_string: str
     elapsed_ms: float
+    # Order parameter that the same steps and coupling reach from the same
+    # starting phases with zero stimuli: the layer's own floor. None only when
+    # the starting phases held non-finite rows (nothing to simulate from).
+    zero_stimulus_order_parameter: Optional[float] = None
 
 
 class OscillatoryBinding:
@@ -150,6 +154,8 @@ class OscillatoryBinding:
 
         self._history_window = history_window
         self._order_history: deque = deque(maxlen=history_window)
+        # Zero-stimulus order parameter of each bind (see bind)
+        self._null_order_history: deque = deque(maxlen=history_window)
         self._binding_count = 0
         # Pairwise substrate coherence from the latest bind; RPT reads it
         self._last_cross_coherence: Dict[str, float] = {}
@@ -201,11 +207,22 @@ class OscillatoryBinding:
         return J
 
     def bind(self, metrics: Dict[str, float]) -> BindingResult:
+        """Run the Kuramoto steps on the projected metrics and report binding.
+
+        Besides the live result, each bind measures the layer's own floor: the
+        order parameter that the same number of steps with the same coupling
+        reaches from the same starting phases when every stimulus is zero. That
+        run works on a copy and leaves the live phases, the random generator
+        and the learned coupling untouched; its value is returned as
+        ``zero_stimulus_order_parameter`` and appended to
+        ``_null_order_history``.
+        """
         start = time.perf_counter()
         self._binding_count += 1
 
         stimuli = self._project_metrics(metrics)
         J = self.J_static + self.J_learned
+        start_phases = np.array(self.phases, dtype=float, copy=True)
         for _ in range(self.num_steps):
             self._kuramoto_step(stimuli, J)
 
@@ -217,6 +234,10 @@ class OscillatoryBinding:
         context = self._build_context_string(clusters, global_r, group_r, cross_r)
 
         self._hebbian_update()
+
+        null_r = self._zero_stimulus_order_parameter(start_phases, J)
+        if null_r is not None:
+            self._null_order_history.append(null_r)
 
         elapsed = (time.perf_counter() - start) * 1000
         self._order_history.append(global_r)
@@ -233,7 +254,41 @@ class OscillatoryBinding:
             salience_modifiers=salience,
             context_string=context,
             elapsed_ms=elapsed,
+            zero_stimulus_order_parameter=null_r,
         )
+
+    def _zero_stimulus_order_parameter(
+        self, start: np.ndarray, coupling: np.ndarray
+    ) -> Optional[float]:
+        """Order parameter of ``num_steps`` zero-stimulus steps from ``start``.
+
+        A pure computation: it reads the frequencies, the step size and the
+        given coupling, and changes no attribute of this instance and draws
+        nothing from its generator. The arithmetic of each step is that of
+        ``_kuramoto_step`` with a zero stimulus. Returns None when ``start``
+        holds a non-finite value.
+        """
+        x = np.array(start, dtype=float, copy=True)
+        if x.shape != self.phases.shape or not np.all(np.isfinite(x)):
+            return None
+        stimuli = np.zeros_like(x)
+        for _ in range(self.num_steps):
+            freq_term = np.einsum("ijk,ik->ij", self.omega, x)
+            coupled = np.einsum("ijkl,jl->ik", coupling, x)
+            raw = stimuli + coupled
+            dot = np.sum(raw * x, axis=1, keepdims=True)
+            projected = raw - dot * x
+            delta = freq_term + projected
+            x_new = x + self.step_size * delta
+            norms = np.linalg.norm(x_new, axis=1, keepdims=True)
+            norms = np.maximum(norms, 1e-8)
+            x = x_new / norms
+        if not np.all(np.isfinite(x)):
+            return None
+        norms = np.linalg.norm(x, axis=1, keepdims=True)
+        unit = x / np.maximum(norms, 1e-8)
+        r = float(np.linalg.norm(np.mean(unit, axis=0)))
+        return None if not np.isfinite(r) else min(1.0, r)
 
     def _project_metrics(self, metrics: Dict[str, float]) -> np.ndarray:
         values = np.array([metrics.get(name, 0.0) for name in OSCILLATOR_NAMES])
@@ -464,6 +519,7 @@ class OscillatoryBinding:
             },
             "histories": {
                 "order_history": list(self._order_history),
+                "null_order_history": [float(v) for v in self._null_order_history],
             },
         }
 
@@ -483,7 +539,9 @@ class OscillatoryBinding:
         Non-finite phases are replaced by fresh unit vectors and non-finite
         learned coupling by zeros (Hebbian learning rebuilds it), each with a
         warning; arrays whose shape disagrees with this instance are skipped.
-        The order history keeps this instance's window.
+        The order history and the zero-stimulus history keep this instance's
+        window; a state without the zero-stimulus history (written before it
+        existed) restores it empty, and a value outside [0, 1] is dropped.
         """
         scalars = state.get("scalars", {})
         arrays = state.get("arrays", {})
@@ -548,6 +606,17 @@ class OscillatoryBinding:
             self._order_history = deque(
                 histories["order_history"], maxlen=self._history_window
             )
+        self._null_order_history = deque(
+            (
+                float(v)
+                for v in histories.get("null_order_history") or []
+                if isinstance(v, (int, float))
+                and not isinstance(v, bool)
+                and np.isfinite(v)
+                and 0.0 <= v <= 1.0
+            ),
+            maxlen=self._history_window,
+        )
         logger.info(
             f"OscillatoryBinding restored: {self._binding_count} prior bindings, "
             f"J_learned max={np.max(np.abs(self.J_learned)):.4f}"

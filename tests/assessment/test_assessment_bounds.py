@@ -134,7 +134,8 @@ async def test_studies_pass_full_module_dict(monkeypatch, tmp_path):
     assert _EXPECTED_KEYS <= set(seen[-1])
     for key in _EXPECTED_KEYS:
         assert seen[-1][key] is state[key]
-    assert measurement.consciousness_score == 0.0
+    # The captured call measured nothing, so the study records no score
+    assert measurement.consciousness_score is None
 
     async def get_state():
         return _system_state()
@@ -165,6 +166,56 @@ async def test_studies_record_missing_overall(monkeypatch, tmp_path):
     outcome = await ablation.run_full_ablation(get_state)
     assert all(i["score_drop"] is None for i in outcome["impacts"])
     monkeypatch.setattr(ConsciousnessAssessment, "_overall_score", original)
+
+
+def _project_settings(tmp_path, monkeypatch):
+    from mtc.core.config import Settings
+
+    project = tmp_path / "project"
+    settings = Settings(_env_file=None, PROJECT_ROOT=str(project))
+    monkeypatch.setattr(assessment_module, "get_settings", lambda: settings)
+    working = tmp_path / "cwd"
+    working.mkdir()
+    monkeypatch.chdir(working)
+    return project, working
+
+
+def test_study_construction_creates_no_directory(tmp_path, monkeypatch):
+    project, working = _project_settings(tmp_path, monkeypatch)
+    LongitudinalStudy()
+    AblationStudy()
+    assert not project.exists()
+    assert list(working.iterdir()) == []
+    # An explicit directory is not created at construction either
+    LongitudinalStudy(output_dir=str(tmp_path / "explicit"))
+    assert not (tmp_path / "explicit").exists()
+
+
+@pytest.mark.asyncio
+async def test_study_default_dirs_follow_settings(tmp_path, monkeypatch):
+    project, working = _project_settings(tmp_path, monkeypatch)
+    study = LongitudinalStudy()
+    assert study.output_dir == project / "results" / "longitudinal_studies"
+    study.start_time = assessment_module.datetime.now()
+    await study._save_intermediate_results()
+    written = list((project / "results" / "longitudinal_studies").iterdir())
+    assert [p.name for p in written] == [f"study_{study.study_id}_intermediate.json"]
+    assert list(working.iterdir()) == []
+
+    ablation = AblationStudy()
+    assert ablation.output_dir == project / "results" / "ablation_studies"
+    ablation._save_results({"configurations": [], "impacts": []})
+    files = list((project / "results" / "ablation_studies").iterdir())
+    assert len(files) == 1
+    assert files[0].name.startswith("ablation_")
+    assert "phase" not in files[0].name
+    assert "phase" not in str(ablation.output_dir)
+
+    # An explicit directory is used as given
+    explicit = AblationStudy(output_dir=str(tmp_path / "explicit"))
+    assert explicit.output_dir == tmp_path / "explicit"
+    explicit._save_results({"configurations": [], "impacts": []})
+    assert len(list((tmp_path / "explicit").iterdir())) == 1
 
 
 def test_header_and_counts():

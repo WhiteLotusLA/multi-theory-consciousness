@@ -2,20 +2,45 @@
 Regression tests for assessment recalibration.
 
 Verifies that the noise-normalized assessment produces near-zero scores
-on random synthetic data, preventing score inflation from returning.
+on random synthetic data, preventing score inflation from returning. The
+three noise tests drive the experiment runner's modules and take about a
+minute each.
 """
 
+import importlib.util
 import random
+from pathlib import Path
 
 import numpy as np
 import pytest
 
-from mtc.assessment.assessment import ConsciousnessAssessment
+from mtc.assessment.assessment import ABSENT, ConsciousnessAssessment
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _seed(s=42):
     random.seed(s)
     np.random.seed(s)
+
+
+def _runner():
+    """The experiment runner, loaded by file path (it is a script, not a package)."""
+    spec = importlib.util.spec_from_file_location(
+        "_script_run_experiment", ROOT / "scripts" / "run_experiment.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _overrides():
+    from mtc.core.param_overrides import load_overrides
+
+    return load_overrides(
+        str(ROOT / "experiments" / "params.toml"),
+        str(ROOT / "experiments" / "param_schema.toml"),
+    )
 
 
 @pytest.mark.asyncio
@@ -27,34 +52,22 @@ async def test_noise_normalized_below_thresholds():
     pass due to seed-to-seed variance.
     """
     _seed()
-
-    # Import here to avoid circular issues
-    from scripts.run_experiment import (
-        _compute_noise_baseline,
-        build_modules,
-        warmup,
-        WARMUP_CYCLES,
-        SEED,
-    )
-    from mtc.core.param_overrides import load_overrides
-
-    overrides = load_overrides(
-        "experiments/params.toml", "experiments/param_schema.toml"
-    )
+    runner = _runner()
+    overrides = _overrides()
 
     # Compute noise baseline
-    noise_baselines = await _compute_noise_baseline(overrides, iterations=3)
+    noise_baselines = await runner._compute_noise_baseline(overrides, iterations=3)
 
     # Re-seed and run real assessment
-    random.seed(SEED)
-    np.random.seed(SEED)
-    modules = build_modules(overrides)
-    await warmup(modules, WARMUP_CYCLES)
+    random.seed(runner.SEED)
+    np.random.seed(runner.SEED)
+    modules = runner.build_modules(overrides)
+    await runner.warmup(modules, runner.WARMUP_CYCLES)
 
     assessment = ConsciousnessAssessment()
     report = await assessment.run_full_assessment(
         **modules,
-        warmup_cycles=WARMUP_CYCLES,
+        warmup_cycles=runner.WARMUP_CYCLES,
         normalize=True,
         noise_baselines=noise_baselines,
     )
@@ -77,30 +90,19 @@ async def test_noise_normalized_below_thresholds():
 async def test_no_perfect_scores_after_normalization():
     """No indicator should score 1.0 after noise normalization on random data."""
     _seed()
+    runner = _runner()
+    overrides = _overrides()
+    noise_baselines = await runner._compute_noise_baseline(overrides, iterations=3)
 
-    from scripts.run_experiment import (
-        _compute_noise_baseline,
-        build_modules,
-        warmup,
-        WARMUP_CYCLES,
-        SEED,
-    )
-    from mtc.core.param_overrides import load_overrides
-
-    overrides = load_overrides(
-        "experiments/params.toml", "experiments/param_schema.toml"
-    )
-    noise_baselines = await _compute_noise_baseline(overrides, iterations=3)
-
-    random.seed(SEED)
-    np.random.seed(SEED)
-    modules = build_modules(overrides)
-    await warmup(modules, WARMUP_CYCLES)
+    random.seed(runner.SEED)
+    np.random.seed(runner.SEED)
+    modules = runner.build_modules(overrides)
+    await runner.warmup(modules, runner.WARMUP_CYCLES)
 
     assessment = ConsciousnessAssessment()
     report = await assessment.run_full_assessment(
         **modules,
-        warmup_cycles=WARMUP_CYCLES,
+        warmup_cycles=runner.WARMUP_CYCLES,
         normalize=True,
         noise_baselines=noise_baselines,
     )
@@ -113,30 +115,19 @@ async def test_no_perfect_scores_after_normalization():
 async def test_overall_score_near_zero_on_noise():
     """Overall normalized score should be near zero on random data."""
     _seed()
+    runner = _runner()
+    overrides = _overrides()
+    noise_baselines = await runner._compute_noise_baseline(overrides, iterations=3)
 
-    from scripts.run_experiment import (
-        _compute_noise_baseline,
-        build_modules,
-        warmup,
-        WARMUP_CYCLES,
-        SEED,
-    )
-    from mtc.core.param_overrides import load_overrides
-
-    overrides = load_overrides(
-        "experiments/params.toml", "experiments/param_schema.toml"
-    )
-    noise_baselines = await _compute_noise_baseline(overrides, iterations=3)
-
-    random.seed(SEED)
-    np.random.seed(SEED)
-    modules = build_modules(overrides)
-    await warmup(modules, WARMUP_CYCLES)
+    random.seed(runner.SEED)
+    np.random.seed(runner.SEED)
+    modules = runner.build_modules(overrides)
+    await runner.warmup(modules, runner.WARMUP_CYCLES)
 
     assessment = ConsciousnessAssessment()
     report = await assessment.run_full_assessment(
         **modules,
-        warmup_cycles=WARMUP_CYCLES,
+        warmup_cycles=runner.WARMUP_CYCLES,
         normalize=True,
         noise_baselines=noise_baselines,
     )
@@ -148,18 +139,24 @@ async def test_overall_score_near_zero_on_noise():
 
 @pytest.mark.asyncio
 async def test_ablated_modules_score_zero():
-    """All-ablated assessment should score zero everywhere."""
+    """With every module ablated each indicator is absent, 0.0 and not passing.
+
+    0.0 exactly: the v0.4.0 constants (0.1 for an absent module) are a
+    regression this test must catch.
+    """
     _seed()
     assessment = ConsciousnessAssessment()
     report = await assessment.run_full_assessment(
-        normalize=False,  # No normalization needed - raw scores should be near zero
+        normalize=False,  # No normalization needed - raw scores are zero
         warmup_cycles=25,
     )
 
+    assert len(report.indicator_results) == 30
     for name, result in report.indicator_results.items():
-        assert (
-            result.score <= 0.15
-        ), f"{name} scores {result.score:.3f} with all modules ablated"
+        assert result.status == ABSENT, name
+        assert result.score == 0.0, f"{name} scores {result.score!r} when ablated"
+        assert result.passes_threshold is False, name
+    assert report.passing_count == 0
 
 
 def test_saturated_noise_baseline_scores_zero():

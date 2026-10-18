@@ -84,7 +84,9 @@ def test_anomaly_uses_prior_predictions():
     }
     assert prior_columns, "the learned sequence should leave a prediction behind"
 
-    result = htm.process(sequence[0], learn=False)
+    # A learning pass is scored against the learning context's predictions;
+    # an inference-only pass has its own context (test_htm_bounds_and_state).
+    result = htm.process(sequence[0], learn=True)
     active = {int(c) for c in np.where(result["active_columns"])[0]}
     expected = len(active - prior_columns) / max(1, len(active))
 

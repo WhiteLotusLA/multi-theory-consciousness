@@ -15,6 +15,16 @@ Persistence: the reservoir weights are not saved. They regenerate from
 (output weights, bias, the inverse correlation matrix P and the sample
 count) together with the reservoir size and seed it was trained against.
 P is reservoir_size x reservoir_size, about 200 MB at the default size.
+
+Seeding: importing the module seeds nothing. A construction with a seed
+calls the library's ``set_seed`` with it (which also seeds NumPy's global
+generator).
+
+Honest readings: the dynamics proxies are None when the trajectory is too
+short for them, and ``emotional_valence`` and ``emotional_arousal`` are None
+until the RLS readout was trained on this instance or restored; the raw
+readout statistics are always reported as ``readout_mean`` and
+``readout_std``.
 """
 
 import numpy as np
@@ -26,10 +36,11 @@ from dataclasses import dataclass
 import logging
 import time
 
-# Set ReservoirPy backend for performance
-rpy.set_seed(42)  # For reproducibility
-
 logger = logging.getLogger(__name__)
+
+# Fewest reservoir states for the divergence proxy and the lag-1 correlation
+MIN_STATES_LYAPUNOV = 10
+MIN_STATES_CORRELATION = 3
 
 
 @dataclass
@@ -84,6 +95,12 @@ class ProductionLSM:
         """
         self.config = config or LSMConfig()
         self.fast_mode = fast_mode
+        # True once the RLS readout was trained here or restored; until then
+        # its output is not an affect reading
+        self.readout_trained = False
+
+        if self.config.seed is not None:
+            rpy.set_seed(self.config.seed)
 
         # Build reservoir
         self._build_reservoir()
@@ -228,23 +245,33 @@ class ProductionLSM:
             # Information metrics (EXPENSIVE)
             metrics["entropy"] = self._calculate_entropy(states)
             metrics["correlation_time"] = self._correlation_time(states)
+            # Why a dynamics proxy is None: too few states for it
+            metrics["dynamics_reason"] = (
+                "too_few_states"
+                if metrics["lyapunov_estimate"] is None
+                or metrics["correlation_time"] is None
+                else None
+            )
         else:
-            # Provide placeholder values for compatibility
+            # Fast mode measures none of them
             metrics["lyapunov_estimate"] = None
             metrics["edge_of_chaos_score"] = None
             metrics["entropy"] = None
             metrics["correlation_time"] = None
+            metrics["dynamics_reason"] = "fast_mode"
 
         return metrics
 
-    def _estimate_lyapunov(self, states: np.ndarray) -> float:
+    def _estimate_lyapunov(self, states: np.ndarray) -> Optional[float]:
         """
-        Estimate largest Lyapunov exponent (simplified).
+        A divergence proxy: the mean log absolute one-step state difference.
 
-        Positive = chaotic, Near-zero = edge-of-chaos, Negative = stable
+        It is not a Lyapunov exponent (no perturbation is followed); larger
+        values mean larger step-to-step changes. None with fewer than
+        MIN_STATES_LYAPUNOV states.
         """
-        if len(states) < 10:
-            return 0.0
+        if len(states) < MIN_STATES_LYAPUNOV:
+            return None
 
         # Simple estimation using state divergence
         diffs = np.diff(states, axis=0)
@@ -252,13 +279,15 @@ class ProductionLSM:
 
         return float(divergence)
 
-    def _edge_of_chaos_score(self, states: np.ndarray) -> float:
+    def _edge_of_chaos_score(self, states: np.ndarray) -> Optional[float]:
         """
-        Calculate how close the system is to edge-of-chaos.
+        ``exp(-10 |d|)`` of the divergence proxy ``d``, in (0, 1].
 
-        1.0 = perfect edge-of-chaos, 0.0 = far from edge
+        None when the proxy is None (too few states).
         """
         lyapunov = self._estimate_lyapunov(states)
+        if lyapunov is None:
+            return None
 
         # Edge of chaos is near zero Lyapunov
         score = np.exp(-np.abs(lyapunov) * 10)
@@ -277,20 +306,25 @@ class ProductionLSM:
 
         return float(entropy)
 
-    def _correlation_time(self, states: np.ndarray) -> float:
-        """Estimate correlation time of reservoir dynamics."""
-        if len(states) < 2:
-            return 0.0
+    def _correlation_time(self, states: np.ndarray) -> Optional[float]:
+        """The absolute lag-1 autocorrelation of the mean activity.
+
+        None with fewer than MIN_STATES_CORRELATION states (a lag-1
+        correlation of fewer than two pairs is undefined) and when the mean
+        activity is constant.
+        """
+        if len(states) < MIN_STATES_CORRELATION:
+            return None
 
         # Autocorrelation of mean activity
         mean_activity = np.mean(states, axis=1)
+        head, tail = mean_activity[:-1], mean_activity[1:]
+        if np.std(head) == 0.0 or np.std(tail) == 0.0:
+            return None
 
         # Simple autocorrelation at lag 1
-        if len(mean_activity) > 1:
-            corr = np.corrcoef(mean_activity[:-1], mean_activity[1:])[0, 1]
-            return float(np.abs(corr))
-
-        return 0.0
+        corr = np.corrcoef(head, tail)[0, 1]
+        return float(np.abs(corr)) if np.isfinite(corr) else None
 
     def process_subconscious(self, sensory_input: np.ndarray) -> Dict[str, Any]:
         """
@@ -315,10 +349,18 @@ class ProductionLSM:
         entropy = state.get("entropy")
         correlation = state.get("correlation_time")
 
+        # The readout's raw statistics; they read as affect only once the
+        # readout was trained on this instance or restored
+        readout_mean = float(np.mean(output))
+        readout_std = float(np.std(output))
+        trained = bool(self.readout_trained)
+
         subconscious_state = {
             "raw_output": output,
-            "emotional_valence": float(np.mean(output)),
-            "emotional_arousal": float(np.std(output)),
+            "readout_mean": readout_mean,
+            "readout_std": readout_std,
+            "emotional_valence": readout_mean if trained else None,
+            "emotional_arousal": readout_std if trained else None,
             "creative_emergence": entropy,
             "stability": (1.0 - edge_of_chaos if edge_of_chaos is not None else None),
             "processing_depth": correlation,
@@ -326,10 +368,8 @@ class ProductionLSM:
         }
 
         chaos = f"{edge_of_chaos:.3f}" if edge_of_chaos is not None else "n/a"
-        logger.debug(
-            "Processed subconscious state: "
-            f"valence={subconscious_state['emotional_valence']:.3f}, chaos={chaos}"
-        )
+        valence = f"{readout_mean:.3f}" if trained else "n/a"
+        logger.debug(f"Processed subconscious state: valence={valence}, chaos={chaos}")
 
         return subconscious_state
 
@@ -362,6 +402,8 @@ class ProductionLSM:
             total_loss += loss
 
         avg_loss = total_loss / num_sequences
+        if num_sequences > 0:
+            self.readout_trained = True
         logger.info(f"RLS training complete: avg_loss={avg_loss:.4f}")
 
         return avg_loss
@@ -518,6 +560,7 @@ class ProductionLSM:
         readout.S = samples
         readout.state = {"out": np.zeros((out_dim,))}
         readout.initialized = True
+        self.readout_trained = True
         logger.info(f"LSM readout restored for a {size}-unit reservoir")
 
     def benchmark_performance(self) -> Dict[str, Any]:
@@ -597,7 +640,7 @@ def test_production_lsm():
     state = lsm.process_subconscious(sensory_input)
 
     print(f"  Processed in {state.get('processing_time_ms', 0):.2f}ms")
-    print(f"  Emotional valence: {state['emotional_valence']:.3f}")
+    print(f"  Readout mean: {state['readout_mean']:.3f}")
     creative = state.get("creative_emergence")
     print(
         f"  Creative emergence (entropy): {creative:.3f}"

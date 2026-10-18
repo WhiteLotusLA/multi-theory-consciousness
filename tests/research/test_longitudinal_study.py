@@ -89,6 +89,28 @@ def test_output_dir_defaults_to_settings(tmp_path, monkeypatch):
     assert (tmp_path / "cfg" / "s" / "sessions.jsonl").exists()
 
 
+def test_default_directory_resolves_under_project_root(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setattr(
+        ls,
+        "get_settings",
+        lambda: SimpleNamespace(
+            LONGITUDINAL_OUTPUT_DIR="results/longitudinal_studies",
+            PROJECT_ROOT=str(project),
+        ),
+    )
+    mgr = LongitudinalStudyManager("s", Sequence(fake_report(0.5)), clock=Ticker())
+    assert mgr.study_dir == project / "results" / "longitudinal_studies" / "s"
+    run(mgr.run_session())
+    assert (
+        project / "results" / "longitudinal_studies" / "s" / "sessions.jsonl"
+    ).exists()
+    assert not (elsewhere / "results").exists()
+
+
 def test_failed_assessment_records_error_not_scores(tmp_path):
     mgr = manager(Sequence(RuntimeError("module offline")), tmp_path)
     record = run(mgr.run_session())
@@ -289,6 +311,27 @@ def test_numbering_continues_across_managers_and_malformed_lines_are_skipped(tmp
     record = run(second.run_session())
     assert record.session_number == 2
     assert len(second.sessions()) == 2
+
+
+def test_unmeasured_assessment_report_records_no_overall(tmp_path):
+    from mtc.assessment.assessment import ConsciousnessAssessment
+
+    async def assess():
+        # No module supplied: every indicator is absent, nothing is measured
+        return await ConsciousnessAssessment().run_full_assessment(normalize=False)
+
+    mgr = manager(assess, tmp_path)
+    record = run(mgr.run_session())
+    assert record.status == "insufficient_data"
+    assert record.overall_score is None
+    assert record.theory_scores == {}
+    assert record.is_measured is False
+    assert all(info["score"] is None for info in record.indicators.values())
+    row = json.loads(mgr.sessions_path.read_text())
+    assert row["overall_score"] is None
+    final = mgr.final_report()
+    assert final["n_measured"] == 0 and final["n_insufficient"] == 1
+    assert final["status"] == "insufficient_data"
 
 
 def test_study_id_must_be_plain(tmp_path):

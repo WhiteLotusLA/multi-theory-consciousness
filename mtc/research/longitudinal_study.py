@@ -7,8 +7,10 @@ Records repeated assessments of one system over time and reports on them.
 returning a ``ConsciousnessReport``), optionally runs the behavioral battery
 (``ExperimentSuite``) and an optional snapshot hook, and appends one
 ``SessionRecord`` line to ``<LONGITUDINAL_OUTPUT_DIR>/<study_id>/sessions.jsonl``
-(created on the first write). There is no scheduler: the caller decides when to
-run a session.
+(created on the first write; a relative ``LONGITUDINAL_OUTPUT_DIR`` is resolved
+under ``PROJECT_ROOT`` through ``mtc.core.paths.resolve_path``, an explicit
+``output_dir`` is used as given). There is no scheduler: the caller decides when
+to run a session.
 
 What a record holds: the report status (``measured``, ``partial``,
 ``insufficient_data``, or ``error`` when the assessment raised), coverage,
@@ -44,6 +46,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from mtc.core.config import get_settings
+from mtc.core.paths import resolve_path
 from mtc.research import statistics as stats
 
 logger = logging.getLogger(__name__)
@@ -152,7 +155,8 @@ class LongitudinalStudyManager:
     def study_dir(self) -> Path:
         base = self._output_dir
         if base is None:
-            base = Path(get_settings().LONGITUDINAL_OUTPUT_DIR)
+            settings = get_settings()
+            base = resolve_path(settings.LONGITUDINAL_OUTPUT_DIR, settings=settings)
         return base / self.study_id
 
     @property

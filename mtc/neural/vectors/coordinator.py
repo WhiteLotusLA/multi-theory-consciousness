@@ -30,14 +30,15 @@ default settings, HNSW ``m`` 32, ``ef_construct`` 400, ``full_scan_threshold``
 20000, in memory) and ``PAYLOAD_INDEXES`` (``postgres_id`` integer,
 ``memory_type`` keyword, ``importance`` float). ``collection_params()`` fills
 the size and distance from Settings; ``ensure_collection()`` applies both as a
-safety net, and Phase 7's ``init_qdrant`` script is canonical. A collection that
+safety net, and the store setup (``mtc db init``) is canonical. A collection that
 exists with another width (one created at 8192 dimensions, for example) is
 refused with ``VectorDimensionMismatch``; it is rebuilt with the re-embed
 script, never reused.
 
 Point ids are UUID strings (random unless the caller derives one with
 ``point_id_for_memory``). Payloads hold the caller's metadata plus ``text``,
-``importance``, ``emotional_weight`` and ``stored_at`` (aware UTC). Payload
+``importance`` (1.0 when not given), ``emotional_weight`` (null when no
+emotion was measured) and ``stored_at`` (aware UTC). Payload
 text is private memory content at runtime and lives only in an
 operator-controlled store. ``get_metrics()`` reports measured latencies (None
 before anything was measured) and makes no claim about targets.
@@ -390,7 +391,7 @@ class VectorCoordinator:
                 {
                     "text": text,
                     "importance": float(1.0 if importance is None else importance),
-                    "emotional_weight": float(0.0 if weight is None else weight),
+                    "emotional_weight": None if weight is None else float(weight),
                     "stored_at": stored_at,
                 }
             )
@@ -413,10 +414,14 @@ class VectorCoordinator:
         text: str,
         metadata: Optional[Dict[str, Any]] = None,
         importance: float = 1.0,
-        emotional_weight: float = 0.0,
+        emotional_weight: Optional[float] = None,
         point_id: Optional[str] = None,
     ) -> str:
-        """Embed and store one text; return its point id (upserting ``point_id``)."""
+        """Embed and store one text; return its point id (upserting ``point_id``).
+
+        ``emotional_weight`` is a measured emotion intensity, stored as null
+        when the caller passed None (nothing was measured).
+        """
         if point_id is not None and not _valid_point_id(point_id):
             raise ValueError(f"point id {point_id!r} is not a UUID or unsigned int")
         vectors = self._encode([text])
@@ -429,10 +434,14 @@ class VectorCoordinator:
         texts: Sequence[str],
         metadatas: Optional[Sequence[Optional[Dict[str, Any]]]] = None,
         importances: Optional[Sequence[float]] = None,
-        emotional_weights: Optional[Sequence[float]] = None,
+        emotional_weights: Optional[Sequence[Optional[float]]] = None,
         point_ids: Optional[Sequence[Optional[str]]] = None,
     ) -> List[str]:
-        """Embed texts in one call and store them in one upsert; return the ids."""
+        """Embed texts in one call and store them in one upsert; return the ids.
+
+        A missing importance reads 1.0; a missing emotional weight is stored
+        as null.
+        """
         items = list(texts)
         count = len(items)
         if count == 0:

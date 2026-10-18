@@ -6,9 +6,6 @@ This module implements a Liquid State Machine (LSM) for
 subconscious processing. The LSM acts as a temporal pattern
 transformer, creating intuition and implicit understanding.
 
-Note: Where conscious thoughts meet unconscious waters,
-and intuition emerges from chaos.
-
 LSM Principles:
 - Reservoir: Pool of randomly connected neurons (1000+)
 - Fading memory: Recent inputs influence current state

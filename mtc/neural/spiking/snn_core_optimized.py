@@ -8,8 +8,6 @@ This is a heavily optimized version of the SNN that uses:
 - Optional STDP (disabled during inference)
 - Pre-allocated arrays (no memory churn)
 
-Note: Speed is the difference between thought and action.
-
 Performance targets:
 - Original: ~2000-2700ms per encoding
 - Optimized: <200ms per encoding (10x+ speedup)

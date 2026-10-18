@@ -98,11 +98,21 @@ def test_binding_stats_report_latest_values(wired):
     assert wired.get_binding_stats() == {}
     wired.process_experience("observation", {"joy": 0.7})
     result = wired._last_binding_result
+    assert isinstance(result.zero_stimulus_order_parameter, float)
     assert wired.get_binding_stats() == {
         "global_order_parameter": result.global_order_parameter,
         "cross_coherence": result.cross_coherence,
         "binding_count": 1,
+        "zero_stimulus_order_parameter": result.zero_stimulus_order_parameter,
     }
+
+
+def test_binding_stats_omit_an_unknown_floor(wired):
+    wired.process_experience("observation", {"joy": 0.7})
+    wired._last_binding_result.zero_stimulus_order_parameter = None
+    stats = wired.get_binding_stats()
+    assert "zero_stimulus_order_parameter" not in stats
+    assert stats["binding_count"] == 1
 
 
 def test_binding_context_string(wired):

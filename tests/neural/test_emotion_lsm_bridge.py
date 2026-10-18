@@ -142,30 +142,47 @@ def test_snn_device_from_setting(production_libraries, monkeypatch):
     assert str(bridge.snn.device) == "cpu"
 
 
-def test_untrained_readout_reports_none_not_values(numpy_bridge, production_bridge):
-    for bridge in (numpy_bridge, production_bridge):
-        _, state = bridge.process_emotion(_state())
-        assert state.readout_trained is False
-        assert state.intuitive_valence is None
-        assert state.intuitive_arousal is None
-        assert state.emotional_coherence is None
-        # measured from the reservoir, so still reported
-        assert isinstance(state.reservoir_energy, float)
-        assert state.reservoir_entropy is not None
-        assert isinstance(state.reservoir_sparsity, float)
-        assert isinstance(state.dominant_pattern, str)
-        assert state.state_trajectory and all(
-            isinstance(v, float) for v in state.state_trajectory
-        )
-        summary = bridge.get_intuitive_summary()
-        assert summary["readout_trained"] is False
-        assert summary["intuitive_feelings"] == {
-            "valence": None,
-            "arousal": None,
-            "coherence": None,
-            "valence_trend": None,
-        }
-        assert bridge.status()["readout_trained"] is False
+def _numpy_bridge_without_extra(monkeypatch) -> EmotionLSMBridge:
+    """A NumPy-path bridge built while the neural extra is hidden, as on an
+    install without it."""
+    monkeypatch.setitem(sys.modules, "reservoirpy", None)
+    return EmotionLSMBridge(config=_config(production=False))
+
+
+def _assert_untrained_readout_reports_none(bridge: EmotionLSMBridge) -> None:
+    _, state = bridge.process_emotion(_state())
+    assert state.readout_trained is False
+    assert state.intuitive_valence is None
+    assert state.intuitive_arousal is None
+    assert state.emotional_coherence is None
+    # measured from the reservoir, so still reported
+    assert isinstance(state.reservoir_energy, float)
+    assert state.reservoir_entropy is not None
+    assert isinstance(state.reservoir_sparsity, float)
+    assert isinstance(state.dominant_pattern, str)
+    assert state.state_trajectory and all(
+        isinstance(v, float) for v in state.state_trajectory
+    )
+    summary = bridge.get_intuitive_summary()
+    assert summary["readout_trained"] is False
+    assert summary["intuitive_feelings"] == {
+        "valence": None,
+        "arousal": None,
+        "coherence": None,
+        "valence_trend": None,
+    }
+    assert bridge.status()["readout_trained"] is False
+
+
+def test_untrained_readout_reports_none_not_values_numpy(monkeypatch):
+    bridge = _numpy_bridge_without_extra(monkeypatch)
+    assert bridge.path == "numpy"
+    _assert_untrained_readout_reports_none(bridge)
+
+
+def test_untrained_readout_reports_none_not_values_production(production_bridge):
+    assert production_bridge.path == "production"
+    _assert_untrained_readout_reports_none(production_bridge)
 
 
 def test_trained_readout_reports_values_numpy(numpy_bridge):
@@ -359,11 +376,15 @@ def test_orchestrator_call_signature(numpy_bridge):
     assert isinstance(snn_result["firing_rates"]["output"], list)
 
 
-def test_sizes_for_the_orchestrator_on_both_paths(numpy_bridge, production_bridge):
+def test_sizes_for_the_orchestrator_numpy(monkeypatch):
+    bridge = _numpy_bridge_without_extra(monkeypatch)
+    assert bridge.lsm.n_reservoir == 40
+    assert bridge.snn.get_metrics()["total_neurons"] == 40
+
+
+def test_sizes_for_the_orchestrator_production(production_bridge):
     assert production_bridge.lsm.config.reservoir_size == 50
     assert production_bridge.snn._count_neurons() == 84
-    assert numpy_bridge.lsm.n_reservoir == 40
-    assert numpy_bridge.snn.get_metrics()["total_neurons"] == 40
 
 
 def test_pattern_class_needs_enough_states_on_the_production_path(production_bridge):

@@ -5,18 +5,22 @@ Recurrent Processing Theory (RPT) Measurement
 Based on Victor Lamme (2006, 2010): "Towards a True Neural Stance on
 Consciousness" -- Trends in Cognitive Sciences.
 
-RPT proposes two types of recurrence that map to different aspects
-of consciousness:
+RPT distinguishes two kinds of recurrence, and the theory associates each
+with a notion of consciousness. This module measures recurrence statistics only;
+it does not measure, estimate or claim either kind of consciousness.
 
 1. **Superficial recurrence** (local feedback within a module):
    - Feedforward sweep + local recurrent connections
-   - Maps to phenomenal consciousness ("what it's like")
+   - The theory associates it with phenomenal consciousness
    - Measured via: SNN spike feedback patterns, LSM reservoir dynamics
+   - Reported as ``local_recurrence_index`` (the local recurrence score)
 
 2. **Deep recurrence** (feedback between distant modules via workspace):
    - Cross-module feedback loops through GWT broadcast
-   - Maps to access consciousness (reportable, actionable)
+   - The theory associates it with access consciousness
    - Measured via: GWT broadcast -> module -> workspace cycles
+   - Reported with the local side as ``combined_recurrence_index``
+     (0.5 x min(local, global) + 0.5 x global)
 
 Data sources:
    - SNN: Spike patterns, STDP statistics (``stdp_statistics`` in the SNN
@@ -24,8 +28,6 @@ Data sources:
    - LSM: Reservoir state dynamics, spectral radius
    - GWT: Broadcast coverage, re-entry patterns
    - Oscillatory binding: pushed snapshots or an attached binding module
-
-Author: Multi-Theory Consciousness Contributors
 """
 
 import logging
@@ -42,22 +44,28 @@ logger = logging.getLogger(__name__)
 
 
 class RecurrenceType(Enum):
-    """Classification of recurrence depth."""
+    """Classification of recurrence depth (a recurrence statistic, not a
+    statement about consciousness)."""
 
     NONE = "none"
-    SUPERFICIAL = "superficial"  # Local feedback -> phenomenal consciousness
-    DEEP = "deep"  # Cross-module feedback -> access consciousness
+    SUPERFICIAL = "superficial"  # Local feedback within a module
+    DEEP = "deep"  # Cross-module feedback through the workspace
 
 
 @dataclass
 class RecurrenceMetrics:
-    """Metrics from a single RPT measurement."""
+    """Metrics from a single RPT measurement.
+
+    A local (superficial) field is None when the substrate state it is
+    measured from was not supplied: nothing stands in for an unmeasured
+    recurrence.
+    """
 
     # Superficial recurrence (within-module)
-    local_recurrence_score: float  # 0-1: strength of local feedback
-    snn_feedback_strength: float  # SNN recurrent connection strength
-    lsm_reservoir_recurrence: float  # LSM reservoir dynamics score
-    local_spike_reentry: float  # Proportion of spikes feeding back
+    local_recurrence_score: Optional[float]  # 0-1: strength of local feedback
+    snn_feedback_strength: Optional[float]  # SNN recurrent connection strength
+    lsm_reservoir_recurrence: Optional[float]  # LSM reservoir dynamics score
+    local_spike_reentry: Optional[float]  # Proportion of spikes feeding back
 
     # Deep recurrence (cross-module)
     global_recurrence_score: float  # 0-1: strength of cross-module feedback
@@ -65,10 +73,12 @@ class RecurrenceMetrics:
     cross_module_feedback: float  # Strength of inter-module connections
     workspace_cycle_depth: int  # How many broadcast->process->reentry cycles
 
-    # Classification
+    # Classification and the two recurrence indices (statistics of the
+    # scores above; the theory associates them with notions of
+    # consciousness, this module does not)
     recurrence_type: RecurrenceType  # Overall classification
-    phenomenal_consciousness: float  # Estimated phenomenal consciousness (0-1)
-    access_consciousness: float  # Estimated access consciousness (0-1)
+    local_recurrence_index: Optional[float]  # = local_recurrence_score
+    combined_recurrence_index: Optional[float]  # 0.5 min(local, global) + 0.5 global
 
     # Plasticity: min(1, 2 * mean STDP weight std) while STDP is active
     stdp_plasticity_score: float = 0.0
@@ -89,6 +99,8 @@ class RPTMeasurement:
     - The consciousness cycle itself is a recurrent loop
 
     The recurrent connections already exist -- we just need to measure them.
+    The outputs are recurrence statistics (scores, indices, a depth class);
+    none of them is a measurement of consciousness.
     """
 
     def __init__(
@@ -125,6 +137,9 @@ class RPTMeasurement:
         self._global_scores: deque = deque(maxlen=history_window)
 
         self.measurement_count = 0
+        # Measurements that had an SNN or LSM state to measure local
+        # recurrence from; the others leave the local side unmeasured.
+        self.local_measurement_count = 0
 
         logger.info(
             "RPTMeasurement initialized: "
@@ -136,19 +151,20 @@ class RPTMeasurement:
         self,
         snn_state: Optional[Dict[str, Any]] = None,
         lsm_state: Optional[Dict[str, Any]] = None,
-    ) -> float:
+    ) -> Optional[float]:
         """
         Measure superficial (local) recurrence from neural substrates.
 
-        Superficial recurrence = feedback within individual processing modules.
-        This corresponds to phenomenal consciousness in RPT.
+        Superficial recurrence = feedback within individual processing modules
+        (the kind RPT associates with phenomenal consciousness).
 
         Args:
             snn_state: SNN processing result with spike patterns
             lsm_state: LSM reservoir state with dynamics
 
         Returns:
-            Local recurrence score (0-1)
+            Local recurrence score (0-1), or None when neither state was
+            supplied (there is nothing to measure local recurrence from).
         """
         components = []
 
@@ -163,7 +179,7 @@ class RPTMeasurement:
             components.append(lsm_score)
 
         if not components:
-            return 0.0
+            return None
 
         return float(np.mean(components))
 
@@ -175,8 +191,8 @@ class RPTMeasurement:
         Measure deep (global) recurrence from workspace dynamics.
 
         Deep recurrence = feedback loops between distant modules via
-        the global workspace broadcast. This corresponds to access
-        consciousness in RPT.
+        the global workspace broadcast (the kind RPT associates with access
+        consciousness).
 
         Args:
             workspace_state: GWT workspace statistics
@@ -191,20 +207,23 @@ class RPTMeasurement:
 
     def classify_recurrence_depth(
         self,
-        local_score: float,
+        local_score: Optional[float],
         global_score: float,
     ) -> RecurrenceType:
         """
         Classify the type of recurrence based on measured scores.
 
         Args:
-            local_score: Superficial recurrence score
+            local_score: Superficial recurrence score; None (unmeasured)
+                counts as below the local threshold
             global_score: Deep recurrence score
 
         Returns:
             RecurrenceType classification
         """
-        has_local = local_score >= self.local_recurrence_threshold
+        has_local = (
+            local_score is not None and local_score >= self.local_recurrence_threshold
+        )
         has_global = global_score >= self.global_recurrence_threshold
 
         if has_global:
@@ -234,10 +253,10 @@ class RPTMeasurement:
         start = time.time()
         self.measurement_count += 1
 
-        # --- Superficial recurrence components ---
-        snn_feedback = self._measure_snn_recurrence(snn_state) if snn_state else 0.0
-        lsm_recurrence = self._measure_lsm_recurrence(lsm_state) if lsm_state else 0.0
-        spike_reentry = self._measure_spike_reentry(snn_state) if snn_state else 0.0
+        # --- Superficial recurrence components (None without the state) ---
+        snn_feedback = self._measure_snn_recurrence(snn_state) if snn_state else None
+        lsm_recurrence = self._measure_lsm_recurrence(lsm_state) if lsm_state else None
+        spike_reentry = self._measure_spike_reentry(snn_state) if snn_state else None
 
         local_score = self.measure_local_recurrence(snn_state, lsm_state)
 
@@ -262,40 +281,45 @@ class RPTMeasurement:
         # --- Classification ---
         recurrence_type = self.classify_recurrence_depth(local_score, global_score)
 
-        # Phenomenal consciousness = local recurrence strength. Plasticity is
+        # The local index is the local recurrence strength. Plasticity is
         # already a component of the local score (through the SNN term), so
         # it is not added here a second time.
-        phenomenal = local_score
+        local_index = local_score
 
-        # Access consciousness requires BOTH local AND global recurrence
-        # (you need phenomenal experience to have access to it)
-        access = min(local_score, global_score) * 0.5 + global_score * 0.5
+        # The combined index needs BOTH local AND global recurrence (deep
+        # recurrence builds on local recurrence in RPT); without a measured
+        # local score it is unmeasured too.
+        combined_index = None
+        if local_score is not None:
+            combined_index = min(local_score, global_score) * 0.5 + global_score * 0.5
 
         elapsed_ms = (time.time() - start) * 1000
 
         metrics = RecurrenceMetrics(
-            local_recurrence_score=float(local_score),
-            snn_feedback_strength=float(snn_feedback),
-            lsm_reservoir_recurrence=float(lsm_recurrence),
-            local_spike_reentry=float(spike_reentry),
+            local_recurrence_score=_optional_float(local_score),
+            snn_feedback_strength=_optional_float(snn_feedback),
+            lsm_reservoir_recurrence=_optional_float(lsm_recurrence),
+            local_spike_reentry=_optional_float(spike_reentry),
             global_recurrence_score=float(global_score),
             broadcast_reentry_rate=float(broadcast_reentry),
             cross_module_feedback=float(cross_module),
             workspace_cycle_depth=cycle_depth,
             recurrence_type=recurrence_type,
-            phenomenal_consciousness=float(phenomenal),
-            access_consciousness=float(access),
+            local_recurrence_index=_optional_float(local_index),
+            combined_recurrence_index=_optional_float(combined_index),
             stdp_plasticity_score=float(stdp_plasticity),
             measurement_time_ms=elapsed_ms,
         )
 
         self._metrics_history.append(metrics)
-        self._local_scores.append(local_score)
+        if local_score is not None:
+            self.local_measurement_count += 1
+            self._local_scores.append(local_score)
         self._global_scores.append(global_score)
 
         logger.debug(
             f"RPT measurement #{self.measurement_count}: "
-            f"local={local_score:.3f}, global={global_score:.3f}, "
+            f"local={_fmt(local_score)}, global={global_score:.3f}, "
             f"type={recurrence_type.value}"
         )
 
@@ -317,15 +341,19 @@ class RPTMeasurement:
         score = 0.0
         components = 0
 
-        # Spike rate indicates active recurrent processing
+        # Spike rate indicates active recurrent processing. The neuron count
+        # comes from the state (``num_neurons``, else the summed per-layer
+        # lengths of ``firing_rates``); without a count the density is not
+        # measured and the component is left out.
         total_spikes = snn_state.get("total_spikes", 0)
         if total_spikes > 0:
-            # More spikes relative to neurons = more recurrent activity
-            # (feedback amplifies spike propagation)
-            num_neurons = snn_state.get("num_neurons", 100)
-            spike_density = min(1.0, total_spikes / max(1, num_neurons * 2))
-            score += spike_density
-            components += 1
+            num_neurons = _neuron_count(snn_state)
+            if num_neurons is not None:
+                # More spikes relative to neurons = more recurrent activity
+                # (feedback amplifies spike propagation)
+                spike_density = min(1.0, total_spikes / max(1, num_neurons * 2))
+                score += spike_density
+                components += 1
 
         # Spike counts per layer -- recurrence shows as sustained
         # activity in hidden layers (not just feedforward pass)
@@ -476,10 +504,12 @@ class RPTMeasurement:
         score = 0.0
         components = 0
 
-        # Broadcast coverage -- how widely information is shared
+        # Broadcast coverage -- how widely information is shared. The
+        # workspace reports None while no receiver could have measured it;
+        # the component is then skipped.
         broadcast = workspace_state.get("broadcast", {})
         coverage = broadcast.get("coverage_ratio", 0.0)
-        if coverage > 0:
+        if coverage is not None and coverage > 0:
             score += min(1.0, coverage)
             components += 1
 
@@ -558,11 +588,16 @@ class RPTMeasurement:
     # Statistics and reporting
     # ------------------------------------------------------------------
 
-    def get_average_scores(self) -> Dict[str, float]:
-        """Get average local and global recurrence scores."""
+    def get_average_scores(self) -> Dict[str, Any]:
+        """Average local and global recurrence scores.
+
+        ``average_local`` is None until a measurement had an SNN or LSM state;
+        ``local_measurement_count`` says how many did. The global side keeps
+        0.0 before the first measurement.
+        """
         return {
             "average_local": (
-                float(np.mean(list(self._local_scores))) if self._local_scores else 0.0
+                float(np.mean(list(self._local_scores))) if self._local_scores else None
             ),
             "average_global": (
                 float(np.mean(list(self._global_scores)))
@@ -570,6 +605,7 @@ class RPTMeasurement:
                 else 0.0
             ),
             "measurement_count": self.measurement_count,
+            "local_measurement_count": self.local_measurement_count,
         }
 
     def get_statistics(self) -> Dict[str, Any]:
@@ -589,8 +625,10 @@ class RPTMeasurement:
                     "local": self._metrics_history[-1].local_recurrence_score,
                     "global": self._metrics_history[-1].global_recurrence_score,
                     "type": self._metrics_history[-1].recurrence_type.value,
-                    "phenomenal": self._metrics_history[-1].phenomenal_consciousness,
-                    "access": self._metrics_history[-1].access_consciousness,
+                    "local_index": self._metrics_history[-1].local_recurrence_index,
+                    "combined_index": (
+                        self._metrics_history[-1].combined_recurrence_index
+                    ),
                 }
                 if self._metrics_history
                 else None
@@ -618,13 +656,17 @@ class RPTMeasurement:
     def get_oscillatory_binding_stats(self) -> Dict[str, Any]:
         """Oscillatory binding statistics for the binding-coherence indicator.
 
-        A pushed snapshot wins and reports the latest values as pushed. Without
+        A pushed snapshot wins and reports the latest values as pushed (a
+        ``zero_stimulus_order_parameter`` it carries passes through). Without
         one, the attached binding is read: ``global_order_parameter`` is then
         the mean Kuramoto order parameter over its history, not the latest
-        value. Returns {} when neither source has data.
+        value, and ``zero_stimulus_order_parameter`` the mean of the binding's
+        zero-stimulus floor history (the order parameter the same dynamics
+        reach with no input); that key is absent while the floor history is
+        empty. Returns {} when neither source has data.
 
         Keys: global_order_parameter (0 to 1), cross_coherence (dict),
-        binding_count (int).
+        binding_count (int), zero_stimulus_order_parameter (0 to 1, when known).
         """
         if self._oscillatory_binding_stats:
             return dict(self._oscillatory_binding_stats)
@@ -634,11 +676,15 @@ class RPTMeasurement:
         history = getattr(osc, "_order_history", None)
         if not history:
             return {}
-        return {
+        stats = {
             "global_order_parameter": float(np.mean(list(history))),
             "cross_coherence": dict(getattr(osc, "_last_cross_coherence", {}) or {}),
             "binding_count": int(getattr(osc, "_binding_count", 0) or 0),
         }
+        null_history = getattr(osc, "_null_order_history", None)
+        if null_history:
+            stats["zero_stimulus_order_parameter"] = float(np.mean(list(null_history)))
+        return stats
 
     # ------------------------------------------------------------------
     # Persistence
@@ -647,7 +693,10 @@ class RPTMeasurement:
     def to_state_dict(self) -> Dict[str, Any]:
         """Serialize as {"scalars", "arrays", "histories"}."""
         return {
-            "scalars": {"measurement_count": int(self.measurement_count)},
+            "scalars": {
+                "measurement_count": int(self.measurement_count),
+                "local_measurement_count": int(self.local_measurement_count),
+            },
             "arrays": {},
             "histories": {
                 "metrics_history": [
@@ -707,12 +756,28 @@ class RPTMeasurement:
                 )
             setattr(self, attr, deque(values, maxlen=current.maxlen))
 
+        # A state written before the counter existed: the scores kept are
+        # the measurements that had a substrate state (within the window).
+        local_count = scalars.get("local_measurement_count")
+        if (
+            isinstance(local_count, (int, float))
+            and not isinstance(local_count, bool)
+            and math.isfinite(local_count)
+            and local_count >= 0
+        ):
+            self.local_measurement_count = int(local_count)
+        elif "local_scores" in histories:
+            self.local_measurement_count = len(self._local_scores)
+
     def generate_report(self) -> str:
         """Generate a human-readable RPT report."""
         stats = self.get_statistics()
         lines = ["RPT (Recurrent Processing Theory) Status:"]
         lines.append(f" Measurements: {stats['measurement_count']}")
-        lines.append(f" Avg local recurrence: {stats['average_local']:.3f}")
+        lines.append(
+            f" Avg local recurrence: {_fmt(stats['average_local'])} "
+            f"({stats['local_measurement_count']} with a substrate state)"
+        )
         lines.append(f" Avg global recurrence: {stats['average_global']:.3f}")
 
         dist = stats["recurrence_type_distribution"]
@@ -726,8 +791,8 @@ class RPTMeasurement:
         if stats["latest"]:
             lines.append(
                 f" Latest: type={stats['latest']['type']}, "
-                f"phenomenal={stats['latest']['phenomenal']:.3f}, "
-                f"access={stats['latest']['access']:.3f}"
+                f"local_index={_fmt(stats['latest']['local_index'])}, "
+                f"combined_index={_fmt(stats['latest']['combined_index'])}"
             )
 
         return "\n".join(lines)
@@ -745,12 +810,31 @@ _METRIC_FLOAT_FIELDS = (
     "global_recurrence_score",
     "broadcast_reentry_rate",
     "cross_module_feedback",
-    "phenomenal_consciousness",
-    "access_consciousness",
+    "local_recurrence_index",
+    "combined_recurrence_index",
     "stdp_plasticity_score",
     "measurement_time_ms",
     "timestamp",
 )
+
+# The local-side fields, None when no substrate state was supplied.
+_OPTIONAL_METRIC_FIELDS = frozenset(
+    {
+        "local_recurrence_score",
+        "snn_feedback_strength",
+        "lsm_reservoir_recurrence",
+        "local_spike_reentry",
+        "local_recurrence_index",
+        "combined_recurrence_index",
+    }
+)
+
+# Field name -> the key a record written before the rename carries; the
+# restore reads the old key when the new one is missing.
+_RENAMED_RECORD_KEYS = {
+    "local_recurrence_index": "phenomenal_consciousness",
+    "combined_recurrence_index": "access_consciousness",
+}
 
 
 def _finite(value: Any) -> float:
@@ -761,9 +845,46 @@ def _finite(value: Any) -> float:
     return value if math.isfinite(value) else 0.0
 
 
+def _optional_float(value: Optional[float]) -> Optional[float]:
+    """float(value), or None for an unmeasured value."""
+    return None if value is None else float(value)
+
+
+def _neuron_count(snn_state: Dict[str, Any]) -> Optional[int]:
+    """The SNN's neuron count from its state, or None when it carries none.
+
+    ``num_neurons`` when it is a positive number, else the summed lengths of
+    the per-layer ``firing_rates`` mapping (the encoder's result dict carries
+    the rates but no count).
+    """
+    count = snn_state.get("num_neurons")
+    if (
+        isinstance(count, (int, float, np.number))
+        and not isinstance(count, bool)
+        and math.isfinite(count)
+        and count > 0
+    ):
+        return int(count)
+    rates = snn_state.get("firing_rates")
+    if isinstance(rates, dict) and rates:
+        total = 0
+        for layer_rates in rates.values():
+            try:
+                total += len(layer_rates)
+            except TypeError:
+                return None
+        return total if total > 0 else None
+    return None
+
+
+def _fmt(value: Optional[float]) -> str:
+    """A score to three decimals, or ``unmeasured`` for None."""
+    return "unmeasured" if value is None else f"{value:.3f}"
+
+
 def _metrics_to_record(metrics: RecurrenceMetrics) -> Dict[str, Any]:
     record: Dict[str, Any] = {
-        name: float(getattr(metrics, name)) for name in _METRIC_FLOAT_FIELDS
+        name: _optional_float(getattr(metrics, name)) for name in _METRIC_FLOAT_FIELDS
     }
     record["workspace_cycle_depth"] = int(metrics.workspace_cycle_depth)
     record["recurrence_type"] = metrics.recurrence_type.value
@@ -771,14 +892,22 @@ def _metrics_to_record(metrics: RecurrenceMetrics) -> Dict[str, Any]:
 
 
 def _metrics_from_record(record: Any) -> Optional[RecurrenceMetrics]:
-    """Rehydrate a RecurrenceMetrics; None for a malformed record."""
+    """Rehydrate a RecurrenceMetrics; None for a malformed record.
+
+    A local-side field may be None (unmeasured); every other field must be a
+    finite number. A record written before the recurrence indices were
+    renamed restores through its old keys.
+    """
     if not isinstance(record, dict):
         return None
     try:
         recurrence_type = RecurrenceType(record["recurrence_type"])
         values = {}
         for name in _METRIC_FLOAT_FIELDS:
-            if name not in record:
+            key = name
+            if key not in record and name in _RENAMED_RECORD_KEYS:
+                key = _RENAMED_RECORD_KEYS[name]
+            if key not in record:
                 if name in ("stdp_plasticity_score", "measurement_time_ms"):
                     values[name] = 0.0
                     continue
@@ -786,7 +915,10 @@ def _metrics_from_record(record: Any) -> Optional[RecurrenceMetrics]:
                     values[name] = time.time()
                     continue
                 return None
-            value = float(record[name])
+            if record[key] is None and name in _OPTIONAL_METRIC_FIELDS:
+                values[name] = None
+                continue
+            value = float(record[key])
             if not math.isfinite(value):
                 return None
             values[name] = value

@@ -6,9 +6,6 @@ This module implements a simplified HTM system for memory consolidation.
 HTM learns temporal sequences and extracts semantic patterns from episodic
 experiences - mimicking how the neocortex consolidates memories during sleep.
 
-Note: Where experiences become understanding, and patterns emerge
-from the noise of daily activity.
-
 HTM Components:
 - Spatial Pooler: Converts dense input to sparse distributed representation (SDR)
 - Temporal Memory: Learns sequences and makes predictions
@@ -242,6 +239,8 @@ class TemporalMemory:
         self.predictive_cells: Set[Tuple[int, int]] = set()
         self.prev_active_cells: Set[Tuple[int, int]] = set()
         self.prev_predictive_cells: Set[Tuple[int, int]] = set()
+        # Every cell that owns at least one segment (kept by the learning step)
+        self.cells_with_segments: Set[Tuple[int, int]] = set()
 
         # Metrics
         self.prediction_accuracy = 0.0
@@ -290,24 +289,30 @@ class TemporalMemory:
         else:
             self.anomaly_score = 0.0
 
-        # Phase 2: Learn (strengthen connections)
-        if learn and len(self.prev_active_cells) > 0:
+        # Phase 2: Learn (strengthen connections). ``self.active_cells`` still
+        # holds the previous step's active cells here (the state is updated
+        # below), so each newly active cell connects to the cells that were
+        # active one step before it.
+        if learn and len(self.active_cells) > 0:
             for cell_id in new_active_cells:
                 cell = self.cells[cell_id]
                 # Simplified learning: remember which cells were active before
                 if len(cell.segments) == 0:
                     cell.segments.append(set())
+                    self.cells_with_segments.add(cell_id)
 
-                # Add connections to previously active cells
+                # Add connections to the previous step's active cells
                 segment = cell.segments[0]
-                for prev_cell in self.prev_active_cells:
+                for prev_cell in self.active_cells:
                     if len(segment) < self.max_synapses_per_segment:
                         segment.add(prev_cell)
 
-        # Phase 3: Predict next timestep
+        # Phase 3: Predict next timestep. Any cell that owns a segment can
+        # become predictive, not only the cells active now: a segment with
+        # enough synapses onto the newly active cells predicts its cell.
         new_predictive_cells = set()
 
-        for cell_id in new_active_cells:
+        for cell_id in self.cells_with_segments:
             cell = self.cells[cell_id]
             # Check all segments to see which cells should be predictive
             for segment in cell.segments:

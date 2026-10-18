@@ -96,6 +96,10 @@ class EmotionalState:
     valence: positive (joy) <-> negative (sadness), -1.0 to 1.0
     arousal: calm <-> excited, 0.0 to 1.0
     dominance: submissive <-> dominant, 0.0 to 1.0
+
+    The defaults of ``dominance`` and ``intensity`` (0.5) are the scale's
+    midpoint, used when the caller omits the argument; they are not a
+    measurement.
     """
 
     valence: float

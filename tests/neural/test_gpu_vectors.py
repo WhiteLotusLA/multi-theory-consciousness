@@ -182,6 +182,15 @@ def test_batch_store_upserts_once_with_uuid_ids(cpu_settings):
         coordinator.store_memories_batch(["a"], importances=[1.0, 2.0])
 
 
+def test_batch_store_writes_null_weight(cpu_settings):
+    coordinator = _coordinator(cpu_settings)
+    ids = coordinator.store_memories_batch(["river", "stone bridge"])
+    for point_id in ids:
+        payload = coordinator.get_memory_by_id(point_id)
+        assert payload["emotional_weight"] is None
+        assert payload["importance"] == 1.0
+
+
 def test_metrics_never_count_failed_embeddings(cpu_settings):
     client = SpyClient(qdrant_client.QdrantClient(":memory:"))
     coordinator = _coordinator(

@@ -44,7 +44,7 @@ Retention is the retention store's job (``prune_telemetry``, ``prune_thoughts``
 and ``expire_gists``), not a TTL index, because two mechanisms would disagree.
 
 Schema artifact: ``NEURAL_INDEXES``, applied idempotently by ``ensure_indexes()``
-as a safety net; Phase 7's ``init_mongo`` script is canonical. Thought streams
+as a safety net; the store setup (``mtc db init``) is canonical. Thought streams
 and conversation turns hold private conversation content at runtime and live
 only in the operator's MongoDB; the modules log no document content.
 """
@@ -56,7 +56,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Sequence, Tuple
 
 from mtc.core.config import Settings, get_settings
 from mtc.memory.clients import IndexSpec, apply_indexes, create_mongo_client
@@ -372,6 +372,8 @@ class NeuralDataManager:
         self._failures = 0
         self._skipped_writes = 0
         self._closed = False
+        # True once a driver call returned or failed to reach the server
+        self._contacted = False
 
         self.spikes = self.db["neural_spikes"]
         self.liquid_states = self.db["liquid_state"]
@@ -391,6 +393,7 @@ class NeuralDataManager:
 
     def _mark_failed(self, exc: BaseException) -> None:
         was_available = self._last_error is None
+        self._contacted = True
         self._failures += 1
         self._last_error = f"{type(exc).__name__}: {exc}"
         self._disabled_until = self._clock() + self.retry_after_s
@@ -403,6 +406,7 @@ class NeuralDataManager:
             )
 
     def _mark_ok(self) -> None:
+        self._contacted = True
         self._last_error = None
         self._disabled_until = None
 
@@ -442,10 +446,21 @@ class NeuralDataManager:
 
     def status(self) -> Dict[str, Any]:
         """Return ``backend``, ``available`` and ``last_error`` plus the failure,
-        skipped-write and retry figures."""
+        skipped-write and retry figures.
+
+        ``available`` is None until a driver call has returned or failed to
+        reach the server (nothing is known before the first contact), True
+        after a success, and False after a connection failure or ``close()``.
+        """
+        if self._closed:
+            available: Optional[bool] = False
+        elif not self._contacted:
+            available = None
+        else:
+            available = self._last_error is None
         return {
             "backend": "mongodb",
-            "available": self._last_error is None and not self._closed,
+            "available": available,
             "last_error": self._last_error,
             "database": getattr(self.db, "name", None),
             "failures": self._failures,
@@ -459,7 +474,7 @@ class NeuralDataManager:
     def ensure_indexes(self) -> int:
         """Create every index in ``NEURAL_INDEXES`` (idempotent); return the count.
 
-        A safety net: Phase 7's ``init_mongo`` script is the canonical schema.
+        A safety net: the store setup (``mtc db init``) is the canonical schema.
         """
         return self._call(apply_indexes, self.db, NEURAL_INDEXES)
 
@@ -656,7 +671,12 @@ class NeuralDataManager:
     def get_active_gists(
         self, min_retention: float = 0.2, limit: int = 100
     ) -> List[Dict[str, Any]]:
-        """Return gist documents at or above a retention, most important first."""
+        """Return gist documents at or above a retention, most important first.
+
+        A null retention (unknown) never matches the floor, so such a gist is
+        never returned; a null importance sorts after every measured one (the
+        server orders null below every number).
+        """
         size = _bounded(limit)
         if size == 0:
             return []
@@ -676,11 +696,64 @@ class NeuralDataManager:
     async def active_gists(
         self, min_retention: float = 0.2, limit: int = 100
     ) -> List[ThoughtGist]:
-        """Return gists with retention at or above the floor, most important first."""
+        """Return gists with retention at or above the floor, most important first.
+
+        A None retention is never returned; a None importance sorts last.
+        """
         docs = await asyncio.to_thread(self.get_active_gists, min_retention, limit)
         for doc in docs:
             doc.pop("id", None)
         return [ThoughtGist.from_document(doc) for doc in docs]
+
+    def _gist_page(
+        self, after: Optional[Tuple[datetime, str]], size: int
+    ) -> List[Dict[str, Any]]:
+        """The next ``size`` gist documents by ``created_at`` then ``gist_id``.
+
+        ``after`` is the key of the last document of the previous page; the
+        page starts strictly after it, so equal creation times are not
+        skipped or repeated.
+        """
+        if after is None:
+            query: Dict[str, Any] = {}
+        else:
+            created, gist_id = after
+            query = {
+                "$or": [
+                    {"created_at": {"$gt": created}},
+                    {"created_at": created, "gist_id": {"$gt": gist_id}},
+                ]
+            }
+        cursor = (
+            self.thought_gists.find(query)
+            .sort([("created_at", ASCENDING), ("gist_id", ASCENDING)])
+            .limit(size)
+        )
+        return [_read(doc) for doc in cursor]
+
+    async def iter_gists(self, batch: int = 500) -> AsyncIterator[ThoughtGist]:
+        """Yield every stored gist whatever its retention (null included).
+
+        Gists come ordered by ``created_at``, then ``gist_id``, read from the
+        server ``batch`` at a time; each page starts after the last key of the
+        one before. A batch below 1 raises ValueError; an unreachable server
+        raises ``StoreUnavailable``.
+        """
+        if int(batch) < 1:
+            raise ValueError("batch must be at least 1")
+        size = int(batch)
+        after: Optional[Tuple[datetime, str]] = None
+        while True:
+            docs = await asyncio.to_thread(self._call, self._gist_page, after, size)
+            for doc in docs:
+                doc.pop("id", None)
+            gists = [ThoughtGist.from_document(doc) for doc in docs]
+            for gist in gists:
+                yield gist
+            if len(docs) < size:
+                return
+            last = docs[-1]
+            after = (last["created_at"], last["gist_id"])
 
     async def update_gist(self, gist_id: str, fields: Dict[str, Any]) -> bool:
         """Set fields of a stored gist; False when no such gist exists.
@@ -845,7 +918,11 @@ class NeuralDataManager:
         return await asyncio.to_thread(self._call, run)
 
     async def expire_gists(self, min_retention: float, dry_run: bool) -> int:
-        """Remove unprotected gists whose stored retention is below the floor."""
+        """Remove unprotected gists whose stored retention is below the floor.
+
+        A null retention (unknown) is never below a floor, so such a gist is
+        never expired; a refresh computes it first.
+        """
         query = {
             "retention_strength": {"$lt": min_retention},
             "is_protected": {"$ne": True},

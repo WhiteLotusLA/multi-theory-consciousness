@@ -14,10 +14,17 @@ The anomaly score of a step is the share of its active columns that the
 previous step did not predict. It is scored before the temporal memory
 replaces its predictions, so a learned sequence reads low and a novel input
 reads high. The per-step history is bounded at ANOMALY_HISTORY_LIMIT.
+
+An inference-only pass (``process(..., learn=False)``) runs on a separate
+live context: its own active, winner and predicted cells, empty at first and
+kept between live passes. It reads the learned segments and changes nothing
+that learning uses: the learning context, the anomaly history and the last
+active columns stay as the last learning pass left them. Its anomaly goes to
+a bounded ``live_anomaly_history`` and is reported as ``live_anomaly_score``.
 """
 
 import numpy as np
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass
 import logging
 import time
@@ -433,6 +440,11 @@ class ProductionHTM:
         self.anomaly_history: List[float] = []
         self._last_active_columns: Optional[np.ndarray] = None
 
+        # Inference-only passes: their own temporal context and history
+        self._live_context: Tuple[Set[int], Set[int], Set[int]] = (set(), set(), set())
+        self.live_anomaly_history: List[float] = []
+        self._last_live_active_columns: Optional[np.ndarray] = None
+
         # Compatibility property (toy HTM uses input_size)
         self.input_size = self.config.input_bits
 
@@ -470,6 +482,11 @@ class ProductionHTM:
         self.anomaly_history = []
         self._last_active_columns = None
 
+        # Clear the live context of inference-only passes
+        self._live_context = (set(), set(), set())
+        self.live_anomaly_history = []
+        self._last_live_active_columns = None
+
         logger.debug("ProductionHTM reset to initial state")
 
     def _trim_anomaly_history(self) -> None:
@@ -484,6 +501,10 @@ class ProductionHTM:
         """
         Process input through HTM.
 
+        With ``learn=False`` the pass runs on the live context (see the module
+        docstring): the learning context, the anomaly history and the last
+        active columns are left untouched.
+
         Args:
             input_pattern: Binary input vector
             learn: Whether to enable learning
@@ -491,6 +512,9 @@ class ProductionHTM:
         Returns:
             Processing results including predictions and anomaly score
         """
+        if not learn:
+            return self._process_live(input_pattern)
+
         start_time = time.time()
 
         # Ensure input is correct size
@@ -528,6 +552,58 @@ class ProductionHTM:
             "num_predicted_cells": len(tm_state["predicted_cells"]),
         }
 
+    def _fit_input(self, input_pattern: np.ndarray) -> np.ndarray:
+        """The input zero-padded or truncated to ``input_bits``."""
+        if len(input_pattern) < self.config.input_bits:
+            return np.pad(
+                input_pattern, (0, self.config.input_bits - len(input_pattern))
+            )
+        return input_pattern[: self.config.input_bits]
+
+    def _process_live(self, input_pattern: np.ndarray) -> Dict[str, Any]:
+        """One inference-only pass on the live context.
+
+        The spatial pooler runs without learning (it then changes no
+        permanence, duty cycle or boost factor). The temporal memory's three
+        cell sets are swapped for the live context for the duration of the
+        compute and swapped back afterwards, whatever happens; the learned
+        segments are read and not changed.
+        """
+        start_time = time.time()
+        if len(input_pattern) != self.config.input_bits:
+            input_pattern = self._fit_input(input_pattern)
+
+        active_columns = self.spatial_pooler.compute(input_pattern, False)
+
+        tm = self.temporal_memory
+        learning_context = (tm.active_cells, tm.winner_cells, tm.predicted_cells)
+        tm.active_cells, tm.winner_cells, tm.predicted_cells = self._live_context
+        try:
+            tm_state = tm.compute(active_columns, False)
+            self._live_context = (
+                tm.active_cells,
+                tm.winner_cells,
+                tm.predicted_cells,
+            )
+        finally:
+            tm.active_cells, tm.winner_cells, tm.predicted_cells = learning_context
+
+        anomaly_score = tm_state["anomaly_score"]
+        self._last_live_active_columns = active_columns
+        self.live_anomaly_history.append(anomaly_score)
+        if len(self.live_anomaly_history) > ANOMALY_HISTORY_LIMIT:
+            del self.live_anomaly_history[:-ANOMALY_HISTORY_LIMIT]
+
+        return {
+            "active_columns": active_columns,
+            "active_cells": tm_state["active_cells"],
+            "predicted_cells": tm_state["predicted_cells"],
+            "anomaly_score": anomaly_score,
+            "processing_time_ms": (time.time() - start_time) * 1000,
+            "num_active_columns": int(np.sum(active_columns)),
+            "num_predicted_cells": len(tm_state["predicted_cells"]),
+        }
+
     def consolidate_memory(self, patterns: List[np.ndarray]) -> Dict[str, Any]:
         """
         Consolidate a sequence of patterns into memory.
@@ -558,7 +634,10 @@ class ProductionHTM:
         Every value is read from the HTM's state. Before the first input the
         anomaly score, the active-column count and the column density are
         None (nothing has been measured yet), and ``avg_permanence`` is None
-        until the temporal memory has grown a segment.
+        until the temporal memory has grown a segment. ``anomaly_score``,
+        ``active_columns``, ``predicted_columns`` and ``column_density``
+        describe the last learning pass; ``live_anomaly_score`` is the last
+        inference-only pass's anomaly, None before the first one.
 
         Returns:
             Dict containing HTM metrics
@@ -582,6 +661,11 @@ class ProductionHTM:
         return {
             "anomaly_score": (
                 float(self.anomaly_history[-1]) if self.anomaly_history else None
+            ),
+            "live_anomaly_score": (
+                float(self.live_anomaly_history[-1])
+                if self.live_anomaly_history
+                else None
             ),
             "active_columns": active_count,
             "predicted_columns": len(predicted_columns),

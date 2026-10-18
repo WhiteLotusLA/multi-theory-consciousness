@@ -353,7 +353,7 @@ def test_available_components_report_real_modules():
         assert importlib.util.find_spec(path) is not None
         assert components[name] is True, name
     missing = {name for name, ok in components.items() if not ok}
-    assert missing <= {"continuous_thought"}  # the last hollow import (Phase 6)
+    assert missing <= {"continuous_thought"}
     assert orchestrator.get_system_metrics()["components"] == components
 
 
@@ -363,7 +363,7 @@ def test_construction_log_names_only_the_continuous_machine(caplog):
     lines = [
         r.getMessage()
         for r in caplog.records
-        if "Optional components not installed" in r.getMessage()
+        if "Optional components could not be imported" in r.getMessage()
     ]
     for line in lines:
         for name in (

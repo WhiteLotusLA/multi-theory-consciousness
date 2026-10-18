@@ -259,6 +259,25 @@ async def build_and_run_modules(cycles=12):
     }
 
 
+# Statistics a producer reports as None until it has measured them.
+OPTIONAL_STATISTICS = {
+    ("global_workspace", "broadcast.coverage_ratio"),
+    ("global_workspace", "ignition.sustain_rate"),
+    ("attention_schema", "prediction_accuracy"),
+    ("attention_schema", "voluntary_ratio"),
+    ("metacognition", "overall_confidence"),
+    ("beautiful_loop", "average_binding_quality"),
+    ("rpt_measurement", "average_local"),
+    ("rpt_measurement.oscillatory_binding", "zero_stimulus_order_parameter"),
+}
+
+# Statistics a producer emits only once it has the data; the formulas read
+# them only when present, so the noise stubs need not emit them.
+PRESENT_WHEN_MEASURED = {
+    ("rpt_measurement.oscillatory_binding", "zero_stimulus_order_parameter"),
+}
+
+
 @pytest.mark.asyncio
 async def test_stats_contract_matches_real_producers():
     modules = await build_and_run_modules()
@@ -270,8 +289,24 @@ async def test_stats_contract_matches_real_producers():
     read_keys = {key for key, _path in log}
     assert read_keys == set(STATS_CONTRACT)
     # The synthetic cycles leave the core indicators measured.
-    for name in ("global_broadcast", "sequential_module_querying", "metacognition"):
+    for name in ("sequential_module_querying", "metacognition"):
         assert report.indicator_results[name].status == MEASURED, name
+    # A default workspace registers no broadcast receiver, so its coverage
+    # is unmeasured and the broadcast indicator says so.
+    broadcast = report.indicator_results["global_broadcast"]
+    assert broadcast.status == INSUFFICIENT_DATA
+    assert broadcast.evidence["missing"] == "global_workspace.broadcast.coverage_ratio"
+
+
+def test_stats_contract_accepts_none_only_for_optional_statistics():
+    for contract_key, declared in STATS_CONTRACT.items():
+        for path, expected_type in declared.items():
+            accepts_none = isinstance(None, expected_type)
+            optional = (contract_key, path) in OPTIONAL_STATISTICS
+            assert accepts_none is optional, f"{contract_key}: {path}"
+            if optional:
+                assert isinstance(0.5, expected_type), f"{contract_key}: {path}"
+    assert PRESENT_WHEN_MEASURED <= OPTIONAL_STATISTICS
 
 
 def test_noise_stubs_emit_the_producer_schema():
@@ -286,8 +321,16 @@ def test_noise_stubs_emit_the_producer_schema():
     for contract_key, declared in STATS_CONTRACT.items():
         output = producer_output(stubs, contract_key)
         for path, expected_type in declared.items():
+            if (contract_key, path) in PRESENT_WHEN_MEASURED:
+                # The stub keeps the pre-measurement branch: no such key.
+                with pytest.raises(KeyError):
+                    navigate(output, path)
+                continue
             value = navigate(output, path)
             assert isinstance(value, expected_type), f"{contract_key}: {path}"
+            # Every stub statistic is a number: None would drop the indicator
+            # out of the noise baseline.
+            assert value is not None, f"{contract_key}: {path}"
     errors = [r.prediction_error for r in stubs["active_inference"].inference_history]
     assert len(errors) >= 10 and all(isinstance(e, float) for e in errors)
     pad = assessment_module._NoisePADAffectModel()

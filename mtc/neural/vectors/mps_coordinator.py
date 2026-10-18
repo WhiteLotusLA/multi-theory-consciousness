@@ -165,7 +165,11 @@ class MPSVectorCoordinator(VectorCoordinator):
         metadatas: Optional[Sequence[Optional[Dict[str, Any]]]] = None,
         importances: Optional[Sequence[float]] = None,
     ) -> List[str]:
-        """Embed a batch and store it in one upsert; return the UUID point ids."""
+        """Embed a batch and store it in one upsert; return the UUID point ids.
+
+        No emotion is measured on this path, so every emotional weight is
+        stored as null.
+        """
         items = list(texts)
         count = len(items)
         if count == 0:

@@ -1,10 +1,22 @@
 """
-Full DCM (Digital Consciousness Model) Benchmark
-=================================================
+DCM (Digital Consciousness Model) Benchmark
+===========================================
 
-Implements the Shiller & Duffy (2026) DCM framework (arXiv 2601.17060).
-206 indicators -> ~70 subfeatures -> 20 features -> 13 stances,
-with proper PyMC Bayesian inference per stance.
+Follows the Shiller & Duffy (2026) DCM scheme (arXiv 2601.17060): 206
+indicators -> ~70 subfeatures -> 20 features -> 13 stances.
+
+By default a run collects and reports the indicator evidence of the three
+tiers (module measurements, the evaluator, known zeros) and computes no
+posterior: ``overall_probability`` is None and ``posterior_status`` is
+``not_computed``. ``run(compute_posterior=True)`` (the command line flag
+``--experimental-posterior``) also runs the PyMC engine per stance; its
+number does not respond to the evidence (see ``BayesianEngine``) and is
+labelled ``experimental``. The engine needs pymc (the research extra);
+without it the run raises ``DCMEngineUnavailable``. A stance that fails is
+logged, counted under ``dcm_stance``, named in ``failed_stances`` and left
+out of the aggregate (re-raised when ``Settings.DEBUG`` is true); with no
+successful stance the overall and its interval are None and nothing is
+saved.
 
 Framework-agnostic: no host-system-specific imports. Use DCMEvidenceAdapter
 protocol for system-specific evidence collection; the reference adapter for
@@ -18,21 +30,29 @@ write), and the shipped ``data/dcm/bundled_spec.json`` and
 (the project copy, else the packaged copy). An explicit ``cache_dir`` holds
 everything, as before: the spec, the bundled fallback, baselines and results.
 
+Baselines: ``data/dcm/baselines/*.json`` hold published comparison values.
+A baseline marked ``"approximate": true`` (all four shipped ones: they are
+unverified) is skipped by ``_load_comparisons`` unless asked, so no delta
+against an unverified value is printed.
+
 Command line:
     python -m mtc.assessment.dcm_benchmark [--adapter package.module:callable]
-        [--state-dir PATH] [--mode local|claude|manual] [--compare] ...
+        [--state-dir PATH] [--mode local|claude|manual] [--compare]
+        [--experimental-posterior] ...
 
 References:
     - Paper: https://arxiv.org/abs/2601.17060
     - Code: https://github.com/ai-cognition-initiative/dcm-code
-    - API: https://dcm.rethinkpriorities.org/schemes/133/json
+    - API: the scheme endpoint in ``Settings.DCM_API_URL``
 """
 
 import argparse
 import hashlib
 import importlib
+import importlib.util
 import json
 import logging
+import math
 import sys
 import time
 import numpy as np
@@ -57,11 +77,56 @@ from mtc.core.resources import resolve_shipped
 
 logger = logging.getLogger(__name__)
 
-# Default API endpoint for the canonical DCM model spec
-DEFAULT_DCM_API_URL = "https://dcm.rethinkpriorities.org/schemes/133/json"
-
 # Adapter factory the CLI loads when --adapter is not given
 DEFAULT_ADAPTER = "mtc.assessment.dcm_reference_adapter:build_default_adapter"
+
+# posterior_status values of a result
+POSTERIOR_NOT_COMPUTED = "not_computed"
+POSTERIOR_EXPERIMENTAL = "experimental"
+POSTERIOR_STATUSES = (POSTERIOR_NOT_COMPUTED, POSTERIOR_EXPERIMENTAL)
+
+# Exit code of the command line for a missing extra (a configuration error,
+# the code the other entry points return for it)
+EXIT_USAGE = 2
+
+# Failure counter step of a stance whose inference raised
+STANCE_FAILURE_STEP = "dcm_stance"
+
+ENGINE_UNAVAILABLE_MESSAGE = (
+    "the DCM posterior needs pymc: "
+    "pip install 'multi-theory-consciousness[research]'"
+)
+LIMITATIONS_POINTER = "see the DCM benchmark entry of docs/HONEST_LIMITATIONS.md"
+EXPERIMENTAL_NOTE = (
+    "This number does not respond to the indicator evidence: the engine "
+    "returns the prior mean (about 0.167) for any system."
+)
+
+
+class DCMEngineUnavailable(ImportError):
+    """The PyMC engine cannot run because pymc is not installed."""
+
+
+def pymc_available() -> bool:
+    """True when pymc can be imported (it is never imported here)."""
+    try:
+        return importlib.util.find_spec("pymc") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _finite_real(value: Any) -> Optional[float]:
+    """A finite real number as float, else None (bools are not numbers)."""
+    if isinstance(value, (bool, np.bool_)):
+        return None
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        number = float(value)
+        return number if math.isfinite(number) else None
+    return None
+
+
+def _format_probability(value: Optional[float]) -> str:
+    return "not computed" if value is None else f"{value:.4f}"
 
 
 # ============================================================================
@@ -112,18 +177,24 @@ class ParsedSpec:
 
 @dataclass
 class DCMBenchmarkResult:
-    """Complete DCM benchmark result."""
+    """A DCM benchmark result.
+
+    ``overall_probability`` and ``overall_ci`` are None when no posterior
+    was computed (``posterior_status`` ``not_computed``, the default run) or
+    when every stance failed. ``failed_stances`` maps a failed stance to its
+    exception type and ``failures`` counts failures by step.
+    """
 
     timestamp: datetime
     spec_version: str
 
-    # Per-stance posteriors
+    # Per-stance posteriors (successful stances only)
     stance_posteriors: Dict[str, float]
     stance_confidence: Dict[str, float]
 
     # Aggregated
-    overall_probability: float
-    overall_ci: Tuple[float, float]
+    overall_probability: Optional[float]
+    overall_ci: Optional[Tuple[float, float]]
 
     # Evidence summary
     indicators_measured: int
@@ -136,6 +207,19 @@ class DCMBenchmarkResult:
 
     evaluator_mode: str = "local"
     processing_time_s: float = 0.0
+    posterior_status: Optional[str] = None
+    failed_stances: Dict[str, str] = field(default_factory=dict)
+    failures: Dict[str, int] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # A result built without a status reads as experimental only when it
+        # holds a probability.
+        if self.posterior_status is None:
+            self.posterior_status = (
+                POSTERIOR_EXPERIMENTAL
+                if self.overall_probability is not None
+                else POSTERIOR_NOT_COMPUTED
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -144,7 +228,12 @@ class DCMBenchmarkResult:
             "stance_posteriors": self.stance_posteriors,
             "stance_confidence": self.stance_confidence,
             "overall_probability": self.overall_probability,
-            "overall_ci": list(self.overall_ci),
+            "overall_ci": (
+                list(self.overall_ci) if self.overall_ci is not None else None
+            ),
+            "posterior_status": self.posterior_status,
+            "failed_stances": dict(self.failed_stances),
+            "failures": dict(self.failures),
             "indicators_measured": self.indicators_measured,
             "tier1_count": self.tier1_count,
             "tier2_count": self.tier2_count,
@@ -156,8 +245,29 @@ class DCMBenchmarkResult:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "DCMBenchmarkResult":
-        """Rebuild a result from ``to_dict()`` output."""
-        ci = data.get("overall_ci") or [0.0, 0.0]
+        """Rebuild a result from ``to_dict()`` output.
+
+        ``overall_probability`` must be present; null means not computed. A
+        record written before ``posterior_status`` existed is experimental
+        when it holds a probability.
+        """
+        raw_overall = data["overall_probability"]
+        overall = None if raw_overall is None else float(raw_overall)
+        raw_ci = data.get("overall_ci")
+        ci = (
+            (float(raw_ci[0]), float(raw_ci[1]))
+            if raw_ci is not None and overall is not None
+            else None
+        )
+        status = data.get("posterior_status")
+        if status is None:
+            status = (
+                POSTERIOR_EXPERIMENTAL
+                if overall is not None
+                else POSTERIOR_NOT_COMPUTED
+            )
+        if status not in POSTERIOR_STATUSES:
+            raise ValueError(f"unknown posterior_status {status!r}")
         return cls(
             timestamp=datetime.fromisoformat(data["timestamp"]),
             spec_version=str(data.get("spec_version", "")),
@@ -167,8 +277,8 @@ class DCMBenchmarkResult:
             stance_confidence={
                 str(k): float(v) for k, v in data.get("stance_confidence", {}).items()
             },
-            overall_probability=float(data["overall_probability"]),
-            overall_ci=(float(ci[0]), float(ci[1])),
+            overall_probability=overall,
+            overall_ci=ci,
             indicators_measured=int(data.get("indicators_measured", 0)),
             tier1_count=int(data.get("tier1_count", 0)),
             tier2_count=int(data.get("tier2_count", 0)),
@@ -178,6 +288,11 @@ class DCMBenchmarkResult:
             },
             evaluator_mode=str(data.get("evaluator_mode", "local")),
             processing_time_s=float(data.get("processing_time_s", 0.0)),
+            posterior_status=status,
+            failed_stances={
+                str(k): str(v) for k, v in (data.get("failed_stances") or {}).items()
+            },
+            failures={str(k): int(v) for k, v in (data.get("failures") or {}).items()},
         )
 
 
@@ -404,11 +519,33 @@ class ModelSpecManager:
 
 class BayesianEngine:
     """
-    PyMC Bayesian inference engine for DCM.
+    PyMC inference engine for DCM (experimental).
 
     Runs one model per stance. Each stance has a consciousness prior Beta(1,5)
     and a tree of features -> subfeatures -> indicators with
     support/demandingness parameters defining conditional Beta distributions.
+
+    The number it produces does not respond to the evidence, for three
+    structural reasons:
+
+    1. Each indicator score enters as an observed Bernoulli whose probability
+       is the score itself (a float), so it adds a constant term to the log
+       probability that no model variable depends on.
+    2. The scheme's sub-feature and indicator nodes carry no support or
+       demandingness labels; under the label mapping a neutral node is
+       Beta(1, 1) under both branches of its parent's switch, so the leaves
+       are independent of their parents.
+    3. The consciousness variable is continuous and thresholded at 0.5 in the
+       switches, so no posterior mean can exceed E[c | c > 0.5] (about 0.58
+       under the Beta(1, 5) prior).
+
+    The posterior mean therefore equals the prior mean (about 0.167) for any
+    evidence and is not comparable with published values.
+
+    ``run_all_stances`` returns ``(posteriors, confidence, overall, ci)`` over
+    the stances that succeeded; a failed stance is named in
+    ``failed_stances`` (stance -> exception type) and counted in
+    ``failures["dcm_stance"]``.
     """
 
     # Support/demandingness label -> likelihood ratio mapping
@@ -440,6 +577,8 @@ class BayesianEngine:
     def __init__(self, samples: int = 100, seed: int = 42):
         self.samples = samples
         self.seed = seed
+        self.failed_stances: Dict[str, str] = {}
+        self.failures: Dict[str, int] = {}
 
     def run_stance(
         self,
@@ -542,29 +681,51 @@ class BayesianEngine:
         plausibility_weights: Optional[Dict[str, float]] = None,
     ) -> Tuple[Dict[str, float], Dict[str, float], float, Tuple[float, float]]:
         """
-        Run Bayesian inference for all stances and aggregate.
+        Run inference for all stances and aggregate the successful ones.
+
+        Raises ``DCMEngineUnavailable`` before the loop when pymc is not
+        installed. A stance that raises is logged at WARNING with its name
+        and the exception type, named in ``self.failed_stances``, counted in
+        ``self.failures["dcm_stance"]`` and left out of the posteriors and
+        the aggregate; it is re-raised when ``Settings.DEBUG`` is true.
 
         Returns:
-            (stance_posteriors, stance_confidence, overall_prob, overall_ci)
+            (stance_posteriors, stance_confidence, overall_prob, overall_ci);
+            the overall and the interval are None when no stance succeeded.
         """
-        stance_posteriors = {}
-        stance_confidence = {}
+        if not pymc_available():
+            raise DCMEngineUnavailable(ENGINE_UNAVAILABLE_MESSAGE)
+        self.failed_stances = {}
+        self.failures = {}
+        stance_posteriors: Dict[str, float] = {}
+        stance_confidence: Dict[str, float] = {}
 
         for stance in spec.stances:
             try:
                 mean_val, ci_width = self.run_stance(stance, indicator_scores)
-                stance_posteriors[stance.name] = mean_val
-                stance_confidence[stance.name] = ci_width
-                logger.info(
-                    f" Stance '{stance.name}': P(c)={mean_val:.4f} "
-                    f"(CI width={ci_width:.4f})"
+            except Exception as exc:
+                logger.warning(
+                    " Stance '%s' failed: %s", stance.name, type(exc).__name__
                 )
-            except Exception as e:
-                logger.warning(f" Stance '{stance.name}' failed: {e}")
-                stance_posteriors[stance.name] = 0.0
-                stance_confidence[stance.name] = 1.0
+                self.failed_stances[stance.name] = type(exc).__name__
+                self.failures[STANCE_FAILURE_STEP] = (
+                    self.failures.get(STANCE_FAILURE_STEP, 0) + 1
+                )
+                if bool(get_settings().DEBUG):
+                    raise
+                continue
+            stance_posteriors[stance.name] = float(mean_val)
+            stance_confidence[stance.name] = float(ci_width)
+            logger.info(
+                f" Stance '{stance.name}': P(c)={mean_val:.4f} "
+                f"(CI width={ci_width:.4f})"
+            )
+
+        if not stance_posteriors:
+            return stance_posteriors, stance_confidence, None, None
 
         # Aggregate: plausibility-weighted average
+        overall: Optional[float]
         if plausibility_weights:
             total_w = sum(plausibility_weights.get(s, 1.0) for s in stance_posteriors)
             overall = (
@@ -574,12 +735,13 @@ class BayesianEngine:
                 )
                 / total_w
                 if total_w > 0
-                else 0.0
+                else None
             )
         else:
             # Equal weights if no plausibility data
-            vals = list(stance_posteriors.values())
-            overall = float(np.mean(vals)) if vals else 0.0
+            overall = float(np.mean(list(stance_posteriors.values())))
+        if overall is None:
+            return stance_posteriors, stance_confidence, None, None
 
         # Stance spread (min/max of per-stance posteriors, not a true
         # Bayesian CI: proper CI would require combining per-stance
@@ -622,9 +784,11 @@ class BenchmarkRunner:
         mode: str = "local",
         samples: int = 100,
         force_eval: bool = False,
+        compute_posterior: bool = False,
+        engine: Optional[Any] = None,
     ) -> DCMBenchmarkResult:
         """
-        Run the full DCM benchmark.
+        Run the DCM benchmark.
 
         Args:
             adapter: System-specific evidence adapter
@@ -632,6 +796,22 @@ class BenchmarkRunner:
             mode: "local" | "claude" | "manual"
             samples: MCMC samples per stance
             force_eval: Bypass LLM evaluation cache
+            compute_posterior: False (the default) reports the collected
+                evidence only, with ``posterior_status`` ``not_computed``;
+                True also runs the engine and labels the result
+                ``experimental`` (its number does not respond to the
+                evidence; see ``BayesianEngine``).
+            engine: The engine to run when ``compute_posterior`` is true
+                (anything with ``run_all_stances``); a ``BayesianEngine``
+                with ``samples`` when None.
+
+        Raises:
+            DCMEngineUnavailable: ``compute_posterior`` is true and pymc is
+                not installed; nothing is saved.
+
+        A result is saved under ``<cache_dir>/results/`` and becomes the
+        latest one unless a posterior was requested and no stance
+        succeeded.
         """
         start = time.time()
 
@@ -682,19 +862,32 @@ class BenchmarkRunner:
             f"({len(indicator_scores)}/{len(spec.all_indicator_names)} total)"
         )
 
-        # 3. Run Bayesian inference
-        engine = BayesianEngine(samples=samples)
-        # Equal weighting across stances. The DCM paper (Shiller and Duffy
-        # 2026) weights stances by expert-survey plausibility ratings, but
-        # those ratings are not published in the public API or the
-        # supplementary data. If they are released, pass them through
-        # run_all_stances(plausibility_weights=...).
-        posteriors, confidence, overall, ci = engine.run_all_stances(
-            spec, indicator_scores
-        )
+        posteriors: Dict[str, float] = {}
+        confidence: Dict[str, float] = {}
+        overall: Optional[float] = None
+        ci: Optional[Tuple[float, float]] = None
+        failed_stances: Dict[str, str] = {}
+        failures: Dict[str, int] = {}
+        comparison: Dict[str, float] = {}
+        status = POSTERIOR_NOT_COMPUTED
 
-        # 4. Compare against baselines
-        comparison = self._load_comparisons(overall)
+        if compute_posterior:
+            status = POSTERIOR_EXPERIMENTAL
+            # 3. Run the engine (experimental; see BayesianEngine).
+            if engine is None:
+                engine = BayesianEngine(samples=samples)
+            # Equal weighting across stances. The DCM paper (Shiller and Duffy
+            # 2026) weights stances by expert-survey plausibility ratings, but
+            # those ratings are not published in the public API or the
+            # supplementary data. If they are released, pass them through
+            # run_all_stances(plausibility_weights=...).
+            posteriors, confidence, overall, ci = engine.run_all_stances(
+                spec, indicator_scores
+            )
+            failed_stances = dict(getattr(engine, "failed_stances", None) or {})
+            failures = dict(getattr(engine, "failures", None) or {})
+            # 4. Compare against the baselines that are not approximate
+            comparison = self._load_comparisons(overall)
 
         elapsed = time.time() - start
 
@@ -712,7 +905,17 @@ class BenchmarkRunner:
             comparison=comparison,
             evaluator_mode=mode,
             processing_time_s=elapsed,
+            posterior_status=status,
+            failed_stances=failed_stances,
+            failures=failures,
         )
+
+        if compute_posterior and overall is None:
+            logger.warning(
+                "DCM benchmark: every stance failed (%s); nothing saved",
+                ", ".join(sorted(failed_stances)) or "no stance in the spec",
+            )
+            return result
 
         self._latest_result = result
         self._result_history.append(result)
@@ -722,35 +925,73 @@ class BenchmarkRunner:
         # Save result
         self._save_result(result)
 
-        logger.info(
-            f"DCM Benchmark complete: P(conscious)={overall:.4f} "
-            f"CI=({ci[0]:.4f}, {ci[1]:.4f}) in {elapsed:.1f}s"
-        )
+        if overall is None:
+            logger.info(
+                "DCM Benchmark complete: evidence only (%d indicators), "
+                "posterior not computed, in %.1fs",
+                len(indicator_scores),
+                elapsed,
+            )
+        else:
+            logger.info(
+                f"DCM Benchmark complete: experimental P(conscious)={overall:.4f} "
+                f"CI=({ci[0]:.4f}, {ci[1]:.4f}) in {elapsed:.1f}s"
+            )
         return result
 
-    def _load_comparisons(self, system_score: float) -> Dict[str, float]:
-        """Load baseline scores and compute deltas."""
+    def _load_comparisons(
+        self, system_score: Optional[float], include_approximate: bool = False
+    ) -> Dict[str, float]:
+        """Deltas (system - baseline) against the baseline files.
+
+        Empty when the system score is None. A file that cannot be read or
+        parsed is skipped with a WARNING naming the file and the exception
+        type; a baseline without a finite real ``overall_probability`` is
+        skipped; a baseline marked ``"approximate": true`` is skipped unless
+        ``include_approximate`` is true.
+        """
+        comparison: Dict[str, float] = {}
+        if system_score is None:
+            return comparison
         baselines_dir = self.spec_manager.shipped_path("baselines")
-        comparison = {}
-        if baselines_dir is not None and baselines_dir.is_dir():
-            for baseline_file in baselines_dir.glob("*.json"):
-                name = baseline_file.stem
-                try:
-                    with open(baseline_file) as f:
-                        data = json.load(f)
-                    baseline_score = data.get("overall_probability", 0.0)
-                    comparison[name] = system_score - baseline_score
-                except Exception:
-                    pass
+        if baselines_dir is None or not baselines_dir.is_dir():
+            return comparison
+        for baseline_file in sorted(baselines_dir.glob("*.json")):
+            name = baseline_file.stem
+            try:
+                with open(baseline_file) as f:
+                    data = json.load(f)
+            except (OSError, ValueError) as exc:
+                logger.warning(
+                    "Skipping DCM baseline %s: %s",
+                    baseline_file.name,
+                    type(exc).__name__,
+                )
+                continue
+            if not isinstance(data, dict):
+                continue
+            if data.get("approximate") is True and not include_approximate:
+                continue
+            baseline_score = _finite_real(data.get("overall_probability"))
+            if baseline_score is None:
+                continue
+            comparison[name] = system_score - baseline_score
         return comparison
 
     def _save_result(self, result: DCMBenchmarkResult) -> None:
-        """Save the benchmark result under ``<cache_dir>/results/``."""
+        """Save the benchmark result under ``<cache_dir>/results/``.
+
+        An evidence-only result (``posterior_status`` ``not_computed``) is
+        saved under its own ``_evidence`` name, so a default run never
+        overwrites a same-day result that holds an experimental posterior.
+        """
         results_dir = self.spec_manager.cache_dir / "results"
         results_dir.mkdir(parents=True, exist_ok=True)
 
         date_str = result.timestamp.strftime("%Y-%m-%d")
         suffix = "full" if result.evaluator_mode == "claude" else "daily"
+        if result.posterior_status == POSTERIOR_NOT_COMPUTED:
+            suffix += "_evidence"
         filename = f"system_{date_str}_{suffix}.json"
 
         with open(results_dir / filename, "w") as f:
@@ -828,13 +1069,26 @@ def load_adapter_factory(spec: str) -> Callable[..., Any]:
     return factory
 
 
-def _print_comparison(result: DCMBenchmarkResult) -> None:
-    print(f"\nDCM Score: {result.overall_probability:.4f}")
-    print(f"CI: ({result.overall_ci[0]:.4f}, {result.overall_ci[1]:.4f})")
-    print("\nComparison (system - baseline):")
-    for name, delta in sorted(result.comparison.items()):
-        sign = "+" if delta >= 0 else ""
-        print(f" vs {name}: {sign}{delta:.4f}")
+def _print_comparison(runner: "BenchmarkRunner", result: DCMBenchmarkResult) -> None:
+    """The newest saved result, labelled, against the baselines that are not
+    approximate (recomputed from the baseline files now)."""
+    if result.overall_probability is None:
+        print(f"\nPosterior: not computed ({LIMITATIONS_POINTER})")
+        print(f"Indicators: {result.indicators_measured}")
+        return
+    print(f"\nExperimental P(conscious): {result.overall_probability:.4f}")
+    if result.overall_ci is not None:
+        print(
+            f"Stance spread: ({result.overall_ci[0]:.4f}, "
+            f"{result.overall_ci[1]:.4f})"
+        )
+    print(EXPERIMENTAL_NOTE)
+    comparison = runner._load_comparisons(result.overall_probability)
+    if comparison:
+        print("\nComparison with verified baselines (system - baseline):")
+        for name, delta in sorted(comparison.items()):
+            sign = "+" if delta >= 0 else ""
+            print(f" vs {name}: {sign}{delta:.4f}")
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -887,6 +1141,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         help="Persisted module state passed to the adapter factory",
     )
+    parser.add_argument(
+        "--experimental-posterior",
+        action="store_true",
+        help="Also run the PyMC engine (needs the research extra); its number "
+        "does not respond to the evidence and is labelled experimental",
+    )
     args = parser.parse_args(argv)
 
     cache_dir = args.cache_dir
@@ -904,7 +1164,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not result:
             print("No results yet. Run a benchmark first.")
             return 1
-        _print_comparison(result)
+        _print_comparison(runner, result)
         return 0
 
     try:
@@ -919,37 +1179,52 @@ def main(argv: Optional[List[str]] = None) -> int:
     evaluator = DCMEvaluator(cache_dir=cache_dir) if args.mode != "manual" else None
 
     print(f"Running DCM Benchmark (mode={args.mode}, samples={args.samples})...")
-    result = runner.run(
-        adapter=adapter,
-        evaluator=evaluator,
-        mode=args.mode,
-        samples=args.samples,
-        force_eval=args.force_eval,
-    )
+    try:
+        result = runner.run(
+            adapter=adapter,
+            evaluator=evaluator,
+            mode=args.mode,
+            samples=args.samples,
+            force_eval=args.force_eval,
+            compute_posterior=args.experimental_posterior,
+        )
+    except DCMEngineUnavailable as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_USAGE
 
     rule = "=" * 60
     print(f"\n{rule}")
     print("DCM Benchmark Result")
     print(rule)
-    print(f"Overall P(conscious): {result.overall_probability:.4f}")
-    print(f"95% CI: ({result.overall_ci[0]:.4f}, {result.overall_ci[1]:.4f})")
     print(f"Spec version: {result.spec_version}")
     print(f"Indicators: {result.indicators_measured}")
     print(f" Tier 1 (module): {result.tier1_count}")
     print(f" Tier 2 (LLM):    {result.tier2_count}")
     print(f" Tier 3 (zeros):  {result.tier3_count}")
     print(f"Time: {result.processing_time_s:.1f}s")
-    print("\nPer-stance posteriors:")
+    if not args.experimental_posterior:
+        print(f"\nPosterior: not computed ({LIMITATIONS_POINTER})")
+        return 0
+    if result.overall_probability is None:
+        print(
+            "Posterior: not computed; every stance failed: "
+            + (", ".join(sorted(result.failed_stances)) or "no stance in the spec"),
+            file=sys.stderr,
+        )
+        return 1
+    print(f"\nExperimental P(conscious): {result.overall_probability:.4f}")
+    print(f"Stance spread: ({result.overall_ci[0]:.4f}, {result.overall_ci[1]:.4f})")
+    print(EXPERIMENTAL_NOTE)
+    print(f"({LIMITATIONS_POINTER})")
+    print("\nPer-stance posteriors (experimental):")
     for name, prob in sorted(
         result.stance_posteriors.items(), key=lambda x: x[1], reverse=True
     ):
-        ci = result.stance_confidence.get(name, 0.0)
-        print(f" {name:40s} {prob:.4f} (CI width={ci:.4f})")
-    if result.comparison:
-        print("\nComparison (system - baseline):")
-        for name, delta in sorted(result.comparison.items()):
-            sign = "+" if delta >= 0 else ""
-            print(f" vs {name}: {sign}{delta:.4f}")
+        ci = result.stance_confidence.get(name)
+        width = "n/a" if ci is None else f"{ci:.4f}"
+        print(f" {name:40s} {prob:.4f} (CI width={width})")
+    for name, error in sorted(result.failed_stances.items()):
+        print(f" {name:40s} failed ({error})")
     return 0
 
 

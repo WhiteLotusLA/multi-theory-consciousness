@@ -5,11 +5,6 @@ Neural Protocol Layer
 Structured communication between neural substrates (SNN, LSM, HTM, CTM).
 Typed messages, priority routing, phase-locked synchronization, and
 efficient binary serialization.
-
-This is the nervous system's communication layer -- synapses, not shouts.
-
-Created: March 7, 2026
-Authors: Multi-Theory Consciousness Contributors
 """
 
 from mtc.neural.protocols.message_format import (

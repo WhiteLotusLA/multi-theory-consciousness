@@ -79,7 +79,7 @@ def test_plasticity_counted_once():
         snn_state=_snn_state(True), workspace_state=_workspace_state()
     )
     assert metrics.stdp_plasticity_score > 0.0
-    assert metrics.phenomenal_consciousness == pytest.approx(
+    assert metrics.local_recurrence_index == pytest.approx(
         metrics.local_recurrence_score
     )
 
@@ -120,6 +120,118 @@ def test_stdp_score_serialized():
     restored = RPTMeasurement()
     restored.from_state_dict(state)
     assert restored._metrics_history[0].stdp_plasticity_score == pytest.approx(0.3)
+
+
+def test_none_local_fields_round_trip():
+    rpt = RPTMeasurement(history_window=4)
+    rpt.measure_full(workspace_state=_workspace_state())
+    rpt.measure_full(snn_state=_snn_state(True), workspace_state=_workspace_state())
+    state = rpt.to_state_dict()
+    first, second = state["histories"]["metrics_history"]
+    assert first["local_recurrence_score"] is None
+    assert first["snn_feedback_strength"] is None
+    assert first["lsm_reservoir_recurrence"] is None
+    assert first["local_spike_reentry"] is None
+    assert second["local_recurrence_score"] is not None
+    assert second["lsm_reservoir_recurrence"] is None
+    assert state["scalars"]["local_measurement_count"] == 1
+    assert state["histories"]["local_scores"] == [second["local_recurrence_score"]]
+
+    restored = RPTMeasurement(history_window=4)
+    restored.from_state_dict(state)
+    assert restored.measurement_count == 2
+    assert restored.local_measurement_count == 1
+    assert len(restored._metrics_history) == 2
+    assert restored._metrics_history[0].local_recurrence_score is None
+    assert restored._metrics_history[0].lsm_reservoir_recurrence is None
+    assert restored._metrics_history[1].local_recurrence_score == pytest.approx(
+        second["local_recurrence_score"]
+    )
+    assert restored.get_statistics()["average_local"] == pytest.approx(
+        rpt.get_statistics()["average_local"]
+    )
+    # A state written before the counter existed falls back to the scores kept
+    del state["scalars"]["local_measurement_count"]
+    older = RPTMeasurement(history_window=4)
+    older.from_state_dict(state)
+    assert older.local_measurement_count == 1
+
+
+def test_recurrence_indices_are_recurrence_statistics():
+    rpt = RPTMeasurement()
+    metrics = rpt.measure_full(
+        snn_state=_snn_state(True), workspace_state=_workspace_state()
+    )
+    local = metrics.local_recurrence_score
+    global_ = metrics.global_recurrence_score
+    assert metrics.local_recurrence_index == pytest.approx(local)
+    assert metrics.combined_recurrence_index == pytest.approx(
+        0.5 * min(local, global_) + 0.5 * global_
+    )
+    latest = rpt.get_statistics()["latest"]
+    assert latest["local_index"] == pytest.approx(local)
+    assert latest["combined_index"] == pytest.approx(metrics.combined_recurrence_index)
+    assert "phenomenal" not in latest and "access" not in latest
+    report = rpt.generate_report()
+    assert "local_index=" in report and "combined_index=" in report
+    assert "phenomenal" not in report and "access=" not in report
+    record = rpt.to_state_dict()["histories"]["metrics_history"][0]
+    assert record["local_recurrence_index"] == pytest.approx(local)
+    assert record["combined_recurrence_index"] == pytest.approx(
+        metrics.combined_recurrence_index
+    )
+
+
+def test_old_record_keys_restore_into_new_fields():
+    rpt = RPTMeasurement()
+    rpt.measure_full(snn_state=_snn_state(True), workspace_state=_workspace_state())
+    state = rpt.to_state_dict()
+    record = state["histories"]["metrics_history"][0]
+    # A record written before the rename carries the old keys only
+    old = dict(record)
+    old["phenomenal_consciousness"] = old.pop("local_recurrence_index")
+    old["access_consciousness"] = old.pop("combined_recurrence_index")
+    state["histories"]["metrics_history"] = [old]
+    restored = RPTMeasurement()
+    restored.from_state_dict(state)
+    assert len(restored._metrics_history) == 1
+    metrics = restored._metrics_history[0]
+    assert metrics.local_recurrence_index == pytest.approx(
+        record["local_recurrence_index"]
+    )
+    assert metrics.combined_recurrence_index == pytest.approx(
+        record["combined_recurrence_index"]
+    )
+    assert not hasattr(metrics, "phenomenal_consciousness")
+    # Without either key the record is malformed and skipped
+    neither = dict(record)
+    del neither["local_recurrence_index"]
+    state["histories"]["metrics_history"] = [neither]
+    skipped = RPTMeasurement()
+    skipped.from_state_dict(state)
+    assert len(skipped._metrics_history) == 0
+
+
+def test_old_identifiers_survive_only_in_the_restore_fallback():
+    import re
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "mtc"
+        / "assessment"
+        / "rpt_measurement.py"
+    ).read_text()
+    block = re.search(r"_RENAMED_RECORD_KEYS\s*=\s*\{[^}]*\}", source)
+    assert block is not None
+    assert "phenomenal_consciousness" in block.group(0)
+    assert "access_consciousness" in block.group(0)
+    rest = source.replace(block.group(0), "")
+    assert "phenomenal_consciousness" not in rest
+    assert "access_consciousness" not in rest
+    # The module says what it measures: recurrence statistics, not either
+    # kind of consciousness.
+    assert "measures recurrence statistics only" in source
 
 
 def test_restore_skips_malformed_and_nonfinite_records():

@@ -5,7 +5,9 @@ or missing HTM never raises."""
 import copy
 
 import numpy as np
+import pytest
 
+from mtc.core.config import Settings
 from mtc.neural.htm.production_htm import HTMConfig, ProductionHTM
 from mtc.neural.orchestrator import NeuralOrchestrator
 
@@ -73,11 +75,28 @@ class _RaisingHTM:
         raise RuntimeError("substrate failure")
 
 
+def _light(**kwargs) -> NeuralOrchestrator:
+    return NeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False, **kwargs
+    )
+
+
 def test_live_htm_metrics_never_raise():
-    bare = _bare()
+    bare = _light(settings=Settings(_env_file=None, DEBUG=False))
     assert bare._live_htm_binding_metrics(_RaisingHTM(), np.ones(8)) == {}
     assert bare._live_htm_binding_metrics(None, np.ones(8)) == {}
     assert bare._live_htm_binding_metrics(_small_htm(), None) == {}
     assert bare._live_htm_binding_metrics(_small_htm(), np.array([])) == {}
     assert bare._live_htm_binding_metrics(object(), np.ones(8)) == {}
     assert bare._live_htm_binding_metrics(_small_htm(), "not a pattern") == {}
+
+    # Only the failed HTM pass is a failure; unusable input is not
+    assert bare.step_failures == {"live_htm_binding": 1}
+    assert bare.get_system_metrics()["failures"] == {"live_htm_binding": 1}
+
+
+def test_live_htm_failure_raises_under_debug():
+    debug = _light(settings=Settings(_env_file=None, DEBUG=True))
+    with pytest.raises(RuntimeError, match="substrate failure"):
+        debug._live_htm_binding_metrics(_RaisingHTM(), np.ones(8))
+    assert debug.step_failures == {"live_htm_binding": 1}

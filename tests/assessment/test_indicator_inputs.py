@@ -338,6 +338,70 @@ async def test_online_learning_has_no_learning_rate_credit():
     ].score == pytest.approx(0.5 * 0.5 + 0.3 * 1.0)
 
 
+async def _metacognition_after_hots(hots=10):
+    """A real module with the introspection cooldown off, after ``hots`` HOTs."""
+    from mtc.consciousness.metacognition import (
+        FirstOrderStateType,
+        MetacognitionModule,
+        MetaType,
+    )
+
+    module = MetacognitionModule(introspection_cooldown=0.0)
+    episodes = []
+
+    async def completed(result):
+        episodes.append(result)
+
+    module.on_introspection_complete(completed)
+    for i in range(hots):
+        state = module.register_first_order_state(
+            content=f"percept {i}",
+            content_summary=f"percept {i}",
+            state_type=FirstOrderStateType.PERCEPTION,
+            source_module="test",
+            confidence=0.5 + 0.04 * i,
+            evidence_strength=0.7,
+        )
+        await module.generate_hot(state, meta_type=MetaType.AWARENESS)
+    return module, episodes
+
+
+@pytest.mark.asyncio
+async def test_metacognition_indicator_reads_measured_confidence():
+    module, _episodes = await _metacognition_after_hots()
+    confidences = [h.confidence for h in module.higher_order_thoughts]
+    measured_mean = float(np.mean(confidences))
+    assert measured_mean != pytest.approx(0.5)
+    assert module.get_statistics()["overall_confidence"] == pytest.approx(measured_mean)
+    report = await _assess(
+        metacognition=module, global_workspace=_Workspace(_quiet_workspace_stats(10))
+    )
+    result = report.indicator_results["metacognition"]
+    assert result.status == MEASURED
+    assert result.evidence["overall_confidence"] == pytest.approx(measured_mean)
+    assert result.score == pytest.approx(
+        0.4 * result.evidence["activity_rate"] + 0.6 * measured_mean
+    )
+
+
+@pytest.mark.asyncio
+async def test_metacognition_activity_rate_counts_episodes():
+    module, episodes = await _metacognition_after_hots()
+    stats = module.get_statistics()
+    assert len(episodes) > 0
+    assert stats["introspection_count"] == len(episodes)
+    assert stats["total_hots_generated"] > len(episodes)
+    report = await _assess(
+        metacognition=module, global_workspace=_Workspace(_quiet_workspace_stats(10))
+    )
+    result = report.indicator_results["metacognition"]
+    assert result.evidence["introspections"] == len(episodes)
+    assert result.evidence["activity_rate"] == pytest.approx(
+        min(1.0, len(episodes) / 10)
+    )
+    assert result.evidence["activity_rate"] < 1.0
+
+
 class _PAD:
     history_length = 20
     _history = [None] * 20

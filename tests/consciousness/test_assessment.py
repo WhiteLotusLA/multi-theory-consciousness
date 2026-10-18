@@ -2,8 +2,6 @@
 Tests for the consciousness assessment (mtc.assessment.assessment): the
 30-indicator measurement system. All tests use mocks (no real neural
 modules or databases).
-
-Author: Multi-Theory Consciousness Project
 """
 
 import pytest
@@ -94,13 +92,20 @@ async def test_phi_calculation_positive():
 
 
 @pytest.mark.asyncio
-async def test_theory_scores_present(full_report):
-    """All 8 theory scores must be present."""
-    required_theories = {"GWT", "IIT", "AST", "HOT", "FEP", "RPT", "BLT", "AE"}
+async def test_theory_scores_present(assessment, full_report):
+    """All 8 theory scores are present once every theory has a measurement."""
+    from tests.assessment.test_missing_signals import fixture_modules
 
+    required_theories = {"GWT", "IIT", "AST", "HOT", "FEP", "RPT", "BLT", "AE"}
+    # No module connected: nothing measured, so no theory score at all
+    assert full_report.theory_scores == {}
+
+    measured = await assessment.run_full_assessment(
+        **fixture_modules(), normalize=False
+    )
     for theory in required_theories:
-        assert theory in full_report.theory_scores, f"Missing theory score: {theory}"
-        score = full_report.theory_scores[theory]
+        assert theory in measured.theory_scores, f"Missing theory score: {theory}"
+        score = measured.theory_scores[theory]
         assert isinstance(
             score, (int, float)
         ), f"Theory score for {theory} is not numeric: {type(score)}"
@@ -117,9 +122,15 @@ async def test_assessment_result_has_timestamp(full_report):
 
 
 @pytest.mark.asyncio
-async def test_overall_score_in_valid_range(full_report):
-    """The overall consciousness score must be between 0.0 and 1.0."""
-    assert 0.0 <= full_report.overall_score <= 1.0
+async def test_overall_score_in_valid_range(assessment, full_report):
+    """The overall score is between 0.0 and 1.0, or None with nothing measured."""
+    from tests.assessment.test_missing_signals import fixture_modules
+
+    assert full_report.overall_score is None
+    measured = await assessment.run_full_assessment(
+        **fixture_modules(), normalize=False
+    )
+    assert 0.0 <= measured.overall_score <= 1.0
 
 
 @pytest.mark.asyncio
@@ -136,9 +147,10 @@ async def test_report_to_dict_serializable(full_report):
     assert "passing_count" in d
     assert "total_indicators" in d
 
-    # Verify theory scores survive serialization
+    # Verify theory scores survive serialization (none with nothing measured)
     assert isinstance(d["theory_scores"], dict)
-    assert len(d["theory_scores"]) >= 5
+    assert d["theory_scores"] == {}
+    assert d["overall_score"] is None
 
 
 @pytest.mark.asyncio

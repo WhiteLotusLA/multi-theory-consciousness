@@ -20,6 +20,10 @@ Measurement vocabulary (one meaning for every indicator):
   is left out of the overall and theory averages and of the passing count,
   and is reported by name.
 
+An assessment in which nothing is measured has no overall score (None) and
+no theory scores: absent indicators enter an average only beside a measured
+one.
+
 No constant stands in for a missing input. ``STATS_CONTRACT`` lists every
 statistic the v05 formulas read from each producer, with its expected type.
 
@@ -39,7 +43,12 @@ Behaviour switches (constructor fields; the new behaviour is the default and
 the legacy_v04 preset sets the v0.4.0 value): ``indicator_formulas``,
 ``missing_signal_policy``, ``irreducibility_method``,
 ``causal_emergence_threshold``, ``phi_source``, ``phi_normalization``,
-``phi_fixed_reference`` and ``saturated_baseline_min_range``.
+``phi_fixed_reference``, ``saturated_baseline_min_range`` and
+``noise_baseline_matching``.
+
+An indicator body that raises is counted under ``indicator:<name>`` in the
+assessment's ``failures`` (copied onto the report), its evidence says
+``failed``, and the exception is re-raised when ``Settings.DEBUG`` is set.
 
 Features:
 - Noise-baseline normalization of every measured indicator
@@ -47,8 +56,6 @@ Features:
 - Negative indicators with their penalties on the report
 - Ablation and longitudinal study support
 - JSON-ready report export
-
-Author: Multi-Theory Consciousness Contributors
 """
 
 import asyncio
@@ -58,7 +65,7 @@ import math
 import random
 import time
 import uuid
-from collections import deque
+from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -69,6 +76,8 @@ import numpy as np
 
 from mtc.consciousness import pyphi_bridge
 from mtc.consciousness.pad_affect import PADState
+from mtc.core.config import get_settings
+from mtc.core.paths import ensure_dir, resolve_path
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +98,9 @@ IRREDUCIBILITY_METHODS = ("weighted_fiedler", "spectral_entropy")
 PHI_SOURCES = ("tracker_preferred", "calculator")
 PHI_NORMALIZATIONS = ("fixed", "percentile")
 PHI_METHODS = ("iit4_sia", "spectral_proxy")
+# producer: a Phi value is normalised only against a noise baseline made by
+# the same producer; v04_any: against whatever baseline the stub pass made.
+NOISE_BASELINE_MATCHINGS = ("producer", "v04_any")
 
 PHI_INTERPRETATIONS = {
     "phi_tracker_iit4": "module-graph integration proxy",
@@ -100,25 +112,33 @@ PHI_INTERPRETATIONS = {
 # Workspace sources that count as perceptual (the workspace's level 0).
 PERCEPTUAL_SOURCES = frozenset({"snn", "lsm", "sensory"})
 
+# The missing-statistic name the recurrence indicators report while the RPT
+# measurement has had no SNN or LSM state to measure local recurrence from.
+_NO_LOCAL_RECURRENCE = "rpt_measurement.average_local (no SNN or LSM state supplied)"
+
 _COUNT = (int, np.integer)
 _REAL = (int, float, np.integer, np.floating)
+# A statistic the producer reports as None until it has measured it.
+_OPTIONAL_REAL = _REAL + (type(None),)
 
 # Every statistic path the v05 formulas read, per module keyword, with its
 # expected type. Keys are the run_full_assessment keyword of the producer;
 # "rpt_measurement.oscillatory_binding" is the RPT measurement's
 # get_oscillatory_binding_stats() output. A dotted path walks nested dicts.
 # Some paths exist only once the producer has activity (for example
-# ignition.sustain_rate after the first ignition); the formulas read them
-# only then.
+# ignition.sustain_rate after the first ignition, and the binding's
+# zero_stimulus_order_parameter once a null history exists); the formulas
+# read them only then. An optional real is None while the producer has not
+# measured it; the v05 formula then reports insufficient_data naming the path.
 STATS_CONTRACT: Dict[str, Dict[str, Any]] = {
     "global_workspace": {
         "cycle_count": _COUNT,
         "broadcast": dict,
         "broadcast.total_broadcasts": _COUNT,
-        "broadcast.coverage_ratio": _REAL,
+        "broadcast.coverage_ratio": _OPTIONAL_REAL,
         "ignition": dict,
         "ignition.total_ignitions": _COUNT,
-        "ignition.sustain_rate": _REAL,
+        "ignition.sustain_rate": _OPTIONAL_REAL,
         "bottleneck": dict,
         "bottleneck.total_competitions": _COUNT,
         "bottleneck.avg_candidates": _REAL,
@@ -127,16 +147,16 @@ STATS_CONTRACT: Dict[str, Dict[str, Any]] = {
     "attention_schema": {
         "total_updates": _COUNT,
         "history_length": _COUNT,
-        "prediction_accuracy": _REAL,
+        "prediction_accuracy": _OPTIONAL_REAL,
         "capacity_used": _REAL,
         "voluntary_shifts": _COUNT,
-        "voluntary_ratio": _REAL,
+        "voluntary_ratio": _OPTIONAL_REAL,
     },
     "metacognition": {
         "total_hots_generated": _COUNT,
         "introspection_count": _COUNT,
         "first_order_buffer_size": _COUNT,
-        "overall_confidence": _REAL,
+        "overall_confidence": _OPTIONAL_REAL,
     },
     "active_inference": {
         "total_inferences": _COUNT,
@@ -149,7 +169,7 @@ STATS_CONTRACT: Dict[str, Dict[str, Any]] = {
     "beautiful_loop": {
         "cycle_count": _COUNT,
         "average_loop_quality": _REAL,
-        "average_binding_quality": _REAL,
+        "average_binding_quality": _OPTIONAL_REAL,
         "field_evidencing_count": _COUNT,
         "epistemic_depth": dict,
         "epistemic_depth.average_depth": _REAL,
@@ -157,13 +177,14 @@ STATS_CONTRACT: Dict[str, Dict[str, Any]] = {
     },
     "rpt_measurement": {
         "measurement_count": _COUNT,
-        "average_local": _REAL,
+        "average_local": _OPTIONAL_REAL,
         "average_global": _REAL,
     },
     "rpt_measurement.oscillatory_binding": {
         "global_order_parameter": _REAL,
         "cross_coherence": dict,
         "binding_count": _COUNT,
+        "zero_stimulus_order_parameter": _OPTIONAL_REAL,
     },
 }
 
@@ -202,6 +223,15 @@ def _count(value: Any) -> int:
     if number is None or number < 0:
         return 0
     return int(number)
+
+
+def _none_as(value: Any, replacement: Any) -> Any:
+    """``value`` unchanged, or ``replacement`` when the producer reported None.
+
+    The v0.4.0 formula bodies read a statistic their producers now leave
+    None until it is measured; they keep the number v0.4.0 saw there.
+    """
+    return replacement if value is None else value
 
 
 def _mapping(value: Any) -> Dict[str, Any]:
@@ -371,17 +401,20 @@ class NormalizedAssessmentResult:
 class ConsciousnessReport:
     """Complete consciousness assessment report.
 
-    ``overall_score`` is None only when no indicator is measured or absent.
-    ``status`` is measured (every indicator measured), partial or
-    insufficient_data (none measured); ``coverage`` is the measured share of
-    all indicators.
+    Under the ``insufficient_data`` policy ``overall_score`` is None when no
+    indicator is measured (absent indicators alone give no number) and
+    ``theory_scores`` omits a theory with no measured indicator; under
+    ``v04_constants`` both always carry a number, as in v0.4.0.
+    ``passing_count`` is always an integer. ``status`` is measured (every
+    indicator measured), partial or insufficient_data (none measured);
+    ``coverage`` is the measured share of all indicators.
     """
 
     session_id: str
     timestamp: datetime
 
     # Overall metrics
-    overall_score: Optional[float]  # 0-1 weighted average over included indicators
+    overall_score: Optional[float]  # 0-1 weighted mean; None with nothing measured
     architecture_functional: bool  # NOTE: Indicates all modules operating as designed, NOT phenomenal consciousness
     confidence: float
 
@@ -390,7 +423,7 @@ class ConsciousnessReport:
     passing_count: int
     total_indicators: int
 
-    # Theory-level scores (a theory with no included indicator is omitted)
+    # Theory-level scores (a theory with no measured indicator is omitted)
     theory_scores: Dict[str, float]
 
     # IIT-specific
@@ -408,6 +441,9 @@ class ConsciousnessReport:
     coverage: float = 1.0
     insufficient_indicators: List[str] = field(default_factory=list)
     negative_indicators: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # Indicator bodies that raised during this assessment, by step
+    # ("indicator:<name>" -> count); empty on a clean run
+    failures: Dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         """Convert to JSON-serializable dict."""
@@ -447,6 +483,7 @@ class ConsciousnessReport:
             "indicator_results": indicator_dict,
             "ablation_config": self.ablation_config,
             "processing_time_ms": self.processing_time_ms,
+            "failures": dict(self.failures),
         }
 
 
@@ -664,8 +701,21 @@ class PhiCalculator:
 
         This approximation avoids the NP-hard exact computation; it is a
         proxy and is labelled ``spectral_proxy``.
+
+        Raises:
+            ValueError: the connectivity is not a square matrix matching the
+                state, or holds non-finite values. A linear algebra error
+                propagates; nothing stands in for a failed term.
         """
         n = len(state)
+        connectivity = np.asarray(connectivity, dtype=np.float64)
+        if connectivity.ndim != 2 or connectivity.shape != (n, n):
+            raise ValueError(
+                f"connectivity must be a square ({n}, {n}) matrix matching the "
+                f"state, got shape {connectivity.shape}"
+            )
+        if not np.all(np.isfinite(connectivity)):
+            raise ValueError("connectivity holds non-finite values")
 
         if n < 2:
             return 0.0
@@ -673,29 +723,21 @@ class PhiCalculator:
         # 1. Calculate INTEGRATION via spectral analysis (Tononi-style)
         # The eigenvalue distribution of the effective connectivity matrix
         # reveals how much information the system integrates as a whole
-        if connectivity.shape[0] == connectivity.shape[1]:
-            try:
-                # Normalize connectivity matrix
-                C = connectivity.astype(np.float64)
-                C_normalized = C / (np.max(np.abs(C)) + 1e-10)
+        C_normalized = connectivity / (np.max(np.abs(connectivity)) + 1e-10)
 
-                # Add self-connections (autoregressive component)
-                C_effective = C_normalized + np.eye(n) * 0.5
+        # Add self-connections (autoregressive component)
+        C_effective = C_normalized + np.eye(n) * 0.5
 
-                # Eigenvalue analysis - integrated systems have concentrated spectrum
-                eigenvalues = np.linalg.eigvalsh(C_effective)
-                eigenvalues = np.abs(eigenvalues)
-                eigenvalues = eigenvalues / (np.sum(eigenvalues) + 1e-10)
+        # Eigenvalue analysis - integrated systems have concentrated spectrum
+        eigenvalues = np.linalg.eigvalsh(C_effective)
+        eigenvalues = np.abs(eigenvalues)
+        eigenvalues = eigenvalues / (np.sum(eigenvalues) + 1e-10)
 
-                # Integration = entropy of eigenvalue distribution
-                # Low entropy = concentrated spectrum = high integration
-                spectral_entropy = -np.sum(eigenvalues * np.log(eigenvalues + 1e-10))
-                max_entropy = np.log(n)
-                integration = 1.0 - (spectral_entropy / (max_entropy + 1e-10))
-            except Exception:
-                integration = 0.5
-        else:
-            integration = 0.5
+        # Integration = entropy of eigenvalue distribution
+        # Low entropy = concentrated spectrum = high integration
+        spectral_entropy = -np.sum(eigenvalues * np.log(eigenvalues + 1e-10))
+        max_entropy = np.log(n)
+        integration = 1.0 - (spectral_entropy / (max_entropy + 1e-10))
 
         # 2. Calculate INTRINSIC INFORMATION via state complexity
         # How much information does the current state carry about itself?
@@ -720,17 +762,14 @@ class PhiCalculator:
         # Connectivity density = how interconnected the system is
         connectivity_density = np.sum(np.abs(connectivity) > 0.1) / (n * n)
 
-        # Cluster coefficient approximation (resistance to cuts)
-        try:
-            # Check for modules/clusters that would make system reducible
-            # Use SVD to find principal components
-            U, S, Vt = np.linalg.svd(connectivity.astype(np.float64))
-            # If singular values are concentrated, system is more reducible
-            sv_normalized = S / (np.sum(S) + 1e-10)
-            sv_entropy = -np.sum(sv_normalized * np.log(sv_normalized + 1e-10))
-            irreducibility = sv_entropy / (np.log(len(S)) + 1e-10)
-        except Exception:
-            irreducibility = connectivity_density
+        # Cluster coefficient approximation (resistance to cuts): check for
+        # modules/clusters that would make the system reducible, through
+        # the singular values. If they are concentrated, the system is more
+        # reducible.
+        U, S, Vt = np.linalg.svd(connectivity)
+        sv_normalized = S / (np.sum(S) + 1e-10)
+        sv_entropy = -np.sum(sv_normalized * np.log(sv_normalized + 1e-10))
+        irreducibility = sv_entropy / (np.log(len(S)) + 1e-10)
 
         # Ensure irreducibility is boosted by high connectivity
         irreducibility = min(1.0, irreducibility + connectivity_density * 0.5)
@@ -781,6 +820,7 @@ class ConsciousnessAssessment:
         phi_source: str = "tracker_preferred",
         phi_normalization: str = "fixed",
         phi_fixed_reference: float = 5.0,
+        noise_baseline_matching: str = "producer",
     ):
         """Initialize the assessment.
 
@@ -809,6 +849,13 @@ class ConsciousnessAssessment:
             phi_normalization: ``fixed`` or ``percentile`` (see PhiCalculator;
                 for the tracker, percentile means the tracker's normalize_phi).
             phi_fixed_reference: denominator of the fixed normalization.
+            noise_baseline_matching: ``producer`` leaves a Phi value
+                un-normalised (raw score kept, evidence says so) when the
+                internal noise pass made its baseline with a different
+                producer, as it does for a PhiTracker value against the
+                spectral proxy's baseline; ``v04_any`` normalises against
+                whatever baseline the stub pass made (v0.4.0). Baselines a
+                caller supplies always apply.
 
         Raises:
             ValueError: an invalid choice; the message names the field.
@@ -822,6 +869,9 @@ class ConsciousnessAssessment:
         )
         _check_choice("phi_source", phi_source, PHI_SOURCES)
         _check_choice("phi_normalization", phi_normalization, PHI_NORMALIZATIONS)
+        _check_choice(
+            "noise_baseline_matching", noise_baseline_matching, NOISE_BASELINE_MATCHINGS
+        )
         threshold = _real(causal_emergence_threshold)
         if threshold is None or not 0.0 <= threshold <= 1.0:
             raise ValueError(
@@ -843,12 +893,16 @@ class ConsciousnessAssessment:
         self.phi_source = phi_source
         self.phi_normalization = phi_normalization
         self.phi_fixed_reference = reference
+        self.noise_baseline_matching = noise_baseline_matching
         self._honest = missing_signal_policy == "insufficient_data"
 
         self.phi_calculator = PhiCalculator(
             normalization=phi_normalization, fixed_reference=reference
         )
         self.assessment_history: List[ConsciousnessReport] = []  # last 50
+        # Indicator bodies that raised, by step ("indicator:<name>"), over
+        # every assessment this instance ran
+        self.failures: Counter = Counter()
 
         # Indicators with thresholds, weights and Butlin 2025 metadata.
         #
@@ -1301,6 +1355,10 @@ class ConsciousnessAssessment:
         }
 
         self._noise_baselines = None
+        # Indicator -> the producer of the Phi the internal noise pass
+        # normalised against (None under the v04 formulas, which computed
+        # no Phi on noise)
+        self._noise_baseline_sources: Dict[str, Optional[str]] = {}
 
         logger.info(
             "Consciousness Assessment initialized with %d indicators "
@@ -1354,6 +1412,9 @@ class ConsciousnessAssessment:
             noise_baselines: Pre-computed noise baselines (indicator name -> noise score).
                 If provided, used instead of running stub-based noise baseline.
                 Typically computed by running real modules with different random seeds.
+                Caller baselines are taken as made by the same producer as
+                the result and always apply; only the internal stub pass is
+                subject to ``noise_baseline_matching``.
             phi_tracker: PhiTracker whose exact IIT 4.0 Phi feeds the
                 integrated_information indicator under ``phi_source =
                 "tracker_preferred"``.
@@ -1373,6 +1434,7 @@ class ConsciousnessAssessment:
         phi_value = float(phi_info.get("value") or 0.0)
 
         indicator_results: Dict[str, IndicatorResult] = {}
+        run_failures: Counter = Counter()
 
         # Measure each indicator
         for name, config in self.indicator_configs.items():
@@ -1398,9 +1460,17 @@ class ConsciousnessAssessment:
                     warmup_cycles=warmup_cycles,
                 )
             except Exception as e:
+                # Counted by step; raised under DEBUG. The result keeps its
+                # shape: insufficient_data (v04_constants: measured 0.0).
+                step = f"indicator:{name}"
+                self.failures[step] += 1
+                run_failures[step] += 1
+                if bool(get_settings().DEBUG):
+                    raise
                 logger.warning(f"Failed to measure {name}: {e}")
                 status = INSUFFICIENT_DATA if self._honest else MEASURED
                 score, confidence, evidence = 0.0, 0.0, {"error": str(e)}
+                evidence["failed"] = True
                 evidence["status"] = status
 
             indicator_results[name] = self._build_result(
@@ -1412,16 +1482,23 @@ class ConsciousnessAssessment:
                 (time.time() - indicator_start) * 1000,
             )
 
-        # Noise-normalize scores so random inputs score near zero
+        # Noise-normalize scores so random inputs score near zero. Caller
+        # baselines always apply; the internal stub pass carries the source
+        # of its Phi so a value from another producer is not normalised
+        # against it.
         if normalize:
             if noise_baselines is not None:
                 baselines = noise_baselines
-            elif not hasattr(self, "_noise_baselines") or self._noise_baselines is None:
-                baselines = await self.run_noise_baseline(iterations=5)
-                self._noise_baselines = baselines
+                baseline_sources = None
             else:
+                if (
+                    not hasattr(self, "_noise_baselines")
+                    or self._noise_baselines is None
+                ):
+                    self._noise_baselines = await self.run_noise_baseline(iterations=5)
                 baselines = self._noise_baselines
-            self._normalize_results(indicator_results, baselines)
+                baseline_sources = self._noise_baseline_sources
+            self._normalize_results(indicator_results, baselines, baseline_sources)
 
         # Theory-level and overall scores
         theory_scores = self._calculate_theory_scores(indicator_results)
@@ -1486,6 +1563,7 @@ class ConsciousnessAssessment:
                 if r.status == INSUFFICIENT_DATA
             ],
             negative_indicators=negative_indicators,
+            failures=dict(run_failures),
         )
 
         self.assessment_history.append(report)
@@ -1558,16 +1636,26 @@ class ConsciousnessAssessment:
         self,
         indicator_results: Dict[str, IndicatorResult],
         baselines: Dict[str, float],
+        baseline_sources: Optional[Dict[str, Optional[str]]] = None,
     ) -> None:
         """Noise-normalize every result that is not insufficient_data.
 
         An indicator with no baseline keeps its raw score and records
-        ``noise_baseline: None``.
+        ``noise_baseline: None``. Under ``noise_baseline_matching =
+        "producer"`` a baseline that ``baseline_sources`` attributes to a
+        different producer than the result's evidence ``source`` is treated
+        the same way, with ``noise_baseline_skipped`` naming both sources; no
+        baseline is synthesised for the result's producer.
         """
         for name, result in list(indicator_results.items()):
             if result.status == INSUFFICIENT_DATA:
                 continue
             baseline = baselines.get(name)
+            skipped: Optional[Dict[str, Any]] = None
+            if baseline is not None and baseline_sources is not None:
+                skipped = self._mismatched_baseline(name, result, baseline_sources)
+                if skipped is not None:
+                    baseline = None
             if baseline is None:
                 normalized = result.score
                 saturated = False
@@ -1593,10 +1681,33 @@ class ConsciousnessAssessment:
                     "raw_score": result.score,
                     "noise_baseline": baseline,
                     "noise_saturated": saturated,
+                    **({"noise_baseline_skipped": skipped} if skipped else {}),
                 },
                 measurement_time_ms=result.measurement_time_ms,
                 status=result.status,
             )
+
+    def _mismatched_baseline(
+        self,
+        name: str,
+        result: IndicatorResult,
+        baseline_sources: Dict[str, Optional[str]],
+    ) -> Optional[Dict[str, Any]]:
+        """Both sources when the baseline's producer differs from the result's.
+
+        None when the baselines are taken as matching: under ``v04_any``,
+        when the result names no source, or when the baseline's source is
+        unknown or the same.
+        """
+        if self.noise_baseline_matching != "producer":
+            return None
+        result_source = result.evidence.get("source")
+        baseline_source = baseline_sources.get(name)
+        if result_source is None or baseline_source is None:
+            return None
+        if baseline_source == result_source:
+            return None
+        return {"baseline_source": baseline_source, "result_source": result_source}
 
     def _included(self, result: IndicatorResult) -> bool:
         """Whether a result enters the averages (measured and absent do)."""
@@ -1605,21 +1716,28 @@ class ConsciousnessAssessment:
     def _overall_score(
         self, indicator_results: Dict[str, IndicatorResult]
     ) -> Optional[float]:
-        """Weighted mean with the ConTraSt theory weighting over included results."""
+        """Weighted mean with the ConTraSt theory weighting over included results.
+
+        Under the ``insufficient_data`` policy the overall is None until at
+        least one included indicator is measured: absent indicators enter the
+        mean (an ablation compares them) but on their own measure nothing.
+        ``v04_constants`` averages every result, as v0.4.0 did.
+        """
         total_weight = 0.0
         weighted_sum = 0.0
-        included = 0
+        measured = 0
         for name, result in indicator_results.items():
             if not self._included(result):
                 continue
-            included += 1
+            if result.status == MEASURED:
+                measured += 1
             ind_weight = self.indicator_configs[name]["weight"]
             theory_name = self.indicator_configs[name]["theory"].name
             theory_weight = self.theory_empirical_weights.get(theory_name, 0.5)
             combined_weight = ind_weight * theory_weight
             weighted_sum += result.score * combined_weight
             total_weight += combined_weight
-        if self._honest and included == 0:
+        if self._honest and measured == 0:
             return None
         return weighted_sum / total_weight if total_weight > 0 else 0.0
 
@@ -1628,10 +1746,14 @@ class ConsciousnessAssessment:
     ) -> Dict[str, float]:
         """Average score per theory over included results.
 
-        A theory with no included result is omitted. Under ``v04_constants``
-        every result is included, as in v0.4.0.
+        Under the ``insufficient_data`` policy a theory with no measured
+        member is omitted (its absent members alone measure nothing); a
+        theory with one enters with the mean over its measured and absent
+        members. Under ``v04_constants`` every result is included, as in
+        v0.4.0.
         """
         theory_totals: Dict[str, List[float]] = {}
+        theories_measured = set()
 
         for result in indicator_results.values():
             if not self._included(result):
@@ -1640,6 +1762,8 @@ class ConsciousnessAssessment:
             if theory_name not in theory_totals:
                 theory_totals[theory_name] = []
             theory_totals[theory_name].append(result.score)
+            if result.status == MEASURED:
+                theories_measured.add(theory_name)
 
         if not self._honest:
             return {
@@ -1649,7 +1773,7 @@ class ConsciousnessAssessment:
         return {
             theory: float(np.mean(scores))
             for theory, scores in theory_totals.items()
-            if scores
+            if scores and theory in theories_measured
         }
 
     def _calculate_confidence(
@@ -1931,6 +2055,7 @@ class ConsciousnessAssessment:
             normalization=self.phi_normalization,
             fixed_reference=self.phi_fixed_reference,
         )
+        phi_source: Optional[str] = None
 
         for i in range(iterations):
             # Build randomised mock modules for each theory group; the v04
@@ -1943,6 +2068,7 @@ class ConsciousnessAssessment:
                 "connectivity": np.random.rand(8, 8),
             }
             phi_info = await self._noise_phi_info(noise_phi, noise_neural)
+            phi_source = phi_info.get("source")
 
             for name, config in self.indicator_configs.items():
                 try:
@@ -1971,6 +2097,9 @@ class ConsciousnessAssessment:
             for name, scores in accumulated.items()
             if scores
         }
+        # The producer of the Phi these baselines were made with: the
+        # spectral proxy under the v05 formulas, none under v04.
+        self._noise_baseline_sources = {"integrated_information": phi_source}
 
         logger.info(
             "Noise baselines computed: %s",
@@ -2039,36 +2168,46 @@ class ConsciousnessAssessment:
         active_inference=None,
         neural_states: Optional[Dict[str, np.ndarray]] = None,
         conversation_data: Optional[Dict[str, Any]] = None,
+        ablation_config: Optional[Dict[str, bool]] = None,
+        beautiful_loop=None,
+        rpt_measurement=None,
+        pad_affect_model=None,
+        causal_emergence_analyzer=None,
+        warmup_cycles: int = 25,
+        phi_tracker=None,
     ) -> NormalizedAssessmentResult:
         """
         Run a full assessment with noise-baseline normalization.
 
-        This is the recommended way to get honest consciousness scores:
-        1. First runs noise baseline to establish floor scores.
-        2. Then runs the real assessment with the provided modules, without
-           its own normalization (so the raw scores stay raw).
-        3. Normalizes each indicator by subtracting its noise floor.
-        4. Flags any indicator where noise baseline > 0.3 as
-           "potentially measuring activity rather than consciousness".
+        1. Runs the stub noise baseline once (``noise_iterations`` runs).
+        2. Runs the real assessment with every module keyword
+           ``run_full_assessment`` takes, without its own normalization, so
+           the raw report stays raw.
+        3. Normalizes a copy of its indicator results exactly as
+           ``run_full_assessment(normalize=True)`` would with these
+           baselines: the configured ``saturated_baseline_min_range``, the
+           missing-baseline branch (an indicator without a baseline keeps
+           its raw score) and ``noise_baseline_matching`` all apply.
+        4. Computes the normalized overall with the same weighted mean and
+           the same negative-indicator penalty, floored at 0.0; it is None
+           when nothing is measured.
+        5. Flags every indicator whose applied noise baseline exceeds 0.3 as
+           potentially measuring activity rather than consciousness.
 
         Insufficient indicators are left out of the scores and the overall.
 
         Args:
             noise_iterations: How many noise runs for baseline (default 10).
-            global_workspace: EnhancedGlobalWorkspace instance (GWT).
-            attention_schema: AttentionSchemaModule instance (AST).
-            metacognition: MetacognitionModule instance (HOT).
-            active_inference: ActiveInferenceModule instance (FEP).
-            neural_states: Raw neural data (SNN, LSM, HTM states).
-            conversation_data: Recent conversation for context.
+            The remaining arguments are those of ``run_full_assessment``.
 
         Returns:
             NormalizedAssessmentResult with raw, baseline, and normalized scores.
         """
         logger.info("Starting normalized consciousness assessment")
 
-        # Step 1: Establish noise baselines
+        # Step 1: Establish noise baselines (and the producer of their Phi)
         baselines = await self.run_noise_baseline(iterations=noise_iterations)
+        baseline_sources = dict(self._noise_baseline_sources)
 
         # Step 2: Run real assessment (raw scores; normalization happens below)
         report = await self.run_full_assessment(
@@ -2078,24 +2217,33 @@ class ConsciousnessAssessment:
             active_inference=active_inference,
             neural_states=neural_states,
             conversation_data=conversation_data,
+            ablation_config=ablation_config,
+            beautiful_loop=beautiful_loop,
+            rpt_measurement=rpt_measurement,
+            pad_affect_model=pad_affect_model,
+            causal_emergence_analyzer=causal_emergence_analyzer,
+            warmup_cycles=warmup_cycles,
+            phi_tracker=phi_tracker,
             normalize=False,
         )
 
-        # Step 3: Normalize each indicator
+        # Step 3: Normalize a copy of the results the way a normalizing
+        # assessment does (the raw report keeps its own result objects)
+        normalized_results = dict(report.indicator_results)
+        self._normalize_results(normalized_results, baselines, baseline_sources)
+
         raw_scores: Dict[str, float] = {}
         normalized_scores: Dict[str, float] = {}
         flagged: List[str] = []
-
-        for name, result in report.indicator_results.items():
-            if not self._included(result):
+        for name, normalized in normalized_results.items():
+            if not self._included(normalized):
                 continue
-            raw = result.score
-            baseline = baselines.get(name, 0.0)
-            raw_scores[name] = raw
-            normalized_scores[name] = self.get_normalized_score(raw, baseline)
+            raw_scores[name] = report.indicator_results[name].score
+            normalized_scores[name] = normalized.score
 
-            # Step 4: Flag suspicious indicators
-            if baseline > 0.3:
+            # Step 5: Flag suspicious indicators (an applied baseline only)
+            baseline = normalized.evidence.get("noise_baseline")
+            if baseline is not None and baseline > 0.3:
                 flagged.append(name)
                 logger.warning(
                     "Indicator '%s' has noise baseline %.3f (> 0.3) -- "
@@ -2104,15 +2252,11 @@ class ConsciousnessAssessment:
                     baseline,
                 )
 
-        # Compute normalized overall score (weighted, same weights as raw)
-        total_weight = sum(
-            self.indicator_configs[name]["weight"] for name in normalized_scores
-        )
-        weighted_sum = sum(
-            normalized_scores[name] * self.indicator_configs[name]["weight"]
-            for name in normalized_scores
-        )
-        normalized_overall = weighted_sum / total_weight if total_weight > 0 else None
+        # Step 4: the normalized overall, with the same weights and penalty
+        normalized_overall = self._overall_score(normalized_results)
+        if normalized_overall is not None:
+            penalty = sum(v["penalty"] for v in report.negative_indicators.values())
+            normalized_overall = max(0.0, normalized_overall - penalty)
 
         result = NormalizedAssessmentResult(
             raw_scores=raw_scores,
@@ -2358,7 +2502,13 @@ class ConsciousnessAssessment:
         competitions = _count(bottleneck.get("total_competitions"))
         avg_candidates = 0.0
         if competitions > 0:
-            avg_candidates = _real(bottleneck.get("avg_candidates")) or 0.0
+            avg_candidates, missing = self._stat_or_default(
+                bottleneck.get("avg_candidates"), 0.0
+            )
+            if missing:
+                return self._insufficient_result(
+                    "global_workspace.bottleneck.avg_candidates"
+                )
         # Successive competitions query the modules; the candidates offered
         # per competition show how many are queried each time.
         competition_score = min(1.0, competitions / 5)
@@ -2511,9 +2661,15 @@ class ConsciousnessAssessment:
         if self._honest and not ran:
             return self._insufficient_result("attention_schema.total_updates")
         warmup_cycles = kw.get("warmup_cycles", 25)
-        capacity = _real(stats.get("capacity_used")) or 0.0
+        capacity, missing = self._stat_or_default(stats.get("capacity_used"), 0.0)
+        if missing:
+            return self._insufficient_result("attention_schema.capacity_used")
         history_len = _count(stats.get("history_length"))
-        vol_ratio = _real(stats.get("voluntary_ratio")) or 0.0
+        # The schema reported 0.5 before it could classify a shift; that is
+        # the v0.4.0 default, not 0.0.
+        vol_ratio, missing = self._stat_or_default(stats.get("voluntary_ratio"), 0.5)
+        if missing:
+            return self._insufficient_result("attention_schema.voluntary_ratio")
         capacity_score = min(1.0, capacity) if capacity > 0 else 0.0
         perspective_score = min(1.0, history_len / max(1, warmup_cycles * 0.5))
         agency_score = vol_ratio
@@ -2903,7 +3059,11 @@ class ConsciousnessAssessment:
             return self._insufficient_result("active_inference.total_inferences")
         warmup_cycles = kw.get("warmup_cycles", 25)
         model_updates = _count(stats.get("total_model_updates"))
-        free_energy = _real(stats.get("variational_free_energy")) or 0.0
+        free_energy, missing = self._stat_or_default(
+            stats.get("variational_free_energy"), 0.0
+        )
+        if missing:
+            return self._insufficient_result("active_inference.variational_free_energy")
         if inferences == 0:
             score = 0.0
         else:
@@ -3092,8 +3252,16 @@ class ConsciousnessAssessment:
             return self._absent_result("rpt_measurement not provided")
         if self._honest and measurements == 0:
             return self._insufficient_result("rpt_measurement.measurement_count")
-        avg_local = _real(stats.get("average_local")) or 0.0
-        avg_global = _real(stats.get("average_global")) or 0.0
+        avg_local, missing = self._stat_or_default(stats.get("average_local"), 0.0)
+        if missing:
+            return self._insufficient_result(
+                _NO_LOCAL_RECURRENCE, measurements=measurements
+            )
+        avg_global, missing = self._stat_or_default(stats.get("average_global"), 0.0)
+        if missing:
+            return self._insufficient_result(
+                "rpt_measurement.average_global", measurements=measurements
+            )
         score = 0.0 if measurements == 0 else 0.6 * avg_local + 0.4 * avg_global
         confidence = 0.5 + 0.3 * min(1.0, measurements / 10)
         return self._measured(
@@ -3116,7 +3284,13 @@ class ConsciousnessAssessment:
                 avg_local_recurrence=None,
                 measurements=0,
             )
-        avg_local = _real(stats.get("average_local")) or 0.0
+        avg_local, missing = self._stat_or_default(stats.get("average_local"), 0.0)
+        if missing:
+            return self._insufficient_result(
+                _NO_LOCAL_RECURRENCE,
+                avg_local_recurrence=None,
+                measurements=measurements,
+            )
         score = avg_local if measurements > 0 else 0.0
         confidence = 0.5 + 0.2 * min(1.0, measurements / 10)
         return self._measured(
@@ -3133,12 +3307,32 @@ class ConsciousnessAssessment:
         binding_count = _count(osc_stats.get("binding_count")) if osc_stats else 0
         if self._honest and binding_count == 0:
             return self._insufficient_result("oscillatory binding statistics")
-        global_r = _real(osc_stats.get("global_order_parameter")) or 0.0
+        global_r, missing = self._stat_or_default(
+            osc_stats.get("global_order_parameter"), 0.0
+        )
+        if missing:
+            return self._insufficient_result(
+                "rpt_measurement.oscillatory_binding.global_order_parameter"
+            )
         cross_vals = _mapping(osc_stats.get("cross_coherence"))
         numbers = [v for v in (_real(x) for x in cross_vals.values()) if v is not None]
         mean_cross = max(0.0, float(np.mean(numbers))) if numbers else 0.0
         score = 0.0 if binding_count == 0 else 0.6 * global_r + 0.4 * mean_cross
         confidence = 0.5 + 0.3 * min(1.0, binding_count / 10)
+        # The binding layer's own zero-stimulus floor: the order parameter
+        # the same dynamics reach with no input. When it leaves less than
+        # saturated_baseline_min_range of headroom the order parameter cannot
+        # register an input and the indicator is uninformative, so it scores
+        # 0.0 (the same guard a noise baseline gets). None when the producer
+        # did not supply the floor; 0.0 for the minimum range disables it.
+        floor = None
+        if "zero_stimulus_order_parameter" in osc_stats:
+            floor = _real(osc_stats.get("zero_stimulus_order_parameter"))
+        floor_saturated = bool(
+            floor is not None and (1.0 - floor) < self.saturated_baseline_min_range
+        )
+        if floor_saturated:
+            score = 0.0
         return self._measured(
             score,
             confidence,
@@ -3147,6 +3341,8 @@ class ConsciousnessAssessment:
                 "cross_coherence": dict(cross_vals),
                 "mean_cross_coherence": mean_cross,
                 "binding_count": binding_count,
+                "zero_stimulus_order_parameter": floor,
+                "floor_saturated": floor_saturated,
             },
         )
 
@@ -3177,10 +3373,22 @@ class ConsciousnessAssessment:
                 if source in PERCEPTUAL_SOURCES
             )
         perceptual_score = min(1.0, perceptual_count / 5) if perceptual_count else 0.0
-        avg_local = 0.0
+        # The RPT term is optional: without an RPT, or with an RPT that has
+        # no local value yet (no substrate state arrived), it contributes
+        # nothing and the evidence records None (the v04_constants policy
+        # records the constant 0.0); it is insufficient only when the
+        # workspace did not run as well.
+        avg_local = None if self._honest else 0.0
         if rpt_ran:
-            avg_local = _real(rpt_stats.get("average_local")) or 0.0
-        score = 0.5 * perceptual_score + 0.5 * avg_local
+            avg_local, missing = self._stat_or_default(
+                rpt_stats.get("average_local"), 0.0
+            )
+            if missing:
+                if not gw_ran:
+                    return self._insufficient_result(_NO_LOCAL_RECURRENCE)
+                avg_local = None
+        local_term = 0.0 if avg_local is None else avg_local
+        score = 0.5 * perceptual_score + 0.5 * local_term
         confidence = 0.4 + 0.2 * min(1.0, perceptual_count / 3)
         return self._measured(
             score,
@@ -3206,19 +3414,24 @@ class ConsciousnessAssessment:
             return self._absent_result("beautiful_loop not provided")
         if self._honest and cycles == 0:
             return self._insufficient_result("beautiful_loop.cycle_count")
-        avg_binding = _real(stats.get("average_binding_quality")) or 0.0
+        avg_binding, missing = self._stat_or_default(
+            stats.get("average_binding_quality"), 0.0
+        )
+        if missing:
+            return self._insufficient_result("beautiful_loop.average_binding_quality")
         score = avg_binding if cycles > 0 else 0.0
         confidence = 0.5 + 0.3 * min(1.0, cycles / 10)
         return self._measured(
             score, confidence, {"avg_binding": avg_binding, "cycles": cycles}
         )
 
-    def _depth(self, stats: Dict[str, Any]) -> Tuple[float, int]:
+    def _depth(self, stats: Dict[str, Any]) -> Tuple[Optional[float], bool, int]:
+        """(average depth, whether it is missing, peak depth) of the loop."""
         depth_stats = _mapping(stats.get("epistemic_depth"))
-        return (
-            _real(depth_stats.get("average_depth")) or 0.0,
-            _count(depth_stats.get("peak_depth")),
+        avg_depth, missing = self._stat_or_default(
+            depth_stats.get("average_depth"), 0.0
         )
+        return avg_depth, missing, _count(depth_stats.get("peak_depth"))
 
     def _v05_epistemic_depth(self, kw):
         bl, stats, cycles = self._loop(kw)
@@ -3226,7 +3439,11 @@ class ConsciousnessAssessment:
             return self._absent_result("beautiful_loop not provided")
         if self._honest and cycles == 0:
             return self._insufficient_result("beautiful_loop.cycle_count")
-        avg_depth, peak_depth = self._depth(stats)
+        avg_depth, missing, peak_depth = self._depth(stats)
+        if missing:
+            return self._insufficient_result(
+                "beautiful_loop.epistemic_depth.average_depth"
+            )
         score = min(1.0, avg_depth / 4.0) if avg_depth > 0 else 0.0
         confidence = 0.6 if peak_depth >= 2 else 0.3
         return self._measured(
@@ -3239,9 +3456,13 @@ class ConsciousnessAssessment:
             return self._absent_result("beautiful_loop not provided")
         if self._honest and cycles == 0:
             return self._insufficient_result("beautiful_loop.cycle_count")
-        avg_quality = _real(stats.get("average_loop_quality")) or 0.0
+        avg_quality, missing = self._stat_or_default(
+            stats.get("average_loop_quality"), 0.0
+        )
+        if missing:
+            return self._insufficient_result("beautiful_loop.average_loop_quality")
         fe_count = _count(stats.get("field_evidencing_count"))
-        _avg_depth, peak_depth = self._depth(stats)
+        _avg_depth, _depth_missing, peak_depth = self._depth(stats)
         has_field_evidencing = fe_count > 0
         has_loop_quality = avg_quality >= 0.4
         has_strange_loop = peak_depth >= 2
@@ -3384,7 +3605,7 @@ class ConsciousnessAssessment:
                     stats = gw.get_statistics() if hasattr(gw, "get_statistics") else {}
                     broadcast_stats = stats.get("broadcast", {})
                     broadcast_count = broadcast_stats.get("total_broadcasts", 0)
-                    coverage = broadcast_stats.get("coverage_ratio", 0.0)
+                    coverage = _none_as(broadcast_stats.get("coverage_ratio", 0.0), 0.0)
                     if broadcast_count == 0:
                         score = 0.0
                     else:
@@ -3400,7 +3621,9 @@ class ConsciousnessAssessment:
                     stats = gw.get_statistics() if hasattr(gw, "get_statistics") else {}
                     ignition_stats = stats.get("ignition", {})
                     ignitions = ignition_stats.get("total_ignitions", 0)
-                    sustain_rate = ignition_stats.get("sustain_rate", 0.0)
+                    sustain_rate = _none_as(
+                        ignition_stats.get("sustain_rate", 0.0), 0.0
+                    )
                     cycle_count = stats.get("cycle_count", 0)
                     if ignitions == 0:
                         score = 0.0
@@ -3444,7 +3667,9 @@ class ConsciousnessAssessment:
                         )
                         total_updates = stats.get("total_updates", 0)
                         history_len = stats.get("history_length", 0)
-                        pred_accuracy = stats.get("prediction_accuracy", 0.0)
+                        pred_accuracy = _none_as(
+                            stats.get("prediction_accuracy", 0.0), 0.0
+                        )
 
                         schema_active = min(
                             1.0, total_updates / max(1, warmup_cycles * 0.5)
@@ -3479,7 +3704,8 @@ class ConsciousnessAssessment:
                         ast.get_statistics() if hasattr(ast, "get_statistics") else {}
                     )
                     voluntary_shifts = stats.get("voluntary_shifts", 0)
-                    voluntary_ratio = stats.get("voluntary_ratio", 0.0)
+                    # The schema reported 0.5 before it could classify a shift
+                    voluntary_ratio = _none_as(stats.get("voluntary_ratio", 0.0), 0.5)
                     if voluntary_shifts == 0:
                         score = 0.0
                     else:
@@ -3498,7 +3724,7 @@ class ConsciousnessAssessment:
                     warmup_cycles = kwargs.get("warmup_cycles", 25)
                     capacity = stats.get("capacity_used", 0.0)
                     history_len = stats.get("history_length", 0)
-                    vol_ratio = stats.get("voluntary_ratio", 0.0)
+                    vol_ratio = _none_as(stats.get("voluntary_ratio", 0.0), 0.5)
                     capacity_score = min(1.0, capacity) if capacity > 0 else 0.0
                     perspective_score = min(
                         1.0, history_len / max(1, warmup_cycles * 0.5)
@@ -3556,7 +3782,10 @@ class ConsciousnessAssessment:
                     )
                     introspections = stats.get("introspection_count", 0)
                     belief_evaluations = stats.get("belief_evaluations", 0)
-                    overall_confidence = stats.get("overall_confidence", 0.0)
+                    # The module reported a constant 0.5 before it measured it
+                    overall_confidence = _none_as(
+                        stats.get("overall_confidence", 0.0), 0.5
+                    )
                     gw = kwargs.get("global_workspace")
                     gw_stats = (
                         gw.get_statistics()
@@ -3812,7 +4041,7 @@ class ConsciousnessAssessment:
                 if gw is not None:
                     stats = gw.get_statistics() if hasattr(gw, "get_statistics") else {}
                     broadcast_stats = stats.get("broadcast", {})
-                    coverage = broadcast_stats.get("coverage_ratio", 0.0)
+                    coverage = _none_as(broadcast_stats.get("coverage_ratio", 0.0), 0.0)
                     cycle_count = stats.get("cycle_count", 0)
                     broadcasts = broadcast_stats.get("total_broadcasts", 0)
                     if cycle_count == 0:
@@ -3839,8 +4068,8 @@ class ConsciousnessAssessment:
                     stats = (
                         rpt.get_statistics() if hasattr(rpt, "get_statistics") else {}
                     )
-                    avg_local = stats.get("average_local", 0.0)
-                    avg_global = stats.get("average_global", 0.0)
+                    avg_local = _none_as(stats.get("average_local", 0.0), 0.0)
+                    avg_global = _none_as(stats.get("average_global", 0.0), 0.0)
                     measurement_count = stats.get("measurement_count", 0)
                     if measurement_count == 0:
                         score = 0.0
@@ -3858,7 +4087,7 @@ class ConsciousnessAssessment:
                     stats = (
                         rpt.get_statistics() if hasattr(rpt, "get_statistics") else {}
                     )
-                    avg_local = stats.get("average_local", 0.0)
+                    avg_local = _none_as(stats.get("average_local", 0.0), 0.0)
                     measurement_count = stats.get("measurement_count", 0)
                     score = avg_local if measurement_count > 0 else 0.0
                     confidence = 0.5 + 0.2 * min(1.0, measurement_count / 10)
@@ -3909,7 +4138,9 @@ class ConsciousnessAssessment:
                 )
 
                 if name == "bayesian_binding_quality":
-                    avg_binding = stats.get("average_binding_quality", 0.0)
+                    avg_binding = _none_as(
+                        stats.get("average_binding_quality", 0.0), 0.0
+                    )
                     cycle_count = stats.get("cycle_count", 0)
                     score = avg_binding if cycle_count > 0 else 0.0
                     confidence = 0.5 + 0.3 * min(1.0, cycle_count / 10)
@@ -3932,7 +4163,7 @@ class ConsciousnessAssessment:
                     }
 
                 elif name == "genuine_implementation":
-                    avg_quality = stats.get("average_loop_quality", 0.0)
+                    avg_quality = _none_as(stats.get("average_loop_quality", 0.0), 0.0)
                     fe_count = stats.get("field_evidencing_count", 0)
                     cycle_count = stats.get("cycle_count", 0)
                     depth_stats = stats.get("epistemic_depth", {})
@@ -4021,7 +4252,7 @@ class ConsciousnessAssessment:
                     base_score = 0.4
                     capacity = stats.get("capacity_used", 0.0)
                     history_len = stats.get("history_length", 0)
-                    vol_ratio = stats.get("voluntary_ratio", 0.0)
+                    vol_ratio = _none_as(stats.get("voluntary_ratio", 0.0), 0.5)
                     capacity_score = min(1.0, capacity * 2) if capacity > 0 else 0.3
                     perspective_score = min(1.0, history_len / 5)
                     agency_score = vol_ratio
@@ -4077,7 +4308,7 @@ class ConsciousnessAssessment:
                 stats = gw.get_statistics() if hasattr(gw, "get_statistics") else {}
                 ignition_stats = stats.get("ignition", {})
                 ignitions = ignition_stats.get("total_ignitions", 0)
-                sustain_rate = ignition_stats.get("sustain_rate", 0.0)
+                sustain_rate = _none_as(ignition_stats.get("sustain_rate", 0.0), 0.0)
                 decay_rate = ignition_stats.get("decay_rate", 0.0)
                 cycle_count = stats.get("cycle_count", 0)
                 if ignitions == 0:
@@ -4141,7 +4372,7 @@ class ConsciousnessAssessment:
                     if rpt and hasattr(rpt, "get_statistics")
                     else {}
                 )
-                avg_local = rpt_stats.get("average_local", 0.0)
+                avg_local = _none_as(rpt_stats.get("average_local", 0.0), 0.0)
                 score = max(base_score, 0.5 * perceptual_score + 0.5 * avg_local)
                 confidence = 0.4 + 0.2 * min(1.0, perceptual_count / 3)
                 evidence = {
@@ -4485,12 +4716,15 @@ class LongitudinalStudy:
     2. Detect consciousness emergence
     3. Validate theories
     4. Generate publishable data
+
+    Results go to ``output_dir`` when one is given, else to
+    ``Settings.LONGITUDINAL_OUTPUT_DIR`` under ``PROJECT_ROOT``, resolved at
+    write time; no directory is created before the first write.
     """
 
-    def __init__(self, output_dir: str = "results/longitudinal_studies"):
+    def __init__(self, output_dir: Optional[str] = None):
         """Initialize longitudinal study framework."""
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._output_dir = Path(output_dir) if output_dir is not None else None
 
         self.assessment = ConsciousnessAssessment()
         self.study_id = str(uuid.uuid4())[:8]
@@ -4499,6 +4733,14 @@ class LongitudinalStudy:
         self.is_running = False
 
         logger.info(f"Longitudinal Study Framework initialized (ID: {self.study_id})")
+
+    @property
+    def output_dir(self) -> Path:
+        """Where results are written (resolved now, created at the first write)."""
+        if self._output_dir is not None:
+            return self._output_dir
+        settings = get_settings()
+        return resolve_path(settings.LONGITUDINAL_OUTPUT_DIR, settings=settings)
 
     async def run_study(
         self,
@@ -4655,7 +4897,8 @@ class LongitudinalStudy:
 
     async def _save_intermediate_results(self):
         """Save intermediate results for safety."""
-        filepath = self.output_dir / f"study_{self.study_id}_intermediate.json"
+        directory = ensure_dir(self.output_dir)
+        filepath = directory / f"study_{self.study_id}_intermediate.json"
 
         data = {
             "study_id": self.study_id,
@@ -4683,7 +4926,8 @@ class LongitudinalStudy:
 
     async def _save_final_results(self, results: StudyResults):
         """Save final study results."""
-        filepath = self.output_dir / f"study_{self.study_id}_final.json"
+        directory = ensure_dir(self.output_dir)
+        filepath = directory / f"study_{self.study_id}_final.json"
 
         data = {
             "study_id": results.study_id,
@@ -4740,15 +4984,26 @@ class AblationStudy:
 
     Every other module the system state carries (beautiful loop, RPT, PAD,
     causal emergence analyzer, PhiTracker, neural states) is forwarded too.
+
+    Results go to ``output_dir`` when one is given, else to
+    ``Settings.ABLATION_OUTPUT_DIR`` under ``PROJECT_ROOT``, resolved at write
+    time; no directory is created before the first write.
     """
 
-    def __init__(self, output_dir: str = "results/ablation_studies/phase6"):
+    def __init__(self, output_dir: Optional[str] = None):
         """Initialize ablation study."""
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._output_dir = Path(output_dir) if output_dir is not None else None
         self.assessment = ConsciousnessAssessment()
 
         logger.info("Ablation Study Framework initialized")
+
+    @property
+    def output_dir(self) -> Path:
+        """Where results are written (resolved now, created at the first write)."""
+        if self._output_dir is not None:
+            return self._output_dir
+        settings = get_settings()
+        return resolve_path(settings.ABLATION_OUTPUT_DIR, settings=settings)
 
     async def run_full_ablation(self, get_system_state: callable) -> Dict[str, Any]:
         """
@@ -4853,7 +5108,8 @@ class AblationStudy:
     def _save_results(self, results: Dict[str, Any]):
         """Save ablation results."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filepath = self.output_dir / f"phase6_ablation_{timestamp}.json"
+        directory = ensure_dir(self.output_dir)
+        filepath = directory / f"ablation_{timestamp}.json"
 
         with open(filepath, "w") as f:
             json.dump(results, f, indent=2)

@@ -1,5 +1,6 @@
 """Behavioral battery: forced-choice scoring, errors, analysis, saving."""
 
+import ast
 import asyncio
 import json
 import re
@@ -119,7 +120,11 @@ def test_partial_status_when_only_some_experiments_have_data():
                 raise ChatClientError("down")
             return await super().send(message, speaker)
 
-    result = run(make_suite(HalfDead()).run_battery(trials_per_experiment=6))
+    result = run(
+        make_suite(HalfDead(), experiments=ef.EXPERIMENT_NAMES).run_battery(
+            trials_per_experiment=6
+        )
+    )
     assert result.status == "partial"
     assert result.summaries["temporal_binding"].status == "insufficient_data"
     assert result.overall_score is not None
@@ -222,7 +227,8 @@ def test_zero_variance_scores_have_no_t_test():
 
 
 def test_battery_weights_and_overall():
-    result = run(make_suite(ScriptedClient()).run_battery(trials_per_experiment=6))
+    suite = make_suite(ScriptedClient(), experiments=ef.EXPERIMENT_NAMES)
+    result = run(suite.run_battery(trials_per_experiment=6))
     means = {n: s.mean_score for n, s in result.summaries.items()}
     w = ef.BATTERY_WEIGHTS
     expected = sum(w[n] * means[n] for n in w) / sum(w.values())
@@ -236,7 +242,8 @@ def test_results_saved_under_results_dir(tmp_path, monkeypatch):
         "get_settings",
         lambda: SimpleNamespace(RESULTS_DIR=str(tmp_path / "res"), SYSTEM_NAME="Probe"),
     )
-    result = run(make_suite(ScriptedClient()).run_battery(trials_per_experiment=4))
+    suite = make_suite(ScriptedClient(), experiments=ef.EXPERIMENT_NAMES)
+    result = run(suite.run_battery(trials_per_experiment=4))
     assert not (tmp_path / "res").exists()
     path = save_results(result)
     assert path.parent == tmp_path / "res" / "experiments"
@@ -332,3 +339,60 @@ def test_http_client_round_trip_and_errors():
 def test_battery_result_type():
     result = run(make_suite(ScriptedClient()).run_battery(trials_per_experiment=3))
     assert isinstance(result, BatteryResult)
+
+
+def test_default_battery_excludes_temporal_binding():
+    suite = make_suite(ScriptedClient())
+    assert tuple(suite.experiments) == ("mirror_self_recognition", "false_belief")
+    assert ef.DEFAULT_EXPERIMENTS == ("mirror_self_recognition", "false_belief")
+    result = run(suite.run_battery(trials_per_experiment=4))
+    assert set(result.summaries) == {"mirror_self_recognition", "false_belief"}
+    assert not any("together or separately" in p for p in suite.client.prompts)
+    # Still available by name, and an unknown name is refused.
+    named = make_suite(ScriptedClient(), experiments=("temporal_binding",))
+    assert isinstance(named.experiments["temporal_binding"], TemporalBindingExperiment)
+    assert set(ef.EXPERIMENT_NAMES) == set(ef.BATTERY_WEIGHTS)
+    with pytest.raises(ValueError, match="unknown experiment"):
+        make_suite(ScriptedClient(), experiments=("mirror", "false_belief"))
+    with pytest.raises(ValueError):
+        make_suite(ScriptedClient(), experiments=())
+    doc = " ".join(TemporalBindingExperiment.__doc__.split())
+    assert "not part of the default battery" in doc
+    assert "cannot be perceived" in doc
+
+
+def _module_level_imports(tree):
+    """Import statements outside every function body, as module names."""
+    inside = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            inside.update(id(child) for child in ast.walk(node))
+    names = []
+    for node in ast.walk(tree):
+        if id(node) in inside:
+            continue
+        if isinstance(node, ast.Import):
+            names.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.append(node.module)
+    return names
+
+
+def test_module_import_loads_no_http_client():
+    tree = ast.parse(open(ef.__file__, encoding="utf-8").read())
+    clients = ("urllib.request", "urllib.error", "http.client", "requests", "httpx")
+    top = _module_level_imports(tree)
+    assert not [name for name in top if name in clients], top
+    # The sending method holds the import.
+    post = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_post"
+    )
+    inner = [
+        alias.name
+        for node in ast.walk(post)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    ]
+    assert "urllib.request" in inner and "urllib.error" in inner

@@ -189,3 +189,20 @@ def test_gpu_factory_creates_novelty_filter(monkeypatch):
     source = Path(gpu_integration.__file__).read_text(encoding="utf-8")
     for claim in ("faster", "zero-copy", "ZERO-COPY", "200x"):
         assert claim not in source, claim
+
+
+def test_spiking_package_names_only_modules_that_exist():
+    import re
+
+    import mtc.neural.spiking as spiking
+
+    assert importlib.util.find_spec("mtc.neural.spiking.snn_core") is None
+    named = set(re.findall(r"``([a-z_]+)``", spiking.__doc__ or ""))
+    shipped = {
+        path.stem
+        for path in Path(spiking.__file__).parent.glob("*.py")
+        if path.stem != "__init__"
+    }
+    assert named == shipped
+    for module in named:
+        assert importlib.util.find_spec(f"mtc.neural.spiking.{module}") is not None

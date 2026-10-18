@@ -16,6 +16,7 @@ import pytest
 
 from mtc.core.config import Settings
 from mtc.memory.protocols import TELEMETRY_COLLECTIONS, StoreUnavailable
+from mtc.memory.thought_gist import ThoughtGist
 from mtc.neural import mongodb_schemas
 from mtc.neural.mongodb_schemas import (
     NEURAL_COLLECTIONS,
@@ -292,6 +293,27 @@ def test_unreachable_server_fails_fast_and_disables_until_retry(client):
     assert status["available"] is True and status["last_error"] is None
 
 
+def test_status_unknown_before_first_contact(client):
+    manager = NeuralDataManager(client=client, database_name="d")
+    assert manager.status()["available"] is None
+    assert client.calls == []
+
+    assert manager.store_spike(_spike()) is not None
+    assert manager.status()["available"] is True
+
+    failing = NeuralDataManager(client=FakeMongoClient(), database_name="d")
+    failing.db.client.unreachable = True
+    assert failing.status()["available"] is None
+    assert failing.store_spike(_spike()) is None
+    assert failing.status()["available"] is False
+
+
+def test_closed_manager_is_unavailable_without_contact(client):
+    manager = NeuralDataManager(client=client, database_name="d")
+    asyncio.run(manager.close())
+    assert manager.status()["available"] is False
+
+
 def test_second_failure_after_the_window_disables_again(client):
     clock = Clock()
     manager = NeuralDataManager(client=client, retry_after_s=10.0, clock=clock)
@@ -549,3 +571,86 @@ def test_stores_satisfy_their_protocols(manager, client):
     )
     assert manager.status()["backend"] == "mongodb"
     assert MongoConversationStore(database=client["c"]).status()["backend"] == "mongodb"
+
+
+def _gist_doc(gist_id, minutes, retention=None, importance=None):
+    return ThoughtGist(
+        gist_id=gist_id,
+        created_at=T0 + timedelta(minutes=minutes),
+        summary=f"summary {gist_id}",
+        source_count=1,
+        source_thought_ids=[f"t-{gist_id}"],
+        importance_score=importance,
+        retention_strength=retention,
+    )
+
+
+@pytest.mark.asyncio
+async def test_iter_gists_yields_gists_without_retention(manager, client):
+    for gist in (
+        _gist_doc("c", 5, retention=0.9, importance=0.4),
+        _gist_doc("a", 0),
+        _gist_doc("e", 9, retention=0.0),
+        _gist_doc("d", 5, retention=0.05),
+        _gist_doc("b", 2, importance=0.7),
+    ):
+        await manager.add_gist(gist)
+    before = len(client.methods("thought_gists"))
+
+    seen = [g async for g in manager.iter_gists(batch=2)]
+
+    assert [g.gist_id for g in seen] == ["a", "b", "c", "d", "e"]
+    assert [g.retention_strength for g in seen] == [None, None, 0.9, 0.05, 0.0]
+    assert all(isinstance(g, ThoughtGist) for g in seen)
+    finds = client.methods("thought_gists")[before:]
+    assert finds.count("find") == 3  # pages of two, two and one
+    assert [g.gist_id async for g in manager.iter_gists()] == ["a", "b", "c", "d", "e"]
+    with pytest.raises(ValueError):
+        [g async for g in manager.iter_gists(batch=0)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch", [1, 2])
+async def test_iter_gists_equal_creation_times_across_page_boundaries(manager, batch):
+    for gist in (
+        _gist_doc("z", 0),
+        _gist_doc("m", 5),
+        _gist_doc("k", 5),
+        _gist_doc("q", 5),
+        _gist_doc("a", 7),
+    ):
+        await manager.add_gist(gist)
+
+    seen = [g.gist_id async for g in manager.iter_gists(batch=batch)]
+
+    # the three gists of minute five straddle every page boundary
+    assert seen == ["z", "k", "m", "q", "a"]
+
+
+@pytest.mark.asyncio
+async def test_iter_gists_unreachable_server_raises(manager, client):
+    await manager.add_gist(_gist_doc("a", 0))
+    client.unreachable = True
+    with pytest.raises(StoreUnavailable):
+        [g async for g in manager.iter_gists()]
+
+
+@pytest.mark.asyncio
+async def test_active_gists_excludes_null_retention_and_orders_null_importance_last(
+    manager,
+):
+    await manager.add_gist(_gist_doc("unknown_retention", 0, importance=0.99))
+    await manager.add_gist(_gist_doc("low", 1, retention=0.5, importance=0.2))
+    await manager.add_gist(_gist_doc("unscored", 2, retention=0.5))
+    await manager.add_gist(_gist_doc("high", 3, retention=0.5, importance=0.8))
+
+    ordered = await manager.active_gists(min_retention=0.0)
+
+    assert [g.gist_id for g in ordered] == ["high", "low", "unscored"]
+    assert ordered[-1].importance_score is None
+    # an unknown retention is never below a floor either
+    assert await manager.expire_gists(1.0, dry_run=True) == 3
+    remaining = [g.gist_id async for g in manager.iter_gists()]
+    assert await manager.expire_gists(1.0, dry_run=False) == 3
+    assert [g.gist_id async for g in manager.iter_gists()] == ["unknown_retention"]
+    assert len(remaining) == 4

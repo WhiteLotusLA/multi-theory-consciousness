@@ -24,7 +24,7 @@ def _run(coro):
 def test_verification_component_available():
     assert orch_mod.OPTIONAL_COMPONENTS["verification_framework"] == (
         "mtc.consciousness.verification_framework",
-        None,
+        "core",
     )
     orchestrator = NeuralOrchestrator(
         enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
@@ -121,8 +121,13 @@ def test_verify_marks_only_produced_outputs_real():
 
 
 def test_verify_never_raises(monkeypatch):
+    from mtc.core.config import Settings
+
     orchestrator = NeuralOrchestrator(
-        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+        enable_mongodb=False,
+        emotion_bridge=False,
+        memory_consolidator=False,
+        settings=Settings(_env_file=None, DEBUG=False),
     )
 
     def boom(*args, **kwargs):
@@ -142,3 +147,51 @@ def test_verify_never_raises(monkeypatch):
 
     orchestrator.consciousness_verifier = None
     assert _run(orchestrator.verify_consciousness()) is None
+
+    # The one failed run above was counted under its step and is reported
+    assert orchestrator.step_failures == {"verification": 1}
+    assert orchestrator.get_system_metrics()["failures"] == {"verification": 1}
+
+
+def test_verify_failure_raises_under_debug(monkeypatch):
+    from mtc.core.config import Settings
+
+    orchestrator = NeuralOrchestrator(
+        enable_mongodb=False,
+        emotion_bridge=False,
+        memory_consolidator=False,
+        settings=Settings(_env_file=None, DEBUG=True),
+    )
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("suite exploded")
+
+    monkeypatch.setattr(
+        orchestrator.consciousness_verifier, "run_verification_suite", boom
+    )
+    with pytest.raises(RuntimeError, match="suite exploded"):
+        _run(orchestrator.verify_consciousness())
+    assert orchestrator.step_failures == {"verification": 1}
+
+
+def test_htm_block_reports_learning_and_live_anomaly_apart():
+    orchestrator = NeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+    )
+    htm = SimpleNamespace(
+        get_metrics=lambda: {"anomaly_score": 0.25, "live_anomaly_score": 0.75}
+    )
+    orchestrator.memory_consolidator = SimpleNamespace(htm=htm)
+    orchestrator.latest_neural_signals = {"htm": np.linspace(-1.0, 1.0, 6)}
+
+    block = orchestrator._verification_neural_data()["htm"]
+
+    assert block == {
+        "anomaly_score": 0.25,
+        "live_anomaly_score": 0.75,
+        "is_real": True,
+    }
+
+    htm.get_metrics = lambda: {"anomaly_score": 0.5}
+    block = orchestrator._verification_neural_data()["htm"]
+    assert block == {"anomaly_score": 0.5, "live_anomaly_score": None, "is_real": True}

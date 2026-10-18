@@ -1,5 +1,11 @@
 """Tests for Causal Emergence Analyzer (Hoel EI)."""
 
+import asyncio
+import json
+import logging
+import re
+from pathlib import Path
+
 import numpy as np
 from mtc.assessment.causal_emergence import (
     CausalEmergenceAnalyzer,
@@ -232,9 +238,29 @@ class TestCausalEmergenceAnalyzer:
         phi = self._make_phi_tracker_mock()
         analyzer.analyze_modules(phi)
         state = analyzer.to_state_dict()
+        json.dumps(state, allow_nan=False)
         analyzer2 = CausalEmergenceAnalyzer()
-        analyzer2.from_state_dict(state)
+        analyzer2.from_state_dict(json.loads(json.dumps(state)))
         assert analyzer2._analysis_count == analyzer._analysis_count
+        assert analyzer.get_latest_ce() is not None
+        assert analyzer2.get_latest_ce() == analyzer.get_latest_ce()
+        original, restored = analyzer._last_result, analyzer2._last_result
+        assert restored.optimal_partition_label == original.optimal_partition_label
+        assert restored.micro_ei == original.micro_ei
+        assert restored.optimal_macro_ei == original.optimal_macro_ei
+        assert restored.ce2_delta_cp == original.ce2_delta_cp
+        assert restored.phi_comparison == original.phi_comparison
+        assert sorted(sorted(g) for g in restored.optimal_partition) == sorted(
+            sorted(g) for g in original.optimal_partition
+        )
+        assert restored.optimal_partition
+        assert restored.computation_time_ms == original.computation_time_ms
+        assert restored.all_partitions == []
+        report = analyzer2.get_research_report()
+        assert report["restored"] is True
+        assert report["module_level"]["causal_emergence"] == analyzer.get_latest_ce()
+        assert report["module_level"]["all_partitions"] == []
+        assert analyzer.get_research_report()["restored"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -345,3 +371,97 @@ def test_ce_with_real_phi_tracker():
     assert result is not None
     assert np.isfinite(result.causal_emergence)
     assert len(result.all_partitions) == 52
+
+
+# ---------------------------------------------------------------------------
+# Restore of the persisted result, and the module text
+# ---------------------------------------------------------------------------
+
+SOURCE = (
+    Path(__file__).resolve().parents[2] / "mtc" / "assessment" / "causal_emergence.py"
+)
+
+
+def _analyzed():
+    analyzer = CausalEmergenceAnalyzer(tpm_row_order="little_endian")
+    analyzer.analyze_modules(_FixedTracker(_asymmetric_little_endian_tpm()))
+    return analyzer
+
+
+def test_restore_rejects_non_finite_result(caplog):
+    for bad in (float("nan"), float("inf"), None, "0.3"):
+        state = _analyzed().to_state_dict()
+        state["histories"]["last_result"]["causal_emergence"] = bad
+        restored = CausalEmergenceAnalyzer()
+        with caplog.at_level(logging.WARNING, logger="mtc.assessment.causal_emergence"):
+            caplog.clear()
+            restored.from_state_dict(state)
+        assert restored._analysis_count == 1
+        assert restored.get_latest_ce() is None
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1, [r.getMessage() for r in warnings]
+    missing = _analyzed().to_state_dict()
+    del missing["histories"]["last_result"]["micro_ei"]
+    restored = CausalEmergenceAnalyzer()
+    restored.from_state_dict(missing)
+    assert restored.get_latest_ce() is None
+
+
+def test_restore_validates_the_counter(caplog):
+    for bad in (-1, 2.5, "3", True):
+        restored = CausalEmergenceAnalyzer()
+        with caplog.at_level(logging.WARNING, logger="mtc.assessment.causal_emergence"):
+            caplog.clear()
+            restored.from_state_dict({"scalars": {"analysis_count": bad}})
+        assert restored._analysis_count == 0, bad
+        assert any(r.levelno == logging.WARNING for r in caplog.records), bad
+    good = CausalEmergenceAnalyzer()
+    good.from_state_dict({"scalars": {"analysis_count": 4}})
+    assert good._analysis_count == 4
+    assert good.get_latest_ce() is None
+
+
+def test_state_written_before_the_partition_was_saved_restores():
+    analyzer = _analyzed()
+    state = analyzer.to_state_dict()
+    for key in ("optimal_partition", "computation_time_ms"):
+        del state["histories"]["last_result"][key]
+    restored = CausalEmergenceAnalyzer()
+    restored.from_state_dict(state)
+    assert restored.get_latest_ce() == analyzer.get_latest_ce()
+    assert restored._last_result.optimal_partition == []
+    assert restored._last_result.computation_time_ms is None
+    assert restored.get_research_report()["restored"] is True
+
+
+def test_assessment_reads_the_restored_analyzer():
+    from mtc.assessment.assessment import ConsciousnessAssessment
+
+    analyzer = _analyzed()
+    restored = CausalEmergenceAnalyzer()
+    restored.from_state_dict(json.loads(json.dumps(analyzer.to_state_dict())))
+
+    def score(ce_analyzer):
+        report = asyncio.run(
+            ConsciousnessAssessment().run_full_assessment(
+                causal_emergence_analyzer=ce_analyzer, normalize=False
+            )
+        )
+        return report.indicator_results["causal_emergence"]
+
+    original = score(analyzer)
+    again = score(restored)
+    assert original.evidence["status"] == "measured"
+    assert again.evidence["status"] == "measured"
+    assert again.score == original.score
+    assert again.evidence["causal_emergence"] == original.evidence["causal_emergence"]
+
+
+def test_module_docstring_makes_no_priority_claim():
+    source = SOURCE.read_text(encoding="utf-8")
+    assert "first systematic" not in source.lower()
+
+
+def test_module_has_no_author_line():
+    source = SOURCE.read_text(encoding="utf-8")
+    assert not re.search(r"^\s*(Created|Authors?):", source, re.M)

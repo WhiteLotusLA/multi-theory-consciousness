@@ -142,7 +142,7 @@ async def test_dual_write_links_point_and_thought(system, manager, embedder_and_
 async def test_no_emotional_state_means_no_weight_not_a_neutral_default(system):
     result = await system.store_memory("alpha memory")
     payload = system.vector_store.get_memory_by_id(result["point_id"])
-    assert payload["emotional_state"] == {} and payload["emotional_weight"] == 0.0
+    assert payload["emotional_state"] == {} and payload["emotional_weight"] is None
     assert system.data_manager.thought_streams.docs[0]["emotional_state"] == {}
 
 
@@ -326,6 +326,13 @@ async def test_status_reports_both_stores(system):
     assert status["last_error"] is None
     assert status["data_manager"]["backend"] == "mongodb"
     assert status["vector_store"]["backend"] in ("memory", "qdrant")
+
+
+def test_status_unknown_until_the_data_manager_made_contact(system):
+    status = system.status()
+    assert status["data_manager"]["available"] is None
+    assert status["available"] is None
+    assert status["last_error"] is None
 
 
 def test_module_import_loads_no_store_client():

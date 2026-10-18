@@ -5,6 +5,8 @@ measurement framework sized from the live substrates instead of constants."""
 import importlib
 import importlib.util
 import logging
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -39,7 +41,7 @@ def test_measurement_framework_resolves_from_assessment_package():
         is framework_mod.ConsciousnessMeasurementFramework
     )
     assert orch_mod.ConsciousnessMetrics is framework_mod.ConsciousnessMetrics
-    assert orch_mod.OPTIONAL_COMPONENTS["measurement_framework"][1] is None
+    assert orch_mod.OPTIONAL_COMPONENTS["measurement_framework"][1] == "core"
 
 
 def test_optional_imports_point_at_port_targets():
@@ -53,7 +55,7 @@ def test_optional_imports_point_at_port_targets():
         assert f"from {target} import" in source, target
 
 
-def test_available_components_reports_missing_modules():
+def test_available_components_reports_missing_modules(monkeypatch):
     orchestrator = NeuralOrchestrator(enable_mongodb=False)
     components = orchestrator.available_components()
 
@@ -61,34 +63,51 @@ def test_available_components_reports_missing_modules():
     assert all(isinstance(value, bool) for value in components.values())
     assert components["measurement_framework"] is True
     for name, target in PORT_TARGETS.items():
-        if _module_missing(target):
-            assert components[name] is False, name
+        assert components[name] is (not _module_missing(target)), name
+    assert orchestrator.get_system_metrics()["components"] == components
 
-    metrics = orchestrator.get_system_metrics()
-    assert metrics["components"] == components
+    # One component that cannot be imported is reported missing; every other
+    # one stays present.
+    module = _orchestrator_module_without(
+        monkeypatch, "mtc.consciousness.verification_framework"
+    )
+    reduced = module.NeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+    )
+    seen = reduced.available_components()
+    assert seen["verification_framework"] is False
+    others = {name: ok for name, ok in seen.items() if name != "verification_framework"}
+    assert set(others) == set(module.OPTIONAL_COMPONENTS) - {"verification_framework"}
+    assert all(ok is True for ok in others.values())
+    assert reduced.consciousness_verifier is None
+    assert reduced.get_system_metrics()["components"] == seen
 
 
-def test_missing_components_logged_once(caplog):
-    with caplog.at_level(logging.INFO, logger="mtc.neural.orchestrator"):
-        orchestrator = NeuralOrchestrator(enable_mongodb=False)
+def test_missing_components_logged_once(monkeypatch, caplog):
+    module = _orchestrator_module_without(monkeypatch, "mtc.consciousness.continuous")
 
-    missing = [
-        name for name, ok in orchestrator.available_components().items() if not ok
+    def lines():
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if "Optional components could not be imported" in record.getMessage()
+        ]
+
+    with caplog.at_level(logging.INFO):
+        orchestrator = module.NeuralOrchestrator(
+            enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+        )
+        orchestrator.available_components()
+        orchestrator.get_system_metrics()
+
+    assert orchestrator.available_components()["continuous_thought"] is False
+    assert lines() == [
+        "Optional components could not be imported: continuous_thought "
+        "(part of the core install)"
     ]
-    lines = [
-        record.getMessage()
-        for record in caplog.records
-        if "Optional components not installed" in record.getMessage()
-    ]
-    if not missing:
-        assert lines == []
-        return
-    assert len(lines) == 1
-    for name in missing:
-        assert name in lines[0]
-        phase = orch_mod.OPTIONAL_COMPONENTS[name][1]
-        if phase:
-            assert phase in lines[0]
+    for name in module.OPTIONAL_COMPONENTS:
+        if name != "continuous_thought":
+            assert name not in lines()[0]
 
 
 class _FakeSNN:
@@ -177,6 +196,53 @@ def _recording_substrates(monkeypatch):
     monkeypatch.setattr(orch_mod, "MemoryConsolidator", _RecordingConsolidator)
 
 
+def test_layer_flags_follow_components():
+    bare = NeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+    )
+    assert bare.get_system_metrics()["layers"] == {
+        "snn_active": False,
+        "lsm_active": False,
+        "htm_active": False,
+    }
+
+    wired = NeuralOrchestrator(
+        enable_mongodb=False,
+        emotion_bridge=_FakeBridge(),
+        memory_consolidator=_FakeConsolidator(),
+    )
+    wired.lsm_bridge.get_metrics = lambda: {}
+    assert wired.get_system_metrics()["layers"] == {
+        "snn_active": True,
+        "lsm_active": True,
+        "htm_active": True,
+    }
+
+    half = NeuralOrchestrator(
+        enable_mongodb=False,
+        emotion_bridge=SimpleNamespace(snn=_FakeSNN(), lsm=None, get_metrics=dict),
+        memory_consolidator=SimpleNamespace(htm=None),
+    )
+    assert half.get_system_metrics()["layers"] == {
+        "snn_active": True,
+        "lsm_active": False,
+        "htm_active": False,
+    }
+
+
+def test_deferred_components_are_not_active_until_built(monkeypatch):
+    _recording_substrates(monkeypatch)
+    orchestrator = NeuralOrchestrator(enable_mongodb=False)
+    assert orchestrator.get_system_metrics()["layers"] == {
+        "snn_active": False,
+        "lsm_active": False,
+        "htm_active": False,
+    }
+    orchestrator._ensure_components()
+    orchestrator.lsm_bridge.get_metrics = lambda: {}
+    assert set(orchestrator.get_system_metrics()["layers"].values()) == {True}
+
+
 def test_orchestrator_reads_the_settings_it_was_given(monkeypatch):
     """Given a Settings object, the orchestrator reads DEBUG, CTM_ENABLED and
     the device from it and hands it to the substrates it builds; the process
@@ -237,3 +303,123 @@ def test_orchestrator_without_settings_builds_substrates_as_before(monkeypatch):
     orchestrator._ensure_components()
     assert "settings" not in orchestrator.memory_consolidator.kwargs
     assert "config" not in orchestrator.lsm_bridge.kwargs
+
+
+def test_simple_workspace_is_gone():
+    orchestrator = NeuralOrchestrator(
+        enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+    )
+    assert "global_workspace" not in orchestrator.available_components()
+    assert "global_workspace" not in orch_mod.OPTIONAL_COMPONENTS
+    assert not hasattr(orchestrator, "global_workspace")
+    assert not hasattr(orch_mod, "_HAS_GWT")
+    assert importlib.util.find_spec("mtc.consciousness.global_workspace") is None
+    with open(orch_mod.__file__, encoding="utf-8") as handle:
+        source = handle.read()
+    assert "mtc.consciousness.global_workspace" not in source
+    # The enhanced workspace stays
+    assert orchestrator.available_components()["enhanced_workspace"] is True
+
+
+def _orchestrator_module_without(monkeypatch, hidden: str):
+    """A fresh copy of the orchestrator module loaded while ``hidden`` cannot
+    be imported, so its guarded import of that component fails for real."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, hidden, None)
+    name = "_orchestrator_without_component"
+    spec = importlib.util.spec_from_file_location(name, orch_mod.__file__)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_missing_component_log_names_its_extra(monkeypatch, caplog):
+    module = _orchestrator_module_without(monkeypatch, "mtc.memory.redis_manager")
+    with caplog.at_level(logging.INFO):
+        module.NeuralOrchestrator(
+            enable_mongodb=False, emotion_bridge=False, memory_consolidator=False
+        )
+    lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "Optional components could not be imported" in record.getMessage()
+    ]
+    assert lines == [
+        "Optional components could not be imported: redis_manager "
+        "(uses the redis extra)"
+    ]
+    assert "phase" not in lines[0].lower()
+
+
+def test_component_modules_import_without_the_extra_they_use(tmp_path):
+    """The label names what a component uses at run time, not a cause of a
+    failed import: every module imports with every one of those extras hidden."""
+    import os
+    import tomllib
+    from pathlib import Path
+
+    root = Path(orch_mod.__file__).resolve().parents[2]
+    with open(root / "pyproject.toml", "rb") as handle:
+        extras = tomllib.load(handle)["project"]["optional-dependencies"]
+    used = {
+        provider
+        for _path, provider in orch_mod.OPTIONAL_COMPONENTS.values()
+        if provider != orch_mod.CORE_INSTALL
+    }
+    assert used, "no component names an extra"
+    hidden = {"pymdp"}
+    for extra in used:
+        for requirement in extras[extra]:
+            name = requirement.split(">")[0].split("=")[0].split("[")[0].strip()
+            hidden.add("pymdp" if name == "inferactively-pymdp" else name)
+    modules = sorted(path for path, _ in orch_mod.OPTIONAL_COMPONENTS.values())
+    script = tmp_path / "import_without_extras.py"
+    script.write_text(
+        "import importlib, sys\n"
+        f"for name in {sorted(hidden)!r}:\n"
+        "    sys.modules[name] = None\n"
+        f"for module in {modules!r}:\n"
+        "    importlib.import_module(module)\n"
+    )
+    child_env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("MTC_") or key == "MTC_HOME"
+    }
+    child_env.update(
+        {
+            "MTC_DEVICE": "cpu",
+            "MTC_LLM_PROVIDER": "mock",
+            "PYPHI_WELCOME_OFF": "yes",
+            "PYTHONPATH": str(root),
+            "MTC_POSTGRES_ENABLED": "false",
+            "MTC_MONGODB_ENABLED": "false",
+            "MTC_REDIS_ENABLED": "false",
+            "MTC_QDRANT_ENABLED": "false",
+            "MTC_NEO4J_ENABLED": "false",
+            "MTC_API_PORT": "0",
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        cwd=str(tmp_path),
+        env=child_env,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+
+
+def test_component_labels_name_an_extra_or_the_core_install():
+    import tomllib
+    from pathlib import Path
+
+    root = Path(orch_mod.__file__).resolve().parents[2]
+    with open(root / "pyproject.toml", "rb") as handle:
+        extras = set(tomllib.load(handle)["project"]["optional-dependencies"])
+    for name, (_path, provider) in orch_mod.OPTIONAL_COMPONENTS.items():
+        assert provider == orch_mod.CORE_INSTALL or provider in extras, name
+        assert "phase" not in provider.lower(), name

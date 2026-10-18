@@ -7,7 +7,8 @@ Consciousness measurement and validation tools:
   theories, with measured, absent and insufficient_data statuses
 - ConsciousnessMeasurementFramework: the legacy 14-metric framework
 - RPTMeasurement: Recurrent Processing Theory measurement
-- BenchmarkRunner: Full Bayesian DCM benchmark (Shiller & Duffy 2026)
+- BenchmarkRunner: DCM benchmark (Shiller & Duffy 2026); reports the
+  collected indicator evidence, with an experimental posterior on request
 - DCMEvaluator: LLM-based DCM indicator evaluator
 - ReferenceDCMAdapter: DCM evidence adapter for MTC's own module set
 - CausalEmergenceAnalyzer: Hoel Effective Information + CE 2.0
@@ -88,7 +89,7 @@ __all__ = [
     "RPTMeasurement",
     "RecurrenceMetrics",
     "RecurrenceType",
-    # DCM Benchmark (Bayesian, Shiller & Duffy 2026)
+    # DCM benchmark (Shiller & Duffy 2026): evidence; experimental posterior
     "BenchmarkRunner",
     "DCMBenchmarkResult",
     "DCMEvidenceAdapter",

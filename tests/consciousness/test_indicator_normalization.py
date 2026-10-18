@@ -221,11 +221,97 @@ class TestNormalizedAssessment:
 
     @pytest.mark.asyncio
     async def test_normalized_overall_score_is_nonnegative(self, assessment):
-        """The normalized overall score must be >= 0."""
+        """The normalized overall is >= 0 when measured, None with nothing measured."""
+        from tests.assessment.test_missing_signals import fixture_modules
+
+        nothing = await assessment.run_normalized_assessment(noise_iterations=2)
+        assert nothing.normalized_overall_score is None
         result = await assessment.run_normalized_assessment(
-            noise_iterations=2,
+            noise_iterations=2, **fixture_modules()
         )
         assert result.normalized_overall_score >= 0.0
+
+    @pytest.mark.asyncio
+    async def test_normalized_overall_matches_full_assessment(self, assessment):
+        """The normalized overall is the overall run_full_assessment computes
+        from the same baselines: the same weights, penalty and min range."""
+        from tests.assessment.test_missing_signals import fixture_modules
+
+        random.seed(3)
+        np.random.seed(3)
+        result = await assessment.run_normalized_assessment(
+            noise_iterations=3, **fixture_modules()
+        )
+        full = await assessment.run_full_assessment(
+            **fixture_modules(),
+            normalize=True,
+            noise_baselines=result.noise_baselines,
+        )
+        assert result.normalized_overall_score == pytest.approx(full.overall_score)
+        for name, score in result.normalized_scores.items():
+            assert score == pytest.approx(full.indicator_results[name].score), name
+        assert set(result.normalized_scores) == {
+            name
+            for name, r in full.indicator_results.items()
+            if r.status != "insufficient_data"
+        }
+        # The raw report is the un-normalized one
+        assert result.raw_report.overall_score != full.overall_score
+
+    @pytest.mark.asyncio
+    async def test_indicator_without_baseline_keeps_raw(self, assessment, monkeypatch):
+        from tests.assessment.test_missing_signals import fixture_modules
+
+        async def partial_baselines(iterations=10):
+            return {"global_broadcast": 0.2}
+
+        monkeypatch.setattr(assessment, "run_noise_baseline", partial_baselines)
+        result = await assessment.run_normalized_assessment(
+            noise_iterations=2, **fixture_modules()
+        )
+        assert result.normalized_scores["global_broadcast"] == pytest.approx(
+            (0.55 - 0.2) / 0.8
+        )
+        for name, raw in result.raw_scores.items():
+            if name != "global_broadcast":
+                assert result.normalized_scores[name] == raw, name
+        assert result.flagged_indicators == []
+
+    @pytest.mark.asyncio
+    async def test_legacy_min_range_respected(self, monkeypatch):
+        from tests.assessment.test_missing_signals import fixture_modules
+
+        async def saturated_baselines(iterations=10):
+            return {"genuine_implementation": 0.95}
+
+        legacy = ConsciousnessAssessment(saturated_baseline_min_range=0.0)
+        monkeypatch.setattr(legacy, "run_noise_baseline", saturated_baselines)
+        result = await legacy.run_normalized_assessment(
+            noise_iterations=2, **fixture_modules()
+        )
+        # raw 1.0 against a 0.95 floor: (1.0 - 0.95) / 0.05, not zeroed
+        assert result.raw_scores["genuine_implementation"] == pytest.approx(1.0)
+        assert result.normalized_scores["genuine_implementation"] == pytest.approx(1.0)
+        assert result.flagged_indicators == ["genuine_implementation"]
+
+        guarded = ConsciousnessAssessment()
+        monkeypatch.setattr(guarded, "run_noise_baseline", saturated_baselines)
+        zeroed = await guarded.run_normalized_assessment(
+            noise_iterations=2, **fixture_modules()
+        )
+        assert zeroed.normalized_scores["genuine_implementation"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_forwards_rpt_measurement(self, assessment):
+        from tests.assessment.test_missing_signals import FixtureRPT
+
+        result = await assessment.run_normalized_assessment(
+            noise_iterations=2, rpt_measurement=FixtureRPT()
+        )
+        local = result.raw_report.indicator_results["local_recurrence"]
+        assert local.status == "measured"
+        assert local.score == pytest.approx(0.42)
+        assert "local_recurrence" in result.normalized_scores
 
     @pytest.mark.asyncio
     async def test_raw_report_is_present(self, assessment):
@@ -234,5 +320,7 @@ class TestNormalizedAssessment:
             noise_iterations=2,
         )
         assert result.raw_report is not None
-        assert result.raw_report.overall_score >= 0.0
+        # No module was supplied: nothing measured, so no overall score
+        assert result.raw_report.overall_score is None
+        assert result.raw_report.status == "insufficient_data"
         assert result.raw_report.total_indicators == len(assessment.indicator_configs)

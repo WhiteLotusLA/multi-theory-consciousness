@@ -2,9 +2,11 @@
 Neural Base Interfaces -- Abstract Foundations for All Substrates
 ===================================================================
 
-Defines the contract that every neural system (SNN, LSM, HTM, CTM)
-must satisfy. This enables the NeuralOrchestrator and NeuralRouter
-to manage systems uniformly without knowing their internals.
+Defines a contract that a neural system (SNN, LSM, HTM, CTM) can
+implement so that a router or a registry can manage systems uniformly
+without knowing their internals. The contracts are available for
+substrates; the neural orchestrator does not use them yet (it drives the
+substrates directly).
 
 Also provides:
 - NeuralSystemType enum for substrate identification

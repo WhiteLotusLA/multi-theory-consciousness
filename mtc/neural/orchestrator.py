@@ -15,8 +15,9 @@ Architecture:
    consolidation
 
 Every substrate except the oscillatory binding is optional. A component whose
-module is not installed is reported by ``available_components()`` and named
-once in the log at construction; nothing stands in for its output.
+module cannot be imported is reported by ``available_components()`` and named
+once in the log at construction with what provides it (an extra, or the core
+install); nothing stands in for its output.
 
 Components and stores:
 
@@ -45,6 +46,9 @@ Components and stores:
   ``ctm_failures``, logged at WARNING the first time and every hundredth time,
   re-raised when ``DEBUG`` is true, and reported as ``orchestrator_failures``
   by ``get_continuous_thought_status`` and the ``continuous_thought`` entry of
+  ``get_system_metrics``. A failed verification run and a failed live HTM
+  binding pass are counted the same way in ``step_failures`` (steps
+  ``verification`` and ``live_htm_binding``) and reported as ``failures`` by
   ``get_system_metrics``.
 - Accelerator cache clears go through the device manager in
   ``mtc.neural.mps_utils``; this module names no accelerator backend.
@@ -71,8 +75,9 @@ from mtc.neural.oscillatory_binding import OscillatoryBinding
 
 logger = logging.getLogger(__name__)
 
-# Optional dependencies. Each import names the module's port target; the
-# orchestrator runs in a reduced capacity without the ones not yet ported.
+# Optional components. Each guarded import names the module that provides the
+# component; the orchestrator runs in a reduced capacity without the ones that
+# cannot be imported.
 
 try:
     from mtc.neural.liquid.emotion_lsm_bridge import (
@@ -159,15 +164,6 @@ except ImportError:
     VerificationSuiteResult = None
 
 try:
-    from mtc.consciousness.global_workspace import GlobalWorkspace, WorkspaceContent
-
-    _HAS_GWT = True
-except ImportError:
-    _HAS_GWT = False
-    GlobalWorkspace = None
-    WorkspaceContent = None
-
-try:
     from mtc.consciousness.enhanced_global_workspace import (
         EnhancedGlobalWorkspace,
         WorkspaceCandidate,
@@ -186,19 +182,34 @@ except ImportError:
     CognitiveModule = None
 
 
-# Optional component -> (import path, the port phase that brings the module).
-# A None phase means the module ships with MTC already.
-OPTIONAL_COMPONENTS: Dict[str, Tuple[str, Optional[str]]] = {
-    "emotion_lsm_bridge": ("mtc.neural.liquid.emotion_lsm_bridge", "phase 5"),
-    "memory_consolidator": ("mtc.neural.htm.memory_consolidator", "phase 5"),
-    "neural_data_manager": ("mtc.neural.mongodb_schemas", "phase 5"),
-    "redis_manager": ("mtc.memory.redis_manager", "phase 5"),
-    "measurement_framework": ("mtc.assessment.framework", None),
-    "verification_framework": ("mtc.consciousness.verification_framework", None),
-    "continuous_thought": ("mtc.consciousness.continuous", "phase 6"),
-    "global_workspace": ("mtc.consciousness.global_workspace", None),
-    "enhanced_workspace": ("mtc.consciousness.enhanced_global_workspace", None),
+# Optional component -> (import path, what it uses at run time): the name of the
+# extra the component uses once it runs (the emotion bridge's production
+# substrates, the MongoDB and Redis drivers, active inference for the
+# workspace), or CORE_INSTALL when the core install provides everything it
+# needs. Every module imports without its extra, so a failed import is a fault
+# of the install or of the source, never a missing extra.
+CORE_INSTALL = "core"
+OPTIONAL_COMPONENTS: Dict[str, Tuple[str, str]] = {
+    "emotion_lsm_bridge": ("mtc.neural.liquid.emotion_lsm_bridge", "neural"),
+    "memory_consolidator": ("mtc.neural.htm.memory_consolidator", CORE_INSTALL),
+    "neural_data_manager": ("mtc.neural.mongodb_schemas", "mongo"),
+    "redis_manager": ("mtc.memory.redis_manager", "redis"),
+    "measurement_framework": ("mtc.assessment.framework", CORE_INSTALL),
+    "verification_framework": (
+        "mtc.consciousness.verification_framework",
+        CORE_INSTALL,
+    ),
+    "continuous_thought": ("mtc.consciousness.continuous", CORE_INSTALL),
+    "enhanced_workspace": ("mtc.consciousness.enhanced_global_workspace", "fep"),
 }
+
+
+def _provider_label(name: str) -> str:
+    """What a component uses at run time, as the failed-import log line says it."""
+    provider = OPTIONAL_COMPONENTS[name][1]
+    if provider == CORE_INSTALL:
+        return "part of the core install"
+    return f"uses the {provider} extra"
 
 
 # A failed read of the thought machine is logged the first and every this many.
@@ -215,7 +226,6 @@ def _component_flags() -> Dict[str, bool]:
         "measurement_framework": bool(_HAS_MEASUREMENT),
         "verification_framework": bool(_HAS_VERIFICATION),
         "continuous_thought": bool(_HAS_CTM),
-        "global_workspace": bool(_HAS_GWT),
         "enhanced_workspace": bool(_HAS_ENHANCED_GWT),
     }
 
@@ -242,6 +252,12 @@ def _finite(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def _fmt_metric(value: Any) -> str:
+    """A metric for a log line: three decimals, or n/a when it was not measured."""
+    number = _finite(value)
+    return "n/a" if number is None else f"{number:.3f}"
 
 
 def _unit(value: float) -> float:
@@ -392,11 +408,6 @@ class ConsciousnessState:
     is_awake: bool  # True = processing experiences, False = sleeping/consolidating
     current_experience: Optional[Experience] = None
 
-    # Layer states
-    snn_active: bool = True
-    lsm_active: bool = True
-    htm_active: bool = True
-
     # Memory state
     episodic_memories_count: int = 0
     semantic_patterns_count: int = 0
@@ -415,8 +426,8 @@ class NeuralOrchestrator:
 
     This orchestrator is designed with optional dependencies: it works in a
     reduced capacity when modules such as the emotion bridge, the memory
-    consolidator or the continuous thought package are not installed, and
-    ``available_components()`` says which ones are.
+    consolidator or the continuous thought package cannot be imported, and
+    ``available_components()`` says which ones can.
     """
 
     def __init__(
@@ -467,10 +478,11 @@ class NeuralOrchestrator:
         missing = []
         for name, installed in _component_flags().items():
             if not installed:
-                phase = OPTIONAL_COMPONENTS[name][1]
-                missing.append(name if phase is None else f"{name} ({phase})")
+                missing.append(f"{name} ({_provider_label(name)})")
         if missing:
-            logger.info(f"Optional components not installed: {', '.join(missing)}")
+            logger.info(
+                f"Optional components could not be imported: {', '.join(missing)}"
+            )
 
         # Layer 1: Conscious (SNN) + Subconscious (LSM)
         # Layer 2: Memory Consolidation (HTM)
@@ -496,6 +508,9 @@ class NeuralOrchestrator:
         # Failed reads of it are counted here by step name.
         self.continuous_thought_machine = None
         self.ctm_failures: Counter = Counter()
+        # Failed steps of this class's own work (``verification``,
+        # ``live_htm_binding``), counted the same way
+        self.step_failures: Counter = Counter()
         if thought_machine is not None:
             self.attach_thought_machine(thought_machine)
 
@@ -533,7 +548,6 @@ class NeuralOrchestrator:
         # Optional frameworks
         self.consciousness_framework = None
         self.consciousness_verifier = None
-        self.global_workspace = None
         self.enhanced_workspace = None
 
         self._build_framework()
@@ -544,17 +558,6 @@ class NeuralOrchestrator:
                 logger.info("Consciousness Verifier initialized")
             except Exception as e:
                 logger.warning(f"Consciousness verifier initialization failed: {e}")
-
-        if _HAS_GWT:
-            try:
-                self.global_workspace = GlobalWorkspace(
-                    integration_dimensions=512,
-                    attention_decay=0.9,
-                    salience_threshold=0.3,
-                )
-                logger.info("Global Workspace initialized")
-            except Exception as e:
-                logger.warning(f"Global Workspace initialization failed: {e}")
 
         if _HAS_ENHANCED_GWT:
             try:
@@ -961,11 +964,18 @@ class NeuralOrchestrator:
 
         Accepts any HTM exposing ``process(pattern, learn=False)``. With
         ``learn=False`` the spatial pooler and temporal memory change no
-        permanence or segment, so live binding cannot alter what consolidation
-        learned. Sets the anomaly, the burst fraction (unpredicted active
-        columns burst, so it equals the anomaly), the prediction accuracy and
-        the active-column density relative to the pooler's target sparsity;
-        leaves every other HTM oscillator unset; never raises.
+        permanence or segment, and the production HTM runs the pass on its own
+        live context: the temporal context of its next learning step, its
+        anomaly history and its last active columns stay as consolidation left
+        them, so live binding cannot alter what consolidation learns. The
+        pass's anomaly is the HTM's ``live_anomaly_score``, apart from the
+        learning ``anomaly_score``. Sets the anomaly, the burst fraction
+        (unpredicted active columns burst, so it equals the anomaly), the
+        prediction accuracy and the active-column density relative to the
+        pooler's target sparsity; leaves every other HTM oscillator unset.
+        Input that is not a finite numeric pattern gives an empty result; a
+        failed HTM pass also gives one, is counted as ``live_htm_binding`` in
+        ``step_failures`` and is re-raised when ``DEBUG`` is true.
         """
         out: Dict[str, float] = {}
         process = getattr(htm, "process", None)
@@ -973,8 +983,11 @@ class NeuralOrchestrator:
             return out
         try:
             array = np.ravel(np.asarray(pattern, dtype=float))
-            if array.size == 0 or not np.all(np.isfinite(array)):
-                return out
+        except (TypeError, ValueError):
+            return out
+        if array.size == 0 or not np.all(np.isfinite(array)):
+            return out
+        try:
             size = _as_count(getattr(htm, "input_size", None))
             if size:
                 array = _resize_pattern(array, size)
@@ -983,8 +996,8 @@ class NeuralOrchestrator:
                 return out
             anomaly = _finite(result.get("anomaly_score"))
             num_active = _finite(result.get("num_active_columns"))
-        except Exception as e:
-            logger.debug(f"Live HTM binding inference unavailable: {e}")
+        except Exception as exc:
+            self._step_failure("live_htm_binding", exc)
             return {}
 
         if anomaly is not None:
@@ -1017,16 +1030,22 @@ class NeuralOrchestrator:
         """Latest binding values for RPT; empty before the first bind.
 
         Keys: ``global_order_parameter`` and ``cross_coherence`` from the last
-        binding result, and ``binding_count``, the binds this orchestrator ran.
+        binding result, ``binding_count``, the binds this orchestrator ran, and
+        ``zero_stimulus_order_parameter``, the last bind's zero-stimulus floor
+        (absent when that bind could not measure it).
         """
         result = getattr(self, "_last_binding_result", None)
         if result is None:
             return {}
-        return {
+        stats = {
             "global_order_parameter": result.global_order_parameter,
             "cross_coherence": result.cross_coherence,
             "binding_count": getattr(self, "_binds_run", 0),
         }
+        floor = _finite(getattr(result, "zero_stimulus_order_parameter", None))
+        if floor is not None:
+            stats["zero_stimulus_order_parameter"] = floor
+        return stats
 
     def publish_retrieved_memories(self, memories: Optional[Sequence[Any]]) -> None:
         """Publish a turn's retrieved memories for the measurement layer.
@@ -1244,13 +1263,9 @@ class NeuralOrchestrator:
                 logger.warning("LSM states missing from subconscious")
                 return None
 
-            # Not ported: the reference implementation's read of recent
-            # memories from the document store. It guarded on an
-            # ``episodic_memories`` attribute that its data manager never
-            # defined (the branch could not run), and episodic rows live in the
+            # Recent memories are not read here: episodic rows live in the
             # episodic store of the memory layer, which this class does not
-            # hold. Recent memories arrive with the memory layer (Phase 6), so
-            # the list stays empty here rather than being filled from a
+            # hold, so the list stays empty rather than being filled from a
             # collection that does not exist. Thoughts come from the thought
             # stream when it exists.
             memories = []
@@ -1265,15 +1280,14 @@ class NeuralOrchestrator:
             metrics = await self.consciousness_framework.measure_consciousness(
                 snn_states=snn_states,
                 lsm_states=lsm_states,
-                input_data=None,
                 memories=memories,
                 thoughts=thoughts,
             )
 
             logger.info(
-                f"Consciousness measured: Phi={metrics.phi:.3f}, "
-                f"Integration={metrics.integration:.3f}, "
-                f"Self-Model={metrics.self_model_accuracy:.3f}"
+                f"Consciousness measured: Phi={_fmt_metric(metrics.phi)}, "
+                f"Integration={_fmt_metric(metrics.integration)}, "
+                f"Self-Model={_fmt_metric(metrics.self_model_accuracy)}"
             )
 
             return metrics
@@ -1293,7 +1307,10 @@ class NeuralOrchestrator:
         output in the latest experience: the SNN with a finite synchrony in the
         stashed SNN state, the LSM with a stashed trajectory and a finite
         emotional coherence, the HTM with a stashed episodic pattern and a
-        finite anomaly score from the HTM's own metrics.
+        finite anomaly score from the HTM's own metrics. The HTM block's
+        ``anomaly_score`` is the last learning pass's; the live binding pass's
+        anomaly is reported apart as ``live_anomaly_score`` (None when the HTM
+        reports none).
         """
         signals = getattr(self, "latest_neural_signals", None)
         signals = signals if isinstance(signals, dict) else {}
@@ -1338,6 +1355,7 @@ class NeuralOrchestrator:
         }
 
         anomaly = None
+        live_anomaly = None
         if signal("htm") is not None:
             htm_metrics = self._component_metric(
                 getattr(getattr(self, "memory_consolidator", None), "htm", None),
@@ -1345,7 +1363,12 @@ class NeuralOrchestrator:
             )
             if isinstance(htm_metrics, dict):
                 anomaly = _finite(htm_metrics.get("anomaly_score"))
-        htm = {"anomaly_score": anomaly, "is_real": anomaly is not None}
+                live_anomaly = _finite(htm_metrics.get("live_anomaly_score"))
+        htm = {
+            "anomaly_score": anomaly,
+            "live_anomaly_score": live_anomaly,
+            "is_real": anomaly is not None,
+        }
         return {"snn": snn, "lsm": lsm, "htm": htm}
 
     async def verify_consciousness(
@@ -1374,7 +1397,8 @@ class NeuralOrchestrator:
 
         Returns:
             VerificationSuiteResult, or None when the verifier is unavailable
-            or the run failed; never raises.
+            or the run failed. A failed run is counted as ``verification`` in
+            ``step_failures`` and re-raised when ``DEBUG`` is true.
         """
         verifier = getattr(self, "consciousness_verifier", None)
         if verifier is None:
@@ -1392,8 +1416,8 @@ class NeuralOrchestrator:
                 temporal_data=temporal_data,
             )
             return verifier.run_verification_suite(state)
-        except Exception as e:
-            logger.error(f"Consciousness verification failed: {e}")
+        except Exception as exc:
+            self._step_failure("verification", exc)
             return None
 
     # =========================================================================
@@ -1485,7 +1509,12 @@ class NeuralOrchestrator:
 
         ``memory.consolidation_strength``, ``intuition`` and ``htm_metrics``
         are None when their component is absent; ``components`` is the
-        ``available_components()`` map.
+        ``available_components()`` map; ``failures`` counts the failed steps
+        of this class's own work by name (``verification``,
+        ``live_htm_binding``). ``layers`` says which substrates exist
+        now: the SNN and the LSM when the emotion bridge holds them, the HTM
+        when the memory consolidator holds one (a component deferred to its
+        first use is not active until it is built).
         """
         # Get detailed bridge metrics if available
         bridge_metrics = {}
@@ -1523,9 +1552,9 @@ class NeuralOrchestrator:
                 "consolidation_strength": self._consolidation_strength(),
             },
             "layers": {
-                "snn_active": self.state.snn_active,
-                "lsm_active": self.state.lsm_active,
-                "htm_active": self.state.htm_active,
+                "snn_active": getattr(self.lsm_bridge, "snn", None) is not None,
+                "lsm_active": getattr(self.lsm_bridge, "lsm", None) is not None,
+                "htm_active": htm is not None,
             },
             "neural_bridge": bridge_metrics,
             "intuition": self._component_metric(
@@ -1540,6 +1569,7 @@ class NeuralOrchestrator:
             "attention_schema": attention_schema_metrics,
             "continuous_thought": self._continuous_thought_component(),
             "components": self.available_components(),
+            "failures": dict(self._step_failure_counts()),
         }
 
     def simulate_day(
@@ -1687,12 +1717,30 @@ class NeuralOrchestrator:
         """Count a failed read of the thought machine by step name, log the
         first and every hundredth at WARNING, and re-raise when ``DEBUG`` is
         true."""
-        counts = self._ctm_failure_counts()
+        self._count_failure(self._ctm_failure_counts(), "continuous thought", step, exc)
+
+    def _step_failure_counts(self) -> Counter:
+        """The failed-step counters (created on a partly built instance)."""
+        counts = getattr(self, "step_failures", None)
+        if counts is None:
+            counts = Counter()
+            self.step_failures = counts
+        return counts
+
+    def _step_failure(self, step: str, exc: BaseException) -> None:
+        """Count a failed step of this class's own work by name, log the first
+        and every hundredth at WARNING, and re-raise when ``DEBUG`` is true."""
+        self._count_failure(self._step_failure_counts(), "neural", step, exc)
+
+    def _count_failure(
+        self, counts: Counter, area: str, step: str, exc: BaseException
+    ) -> None:
         counts[step] += 1
         count = counts[step]
         if count == 1 or count % CTM_FAILURE_LOG_EVERY == 0:
             logger.warning(
-                "continuous thought %s failed (%d so far): %s",
+                "%s %s failed (%d so far): %s",
+                area,
                 step,
                 count,
                 type(exc).__name__,

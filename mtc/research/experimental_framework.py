@@ -3,10 +3,12 @@ Behavioral battery
 ==================
 
 A small battery of behavioral tasks run against a chat endpoint: mirror
-self-recognition (adapted from the mirror test of Gallup 1970), a false-belief
-task (Baron-Cohen, Leslie and Frith 1985) and a temporal binding judgement
-(the binding-window literature, for example Haggard, Clark and Kalogeras
-2002). Each task is a forced choice scored 1.0 or 0.0.
+self-recognition (adapted from the mirror test of Gallup 1970) and a
+false-belief task (Baron-Cohen, Leslie and Frith 1985) form the default
+battery; a temporal binding judgement (the binding-window literature, for
+example Haggard, Clark and Kalogeras 2002) is available by name only (see
+``TemporalBindingExperiment`` for why). Each task is a forced choice scored
+1.0 or 0.0.
 
 The battery measures task accuracy and nothing else. Behavioral responses do
 not establish consciousness, and the report text says so.
@@ -15,9 +17,10 @@ How it runs
 -----------
 Trials go through a ``ChatClient`` (``async send(message, speaker) -> str``).
 ``HttpChatClient`` posts ``{"message", "speaker"}`` as JSON with the standard
-library ``urllib`` inside ``asyncio.to_thread`` and reads ``response_key``
-from the JSON reply; the endpoint path and response key are constructor
-arguments because the MTC API route arrives in a later phase.
+library ``urllib`` (imported by the method that sends, so importing this
+module loads no HTTP client) inside ``asyncio.to_thread`` and reads
+``response_key`` from the JSON reply; the endpoint path and response key are
+constructor arguments.
 
 Honest handling of failure: a failed call (``ChatClientError``, an empty
 reply, a network error) is a trial error. It is recorded, excluded from the
@@ -54,8 +57,6 @@ import json
 import logging
 import re
 import time
-import urllib.error
-import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -90,6 +91,14 @@ BATTERY_WEIGHTS: Dict[str, float] = {
     "false_belief": 1.2,
     "temporal_binding": 1.0,
 }
+
+# Every experiment the suite can run, and the default battery.
+EXPERIMENT_NAMES: Tuple[str, ...] = (
+    "mirror_self_recognition",
+    "false_belief",
+    "temporal_binding",
+)
+DEFAULT_EXPERIMENTS: Tuple[str, ...] = ("mirror_self_recognition", "false_belief")
 
 _WORD = re.compile(r"[a-z']+")
 
@@ -151,6 +160,9 @@ class HttpChatClient:
         self.response_key = response_key
 
     def _post(self, message: str, speaker: str) -> str:
+        import urllib.error
+        import urllib.request
+
         body = json.dumps({"message": message, "speaker": speaker}).encode("utf-8")
         request = urllib.request.Request(
             self.url,
@@ -507,6 +519,12 @@ class TemporalBindingExperiment(ConsciousnessExperiment):
     Two events are described in two messages with a scheduled gap between
     them; the expected answer is ``together`` when the gap is within
     ``binding_window_ms``, otherwise ``separately``. ``sleep`` is injectable.
+
+    Limitation: this experiment is not part of the default battery. The
+    scheduled gap is 100 to 950 ms, while each message's own reply takes
+    longer than the gap and the system under test is given no timestamps, so
+    the expected answer cannot be perceived by the system under test. It
+    stays available by name (``ExperimentSuite(experiments=...)``).
     """
 
     name = "temporal_binding"
@@ -563,7 +581,13 @@ def default_system_description() -> str:
 
 
 class ExperimentSuite:
-    """Runs the three experiments and reports honest, bounded results."""
+    """Runs the selected experiments and reports honest, bounded results.
+
+    ``experiments`` names the experiments to run, in order, from
+    ``EXPERIMENT_NAMES``; the default is ``DEFAULT_EXPERIMENTS`` (mirror
+    self-recognition and false belief). An unknown or empty selection raises
+    ValueError.
+    """
 
     def __init__(
         self,
@@ -573,18 +597,31 @@ class ExperimentSuite:
         min_completed_trials: int = 3,
         clock: Optional[Callable[[], datetime]] = None,
         sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
+        experiments: Optional[Sequence[str]] = None,
     ) -> None:
         self.client = client
         self.speaker = speaker
         self.min_completed_trials = int(min_completed_trials)
         self._clock = clock or (lambda: datetime.now(timezone.utc))
-        self.experiments: Dict[str, ConsciousnessExperiment] = {
-            e.name: e
-            for e in (
-                MirrorSelfRecognitionExperiment(system_description, self._clock),
-                FalseBeliefExperiment(self._clock),
-                TemporalBindingExperiment(sleep=sleep, clock=self._clock),
+        selected = tuple(DEFAULT_EXPERIMENTS if experiments is None else experiments)
+        unknown = [name for name in selected if name not in EXPERIMENT_NAMES]
+        if unknown:
+            raise ValueError(
+                f"unknown experiment(s) {unknown}; choose from {EXPERIMENT_NAMES}"
             )
+        if not selected:
+            raise ValueError("experiments must name at least one experiment")
+        builders: Dict[str, Callable[[], ConsciousnessExperiment]] = {
+            "mirror_self_recognition": lambda: MirrorSelfRecognitionExperiment(
+                system_description, self._clock
+            ),
+            "false_belief": lambda: FalseBeliefExperiment(self._clock),
+            "temporal_binding": lambda: TemporalBindingExperiment(
+                sleep=sleep, clock=self._clock
+            ),
+        }
+        self.experiments: Dict[str, ConsciousnessExperiment] = {
+            name: builders[name]() for name in dict.fromkeys(selected)
         }
 
     async def run_battery(self, trials_per_experiment: int = 10) -> BatteryResult:

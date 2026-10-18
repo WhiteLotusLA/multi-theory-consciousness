@@ -6,9 +6,6 @@ Computes Effective Information across consciousness modules to test
 whether macro-level descriptions carry genuine causal power. Exhaustively
 searches all 52 Bell partitions of 5 modules (GWT, AST, HOT, FEP, BLT).
 
-This is the first systematic search for causal emergence in a multi-theory
-AI consciousness system.
-
 Primary analysis (module-level):
   - Reads PhiTracker's empirical TPM (32x5 node-factored)
   - Reorders its rows to little-endian when they arrive big-endian (the
@@ -31,10 +28,16 @@ References:
   - Hoel, Albantakis & Tononi (2013). PNAS.
   - Hoel (2025). "Causal Emergence 2.0." arXiv:2503.13395.
 
-Author: MTC Contributors
+Persistence: ``to_state_dict`` writes the analysis count and the last
+module-level result (its scalars, the optimal partition as sorted integer
+lists and the computation time). ``from_state_dict`` rebuilds that result
+when every numeric field is a finite real, without the partition table, and
+the research report marks it ``restored``; a record with a missing or
+non-finite field restores no result and logs one WARNING.
 """
 
 import logging
+import math
 import time
 import numpy as np
 from dataclasses import dataclass
@@ -280,8 +283,51 @@ class CausalEmergenceResult:
     ce2_delta_cp: float  # CE 2.0 causal primitives delta
     all_partitions: List[Dict[str, Any]]  # sorted by EI
     phi_comparison: Optional[float]
-    computation_time_ms: float
+    computation_time_ms: Optional[float]
     warming_up: bool = False
+    restored: bool = False
+
+
+# Fields of a persisted result that must be finite reals for a restore.
+_RESTORED_REAL_FIELDS = (
+    "micro_ei",
+    "optimal_macro_ei",
+    "causal_emergence",
+    "ce2_delta_cp",
+)
+
+
+def _finite_real(value: Any) -> Optional[float]:
+    """A finite real number as float, else None (bools are not numbers)."""
+    if isinstance(value, (bool, np.bool_)):
+        return None
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        number = float(value)
+        return number if math.isfinite(number) else None
+    return None
+
+
+def _partition_lists(partition: Optional[List[set]]) -> List[List[int]]:
+    """A partition as sorted lists of plain integers, in a stable order."""
+    groups = [sorted(int(node) for node in group) for group in (partition or [])]
+    return sorted(groups)
+
+
+def _partition_from_lists(value: Any) -> Optional[List[set]]:
+    """The saved partition lists as sets, None when they are malformed."""
+    if not isinstance(value, list):
+        return None
+    partition = []
+    for group in value:
+        if not isinstance(group, list) or not group:
+            return None
+        if not all(
+            isinstance(node, int) and not isinstance(node, bool) and node >= 0
+            for node in group
+        ):
+            return None
+        partition.append(set(group))
+    return partition
 
 
 class CausalEmergenceAnalyzer:
@@ -510,31 +556,93 @@ class CausalEmergenceAnalyzer:
                 }
             ),
             "warming_up": False,
+            "restored": r.restored,
             "analysis_count": self._analysis_count,
             "computation_time_ms": r.computation_time_ms,
         }
 
     def to_state_dict(self) -> Dict[str, Any]:
-        """Export state for persistence."""
-        scalars = {"analysis_count": self._analysis_count}
+        """Export state for persistence; every value is JSON-safe (a
+        non-finite number is written as null)."""
+        scalars = {"analysis_count": int(self._analysis_count)}
         histories = {}
         if self._last_result:
+            result = self._last_result
             histories["last_result"] = {
-                "micro_ei": self._last_result.micro_ei,
-                "optimal_macro_ei": self._last_result.optimal_macro_ei,
-                "optimal_partition_label": self._last_result.optimal_partition_label,
-                "causal_emergence": self._last_result.causal_emergence,
-                "ce2_delta_cp": self._last_result.ce2_delta_cp,
-                "phi_comparison": self._last_result.phi_comparison,
+                "micro_ei": _finite_real(result.micro_ei),
+                "optimal_macro_ei": _finite_real(result.optimal_macro_ei),
+                "optimal_partition_label": str(result.optimal_partition_label),
+                "optimal_partition": _partition_lists(result.optimal_partition),
+                "causal_emergence": _finite_real(result.causal_emergence),
+                "ce2_delta_cp": _finite_real(result.ce2_delta_cp),
+                "phi_comparison": _finite_real(result.phi_comparison),
+                "computation_time_ms": _finite_real(result.computation_time_ms),
             }
         return {"scalars": scalars, "arrays": {}, "histories": histories}
 
     def from_state_dict(self, state: Dict[str, Any]) -> None:
-        """Restore state from persistence."""
-        scalars = state.get("scalars", {})
-        self._analysis_count = scalars.get("analysis_count", 0)
-        # Note: _last_result is not fully restored (partition objects are complex)
-        # It will be recomputed on next analysis cycle
+        """Restore the analysis count and the last module-level result.
+
+        The count must be a non-negative integer (otherwise it restores as
+        0 with a WARNING). The result is rebuilt when ``micro_ei``,
+        ``optimal_macro_ei``, ``causal_emergence`` and ``ce2_delta_cp`` are
+        finite reals; it carries the saved partition (empty when an older
+        state has none), no partition table and the ``restored`` mark. A
+        record with a missing or non-finite field restores no result and
+        logs one WARNING.
+        """
+        state = state if isinstance(state, dict) else {}
+        scalars = state.get("scalars") or {}
+        count = scalars.get("analysis_count", 0)
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            logger.warning(
+                "CausalEmergenceAnalyzer: ignoring invalid analysis_count %r",
+                count,
+            )
+            count = 0
+        self._analysis_count = count
+        self._last_result = None
+
+        record = (state.get("histories") or {}).get("last_result")
+        if isinstance(record, dict):
+            self._last_result = self._result_from_record(record)
         logger.info(
-            f"CausalEmergenceAnalyzer restored: {self._analysis_count} prior analyses"
+            "CausalEmergenceAnalyzer restored: %d prior analyses, last result %s",
+            self._analysis_count,
+            "restored" if self._last_result is not None else "absent",
+        )
+
+    @staticmethod
+    def _result_from_record(
+        record: Dict[str, Any],
+    ) -> Optional[CausalEmergenceResult]:
+        values = {
+            name: _finite_real(record.get(name)) for name in _RESTORED_REAL_FIELDS
+        }
+        unusable = sorted(name for name, value in values.items() if value is None)
+        partition = (
+            _partition_from_lists(record["optimal_partition"])
+            if "optimal_partition" in record
+            else []
+        )
+        if partition is None:
+            unusable.append("optimal_partition")
+        if unusable:
+            logger.warning(
+                "CausalEmergenceAnalyzer: persisted last result not restored; "
+                "missing or non-finite: %s",
+                ", ".join(unusable),
+            )
+            return None
+        return CausalEmergenceResult(
+            micro_ei=values["micro_ei"],
+            optimal_macro_ei=values["optimal_macro_ei"],
+            optimal_partition=partition,
+            optimal_partition_label=str(record.get("optimal_partition_label", "")),
+            causal_emergence=values["causal_emergence"],
+            ce2_delta_cp=values["ce2_delta_cp"],
+            all_partitions=[],
+            phi_comparison=_finite_real(record.get("phi_comparison")),
+            computation_time_ms=_finite_real(record.get("computation_time_ms")),
+            restored=True,
         )
