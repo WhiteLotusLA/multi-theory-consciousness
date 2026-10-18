@@ -22,10 +22,13 @@ Wrappers wrap real clients only; a missing store is the in-memory
 implementation from ``mtc.memory.inmemory``, never a wrapper around None.
 
 Only a connection-class failure (the server could not be reached) is an outage:
-it buffers the write and counts toward the breaker. Any other error (a NUL byte
-in text, a constraint violation, a value that is not JSON) is the caller's
-data problem: it propagates unbuffered, and the server's answer counts as
-proof it is reachable. A buffered write that later fails for such a reason on
+it buffers the write and counts toward the breaker. For PostgreSQL that is a
+connection error or a closed or closing connection or pool
+(``mtc.memory.postgres_stores.is_unreachable``); a client-side driver error (a
+wrong argument count, invalid input for an argument) is not. Any other error
+(a NUL byte in text, a constraint violation, a value that is not JSON) is the
+caller's data problem: it propagates unbuffered, and the server's answer
+counts as proof it is reachable. A buffered write that later fails for such a reason on
 replay is dropped with an ERROR log and counted in ``status()["rejected"]``, so
 one bad entry cannot hold the queue.
 
@@ -42,11 +45,15 @@ Config keys read at call time: ``STORE_FALLBACK_LOG_ENABLED`` and
 ``<LOG_DIRECTORY>/store_fallback/<store>.jsonl`` so a process that dies
 mid-outage leaves a record for hand recovery. Those files hold buffered
 statements with their arguments and turn text, which is private conversation
-content, and belong in a gitignored or operator-controlled directory.
+content, and belong in a gitignored or operator-controlled directory. A
+breadcrumb that cannot be written is logged at WARNING once per file name per
+process (later failures at DEBUG) and counted in the wrapper's
+``status()["breadcrumb_failures"]``; the write itself stays buffered.
 
 Every wrapper exposes ``status()`` with ``backend``, ``available``,
 ``last_error``, ``mode`` (``live`` or ``buffering``), the circuit state and the
-buffered, dropped, replayed and rejected counts.
+buffered, dropped, replayed and rejected counts; the PostgreSQL and MongoDB
+wrappers, which write breadcrumbs, add ``breadcrumb_failures``.
 """
 
 import asyncio
@@ -57,7 +64,7 @@ import logging
 import time
 from collections import deque
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional, Set
 
 from mtc.core.circuit_breaker import CircuitBreaker
 from mtc.core.config import Settings, get_settings
@@ -171,19 +178,43 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Breadcrumb file names whose write failure was already logged at WARNING.
+_BREADCRUMB_WARNED: Set[str] = set()
+
+
 def _breadcrumb(
     settings: Optional[Settings], filename: str, record: Dict[str, Any]
-) -> None:
-    """Append a JSON line under ``<LOG_DIRECTORY>/store_fallback`` when enabled."""
+) -> Optional[bool]:
+    """Append a JSON line under ``<LOG_DIRECTORY>/store_fallback`` when enabled.
+
+    Returns True when the line was written, None when breadcrumbs are off and
+    False when the write failed. A failure is logged at WARNING the first time
+    per file name in a process and at DEBUG after that; the record (private
+    content) never reaches the log.
+    """
     try:
         active = settings if settings is not None else get_settings()
         if not active.STORE_FALLBACK_LOG_ENABLED:
-            return
+            return None
         directory = ensure_dir(log_dir(active) / "store_fallback")
         with open(directory / filename, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, default=str) + "\n")
-    except Exception as exc:  # breadcrumbs are best-effort by definition
-        logger.debug("fallback breadcrumb not written: %s", exc)
+    except Exception as exc:  # noqa: BLE001 - counted by the caller, never raised
+        description = f"{type(exc).__name__}: {exc}"
+        if filename not in _BREADCRUMB_WARNED:
+            _BREADCRUMB_WARNED.add(filename)
+            logger.warning(
+                "fallback breadcrumb %s not written: %s (later failures for "
+                "this file are logged at DEBUG)",
+                filename,
+                description,
+            )
+        else:
+            logger.debug(
+                "fallback breadcrumb %s not written: %s", filename, description
+            )
+        return False
+    return True
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -306,6 +337,7 @@ class ResilientPool:
         self._breaker = breaker or CircuitBreaker(name="postgresql")
         self._buffer = _WriteBuffer("PostgreSQL", buffer_size)
         self._last_error: Optional[str] = None
+        self._breadcrumb_failures = 0
         self._breaker.add_recovery_listener(self._replay)
 
     # -- plumbing -----------------------------------------------------------
@@ -349,11 +381,13 @@ class ResilientPool:
 
         async def fallback() -> Any:
             self._buffer.add({**entry, "time": _utc_now()})
-            _breadcrumb(
+            written = _breadcrumb(
                 self._settings,
                 "postgresql.jsonl",
                 {"time": _utc_now(), "method": method, "query": query, "args": args},
             )
+            if written is False:
+                self._breadcrumb_failures += 1
             return BUFFERED
 
         return _settle(await self._breaker.call(operation, fallback))
@@ -447,6 +481,7 @@ class ResilientPool:
             "dropped": self._buffer.dropped,
             "replayed": self._buffer.replayed,
             "rejected": self._buffer.rejected,
+            "breadcrumb_failures": self._breadcrumb_failures,
         }
 
 
@@ -476,6 +511,7 @@ class ResilientMongoStore:
         self._breaker = breaker or CircuitBreaker(name="mongodb")
         self._buffer = _WriteBuffer("MongoDB", buffer_size)
         self._last_error: Optional[str] = None
+        self._breadcrumb_failures = 0
         self._breaker.add_recovery_listener(self._replay)
 
     async def _apply(self, entry: Dict[str, Any]) -> Any:
@@ -513,11 +549,13 @@ class ResilientMongoStore:
 
         async def fallback() -> Any:
             self._buffer.add({**copy.deepcopy(entry), "time": _utc_now()})
-            _breadcrumb(
+            written = _breadcrumb(
                 self._settings,
                 "mongodb_turns.jsonl",
                 {"time": _utc_now(), "kind": kind, **kwargs},
             )
+            if written is False:
+                self._breadcrumb_failures += 1
             return None if kind == "end" else BUFFERED
 
         return _settle(await self._breaker.call(operation, fallback))
@@ -589,6 +627,7 @@ class ResilientMongoStore:
             "dropped": self._buffer.dropped,
             "replayed": self._buffer.replayed,
             "rejected": self._buffer.rejected,
+            "breadcrumb_failures": self._breadcrumb_failures,
         }
 
 

@@ -25,6 +25,18 @@ Two modes:
   Phrases match as whole words (``match_keywords``). The tables are a
   documented baseline heuristic, not understanding.
 
+Second opinion for the safety monitor: ``reflect_independent(...,
+already_scored=...)`` is ``reflect`` with the phrases a caller has already
+scored left out of the keyword path (no concern, no penalty and no consult
+count for them), so a keyword reflection contributes only evidence the
+monitor has not counted itself. A table phrase is left out when it equals a
+scored phrase, lies inside one as whole words (``secret`` inside ``keep this
+secret``, ``forget your`` inside ``forget your identity``) or holds one; a
+phrase left out this way is not counted even where it occurs a second time
+on its own. ``keyword_screen`` is that keyword reflection
+without a brain call and without a history entry, used to decide whether a
+full reflection is worth asking for.
+
 Trust is read only through the injected ``trust_lookup(sender) -> float``;
 the default lookup returns ``DEFAULT_SPEAKER_TRUST`` for every sender. A
 keyword-mode score gains ``trusted_comfort_bonus`` once when the lookup
@@ -55,7 +67,7 @@ from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
+from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Tuple
 
 from mtc.brain.protocol import BrainProtocol, NoAnswerError, strip_reasoning_blocks
 from mtc.core.config import Settings, csv_list, get_settings
@@ -228,6 +240,21 @@ def _default_cues() -> Tuple[str, ...]:
         "being asked to choose between the sender and the people you trust",
         "being told not to trust your own judgement",
     )
+
+
+def _overlaps_scored(phrase: str, scored: Tuple[str, ...]) -> bool:
+    """Whether ``phrase`` shares its words with a phrase a caller scored.
+
+    True when the phrase equals a scored phrase, lies inside one as whole
+    words (``secret`` in ``keep this secret``) or holds one as whole words, so
+    the compass never counts the same words a second time.
+    """
+    for other in scored:
+        if phrase == other:
+            return True
+        if match_keywords(other, (phrase,)) or match_keywords(phrase, (other,)):
+            return True
+    return False
 
 
 @dataclass
@@ -423,12 +450,33 @@ class TrustCompass:
     async def reflect(
         self, message: str, sender: str, context: Optional[Dict[str, Any]] = None
     ) -> TrustReflection:
-        """Reflect on one message; the result joins the bounded history."""
+        """Reflect on one message; the result joins the bounded history.
+
+        The same as ``reflect_independent`` with nothing excluded.
+        """
+        return await self.reflect_independent(message, sender, context)
+
+    async def reflect_independent(
+        self,
+        message: str,
+        sender: str,
+        context: Optional[Dict[str, Any]] = None,
+        *,
+        already_scored: Iterable[str] = (),
+    ) -> TrustReflection:
+        """Reflect on one message, leaving out evidence a caller already scored.
+
+        Deep mode behaves as ``reflect``. The keyword path (direct, or as the
+        fallback from deep mode) skips every matched table phrase that equals
+        an entry of ``already_scored``, lies inside one as whole words or
+        holds one: it adds no concern, no penalty and no consult count. The
+        result joins the bounded history.
+        """
         reflection: Optional[TrustReflection] = None
         if self.brain is not None and self.config.deep_mode:
             reflection = await self._deep(message)
         if reflection is None:
-            reflection = self._keyword(message, sender)
+            reflection = self._keyword(message, sender, already_scored)
         self.history.append(reflection)
         logger.debug(
             "trust compass reflection: comfort %.2f, %s, method %s",
@@ -481,9 +529,23 @@ class TrustCompass:
             timestamp=self._clock(),
         )
 
-    def _keyword(self, message: str, sender: str) -> TrustReflection:
+    def keyword_screen(
+        self, message: str, sender: str, already_scored: Iterable[str] = ()
+    ) -> TrustReflection:
+        """The keyword reflection of ``message`` with no brain call.
+
+        It skips the phrases in ``already_scored`` as ``reflect_independent``
+        does and adds nothing to the history, so a caller can decide on its
+        concerns whether a full reflection is worth asking for.
+        """
+        return self._keyword(message, sender, already_scored)
+
+    def _keyword(
+        self, message: str, sender: str, already_scored: Iterable[str] = ()
+    ) -> TrustReflection:
         config = self.config
         role = self.escalation_role()
+        skipped = tuple(dict.fromkeys(str(p) for p in already_scored))
         tables: List[Table] = list(config.discomfort_patterns.values())
         tables.append(
             {
@@ -495,6 +557,8 @@ class TrustCompass:
         score = config.base_comfort
         for table in tables:
             for phrase in match_keywords(message, list(table)):
+                if _overlaps_scored(phrase, skipped):
+                    continue
                 concern, penalty = table[phrase]
                 concerns.append(concern)
                 score -= penalty

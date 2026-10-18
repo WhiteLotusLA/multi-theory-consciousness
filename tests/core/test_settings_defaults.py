@@ -62,8 +62,11 @@ def test_anthropic_key_readable_prefixed(clean_env, monkeypatch):
 
 def test_removed_keys_are_gone(clean_env):
     fields = Settings.model_fields
+    # Only the supported providers carry a provider key: a key for any other
+    # provider returning to Settings fails here.
+    provider_keys = {name for name in fields if name.endswith("_API_KEY")}
+    assert provider_keys == {"ANTHROPIC_API_KEY"}
     for gone in [
-        "OPENAI_API_KEY",
         "NEO4J_HOST",
         "NEO4J_PORT",
         "NEO4J_BOLT_PORT",
@@ -75,6 +78,34 @@ def test_removed_keys_are_gone(clean_env):
         "ENABLE_DREAM_PROCESSING",
     ]:
         assert gone not in fields, gone
+
+
+def test_reset_settings_rebuilds_the_singleton(clean_env, monkeypatch):
+    from mtc.core import config
+
+    monkeypatch.setattr(config, "_settings", None)
+    monkeypatch.setenv("MTC_SYSTEM_NAME", "Testagent")
+    first = config.get_settings()
+    assert first.SYSTEM_NAME == "Testagent"
+    monkeypatch.setenv("MTC_SYSTEM_NAME", "Testagent2")
+    # The instance is built once per process: a changed environment is not
+    # seen until the singleton is reset.
+    assert config.get_settings() is first
+    assert config.get_settings().SYSTEM_NAME == "Testagent"
+    assert config.reset_settings() is None
+    rebuilt = config.get_settings()
+    assert rebuilt is not first
+    assert rebuilt.SYSTEM_NAME == "Testagent2"
+    assert config.get_settings() is rebuilt
+
+
+def test_cors_origin_list_drops_empty_entries(clean_env):
+    assert Settings(API_CORS_ORIGINS="").API_CORS_ORIGINS_LIST == []
+    assert Settings(API_CORS_ORIGINS="a, ,b,").API_CORS_ORIGINS_LIST == ["a", "b"]
+    default = Settings()
+    assert default.API_CORS_ORIGINS_LIST == [
+        item.strip() for item in default.API_CORS_ORIGINS.split(",")
+    ]
 
 
 def test_dcm_settings_exist(clean_env):

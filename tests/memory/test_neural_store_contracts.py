@@ -16,7 +16,9 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 import pytest
 
+from mtc.core.config import Settings
 from mtc.memory import inmemory
+from mtc.memory.memory_consolidation_pipeline import MemoryConsolidationPipeline
 from mtc.memory.protocols import (
     TELEMETRY_COLLECTIONS,
     ConversationTurnStore,
@@ -133,8 +135,8 @@ def backend(request) -> NeuralBackend:
 
 def _gist(
     gist_id: str,
-    retention: float = 1.0,
-    importance: float = 0.5,
+    retention: Optional[float] = 1.0,
+    importance: Optional[float] = 0.5,
     protected: bool = False,
     offset_minutes: int = 0,
 ) -> ThoughtGist:
@@ -228,6 +230,80 @@ async def test_gists_filter_by_retention(backend):
         g.gist_id for g in await gists.active_gists(min_retention=0.0, limit=1)
     ] == ["low"]
     assert await gists.active_gists(min_retention=0.95) == []
+
+
+@pytest.mark.asyncio
+async def test_gist_without_retention_is_never_listed_or_expired(backend):
+    gists, retention = backend.make_gists_and_retention()
+    await gists.add_gist(_gist("unknown", retention=None, importance=0.9))
+    await gists.add_gist(_gist("known", retention=0.6, importance=0.1))
+    # An unknown retention is not at or above any floor, the zero floor included.
+    assert [g.gist_id for g in await gists.active_gists()] == ["known"]
+    assert [g.gist_id for g in await gists.active_gists(min_retention=0.0)] == ["known"]
+    # Nor is it below a floor: the retention pass never expires it.
+    assert await retention.expire_gists(1.0, dry_run=True) == 1
+    assert await retention.expire_gists(1.0, dry_run=False) == 1
+    remaining = [g async for g in gists.iter_gists()]
+    assert [g.gist_id for g in remaining] == ["unknown"]
+    assert remaining[0].retention_strength is None
+
+
+@pytest.mark.asyncio
+async def test_active_gists_order_an_unknown_importance_last(backend):
+    gists, _ = backend.make_gists_and_retention()
+    await gists.add_gist(_gist("low", importance=0.2, offset_minutes=1))
+    await gists.add_gist(_gist("unknown", importance=None, offset_minutes=2))
+    await gists.add_gist(_gist("high", importance=0.8, offset_minutes=3))
+    ordered = await gists.active_gists(min_retention=0.0)
+    assert [g.gist_id for g in ordered] == ["high", "low", "unknown"]
+    assert ordered[-1].importance_score is None
+
+
+@pytest.mark.asyncio
+async def test_iter_gists_yields_every_gist_in_creation_order(backend):
+    gists, _ = backend.make_gists_and_retention()
+    await gists.add_gist(_gist("c", retention=0.9, offset_minutes=5))
+    await gists.add_gist(_gist("a", retention=None, offset_minutes=0))
+    await gists.add_gist(_gist("e", retention=0.0, offset_minutes=9))
+    await gists.add_gist(_gist("d", retention=0.05, offset_minutes=5))
+    await gists.add_gist(_gist("b", retention=None, importance=None, offset_minutes=2))
+    seen = [g.gist_id async for g in gists.iter_gists(batch=2)]
+    # created_at first, gist_id among equal instants; any retention, null included
+    assert seen == ["a", "b", "c", "d", "e"]
+    assert [g.gist_id async for g in gists.iter_gists()] == seen
+    first = [g async for g in gists.iter_gists()][0]
+    first.summary = "changed after read"
+    again = [g async for g in gists.iter_gists()][0]
+    assert again.summary == "summary a"
+
+
+@pytest.mark.asyncio
+async def test_refresh_computes_retention_for_a_gist_stored_without_one(
+    backend, tmp_path
+):
+    gists, _ = backend.make_gists_and_retention()
+    now = T0 + timedelta(days=5)
+    await gists.add_gist(
+        ThoughtGist(
+            gist_id="unknown",
+            created_at=now - timedelta(days=28),
+            summary="s",
+            source_count=1,
+            source_thought_ids=[],
+        )
+    )
+    # No floor lists a gist without a retention, so only iter_gists reaches it.
+    assert await gists.active_gists(min_retention=0.0) == []
+    pipeline = MemoryConsolidationPipeline(
+        settings=Settings(PROJECT_ROOT=str(tmp_path), SYSTEM_NAME="Testagent"),
+        clock=lambda: now,
+        gist_store=gists,
+    )
+    assert await pipeline.refresh_gist_retention() == 1
+    (stored,) = await gists.active_gists(min_retention=0.0)
+    assert stored.gist_id == "unknown"
+    # Two half-lives (14 days each) after creation.
+    assert stored.retention_strength == pytest.approx(0.25)
 
 
 @pytest.mark.asyncio

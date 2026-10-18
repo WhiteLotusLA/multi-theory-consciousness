@@ -42,7 +42,11 @@ shadow records. Spec shape (JSON or YAML, read by ``load_spec``)::
 
 Each per-dimension gate may also name ``dimensions`` to run on a subset; the
 null-beating gate runs once. A record's value that is None is a missing
-measurement and is skipped. An unknown gate name raises ValueError.
+measurement and is skipped. An unknown gate name raises ValueError, and so
+does a ``dimensions`` filter that is empty or names a dimension the spec does
+not list, or a per-dimension gate in a spec with no dimensions: a gate that
+would run nowhere never lets the report pass. Every configured gate has a
+result; one that still ran nowhere is reported as failed.
 
 ``write_artifacts`` writes ``<signal_id>-gates-<date>.json`` and ``.md`` with
 every verdict and the numbers behind it. The records the gates read can hold
@@ -438,13 +442,48 @@ def _value(record: Dict[str, Any], dimension: str) -> Optional[float]:
     return None if raw is None else float(raw)
 
 
+def _check_dimension_filters(gates: Dict[str, Any], dimensions: List[str]) -> None:
+    """Refuse a per-dimension gate that could run nowhere.
+
+    A ``dimensions`` filter that is empty or names a dimension the spec does
+    not list, or a per-dimension gate in a spec with no dimensions, raises
+    ValueError naming the gate and the offending names.
+    """
+    known = set(dimensions)
+    for name in PER_DIMENSION_GATES:
+        if name not in gates:
+            continue
+        if not dimensions:
+            raise ValueError(
+                f"gate {name} is configured but the spec lists no dimensions"
+            )
+        only = dict(gates[name] or {}).get("dimensions")
+        if only is None:
+            continue
+        names = list(only) if isinstance(only, (list, tuple)) else [only]
+        if not names:
+            raise ValueError(f"gate {name} has an empty dimensions filter")
+        outside = [str(n) for n in names if n not in known]
+        if outside:
+            raise ValueError(
+                f"gate {name} names dimensions {outside} that the spec does not "
+                f"list; known: {list(dimensions)}"
+            )
+
+
 def run_signal_gates(
     spec: Dict[str, Any],
     records: List[Dict[str, Any]],
     *,
     now: Optional[datetime] = None,
 ) -> GateReport:
-    """Run the gate suite ``spec`` describes over shadow ``records``."""
+    """Run the gate suite ``spec`` describes over shadow ``records``.
+
+    Every configured gate has a result: a per-dimension filter that could run
+    nowhere is a ValueError before anything runs, and a configured gate that
+    still produced no result is reported as failed (``configured but not
+    run``).
+    """
     try:
         signal_id = str(spec["signal_id"])
         dimensions = list(spec["dimensions"])
@@ -454,6 +493,7 @@ def run_signal_gates(
     unknown = sorted(set(gates) - set(GATE_NAMES))
     if unknown:
         raise ValueError(f"unknown gates {unknown}; known: {GATE_NAMES}")
+    _check_dimension_filters(gates, dimensions)
 
     moment = now or datetime.now(timezone.utc)
     stamps = [str(r["ts"]) for r in records if r.get("ts")]
@@ -520,6 +560,19 @@ def run_signal_gates(
         report.results.append(
             null_beating_gate(signal_id=signal_id, dimension=None, **cfg)
         )
+    ran = {result.gate for result in report.results}
+    for name in GATE_NAMES:
+        if name in gates and name not in ran:
+            report.results.append(
+                GateResult(
+                    name,
+                    signal_id,
+                    None,
+                    False,
+                    {},
+                    "configured but not run: no dimension matched the gate",
+                )
+            )
     return report
 
 

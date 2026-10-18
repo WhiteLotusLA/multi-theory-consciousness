@@ -334,7 +334,72 @@ async def test_store_writes_episodic_then_vector_then_graph(settings, clock):
     assert stored["metadata"]["postgres_id"] == result.postgres_id
     assert stored["metadata"]["memory_type"] == "episodic"
     assert stored["metadata"]["created_at"] == T0.isoformat()
-    assert stored["emotional_weight"] == pytest.approx(0.8)
+    assert stored["emotional_weight"] == pytest.approx(0.6)
+
+
+@pytest.mark.asyncio
+async def test_vector_weight_is_the_measured_emotion_not_the_importance(
+    settings, clock
+):
+    vectors = RecordingVectors()
+    manager = _manager(settings, clock, vector_store=vectors)
+    await manager.initialize()
+    await manager.store_memory("a plain note", importance=3.0)
+    await manager.store_memory(
+        "a bright moment", importance=3.0, emotional_context={"joy": 0.8}
+    )
+    await manager.store_memory(
+        "two feelings",
+        importance=9.0,
+        emotional_context={"calm": 0.2, "awe": 0.5, "label": "text", "flag": True},
+    )
+    await manager.store_memory("over the scale", emotional_context={"joy": 1.7})
+    weights = [entry["emotional_weight"] for entry in vectors.stored]
+    assert weights[0] is None
+    assert weights[1] == pytest.approx(0.8)
+    assert weights[2] == pytest.approx(0.5)
+    assert weights[3] == pytest.approx(1.0)
+
+
+@pytest.mark.asyncio
+async def test_non_finite_emotion_is_not_a_measurement(settings, clock):
+    vectors = RecordingVectors()
+    store = InMemoryEpisodicStore(clock=clock)
+    manager = _manager(settings, clock, episodic_store=store, vector_store=vectors)
+    await manager.initialize()
+    await manager.store_memory("nan alone", emotional_context={"joy": float("nan")})
+    await manager.store_memory(
+        "nan beside a number",
+        emotional_context={"joy": float("nan"), "awe": 0.3},
+    )
+    await manager.store_memory(
+        "infinite beside a number",
+        emotional_context={"joy": float("inf"), "awe": 0.4},
+    )
+    weights = [entry["emotional_weight"] for entry in vectors.stored]
+    # A non-finite value is unmeasurable: it never reads as the full weight.
+    assert weights[0] is None
+    assert weights[1] == pytest.approx(0.3)
+    assert weights[2] == pytest.approx(0.4)
+
+
+@pytest.mark.asyncio
+async def test_simple_consolidation_mean_skips_non_finite_values(settings, clock):
+    store = InMemoryEpisodicStore(clock=clock)
+    manager = _manager(settings, clock, episodic_store=store)
+    await manager.initialize()
+    await manager.store_memory("joy one", emotional_context={"joy": 0.4})
+    await manager.store_memory("joy two", emotional_context={"joy": 0.8})
+    await manager.store_memory(
+        "joy unknown", emotional_context={"joy": float("nan"), "calm": 0.1}
+    )
+    report = await manager.consolidate_memories()
+    assert report["method"] == "simple"
+    semantics = await store.get_semantic([1, 2])
+    joy = [row for row in semantics if row["concept"] == "joy_pattern"]
+    assert len(joy) == 1
+    assert joy[0]["emotional_context"] == {"joy": pytest.approx(0.6)}
+    assert joy[0]["source_memories"] == [1, 2]
 
 
 @pytest.mark.asyncio
@@ -632,6 +697,32 @@ async def test_consolidate_simple_path_is_labelled(settings, clock):
     assert semantic[0]["concept"] == "calm_pattern"
     assert semantic[0]["source_memories"] == [1, 2]
     assert (await store.stats())["unconsolidated"] == 0
+
+
+@pytest.mark.asyncio
+async def test_simple_consolidation_writes_no_constant(settings, clock):
+    store = InMemoryEpisodicStore(clock=clock)
+    manager = _manager(settings, clock, episodic_store=store)
+    await manager.initialize()
+    first = await manager.store_memory("joy one", emotional_context={"joy": 0.4})
+    second = await manager.store_memory(
+        "joy two", emotional_context={"joy": 0.8, "calm": 0.1, "note": "text"}
+    )
+    report = await manager.consolidate_memories()
+    assert report["method"] == "simple"
+    assert "consolidation_strength" in report
+    assert report["consolidation_strength"] is None
+    semantic = (await store.get_semantic([1]))[0]
+    assert semantic["concept"] == "joy_pattern"
+    assert semantic["emotional_context"] == {"joy": pytest.approx(0.6)}
+    assert semantic["confidence"] is None
+    # The count-based strength of the semantic row stays (two members).
+    assert semantic["strength"] == pytest.approx(0.2)
+    rows = await store.get_episodic([first.postgres_id, second.postgres_id])
+    assert [row["consolidated"] for row in rows] == [True, True]
+    assert [row["consolidation_strength"] for row in rows] == [None, None]
+    assert not hasattr(manager_module, "SIMPLE_STRENGTH")
+    assert not hasattr(manager_module, "SIMPLE_CONFIDENCE")
 
 
 @pytest.mark.asyncio

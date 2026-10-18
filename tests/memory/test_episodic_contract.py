@@ -204,6 +204,42 @@ async def test_add_semantic_links_sources(store, clock):
 
 
 @pytest.mark.asyncio
+async def test_unmeasured_semantic_strength_and_confidence_read_none(store, clock):
+    source = await _add_at(store, clock, T0, "one")
+    bare = await store.add_semantic({"concept": "bare", "source_memories": [source]})
+    measured = await store.add_semantic(
+        {"concept": "measured", "strength": 0.3, "confidence": 0.65}
+    )
+    explicit = await store.add_semantic(
+        {"concept": "explicit", "strength": None, "confidence": None}
+    )
+    rows = {
+        r["concept"]: r for r in await store.get_semantic([bare, measured, explicit])
+    }
+    assert rows["bare"]["strength"] is None
+    assert rows["bare"]["confidence"] is None
+    assert rows["explicit"]["strength"] is None
+    assert rows["explicit"]["confidence"] is None
+    assert rows["measured"]["strength"] == pytest.approx(0.3)
+    assert rows["measured"]["confidence"] == pytest.approx(0.65)
+
+
+@pytest.mark.asyncio
+async def test_unmeasured_consolidation_strength_reads_none(store, clock):
+    fresh = await _add_at(store, clock, T0, "never consolidated")
+    unmeasured = await _add_at(store, clock, T0, "consolidated without a strength")
+    measured = await _add_at(store, clock, T0, "consolidated with a strength")
+    assert await store.mark_consolidated([unmeasured], None) == 1
+    assert await store.mark_consolidated([measured], 0.3) == 1
+    rows = {r["id"]: r for r in await store.get_episodic([fresh, unmeasured, measured])}
+    assert rows[fresh]["consolidated"] is False
+    assert rows[fresh]["consolidation_strength"] is None
+    assert rows[unmeasured]["consolidated"] is True
+    assert rows[unmeasured]["consolidation_strength"] is None
+    assert rows[measured]["consolidation_strength"] == pytest.approx(0.3)
+
+
+@pytest.mark.asyncio
 async def test_touch_increments_access(store, clock):
     memory_id = await _add_at(store, clock, T0, "touched")
     clock.now = T0 + timedelta(hours=1)

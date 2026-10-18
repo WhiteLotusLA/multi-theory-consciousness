@@ -23,8 +23,9 @@ the store. ``_id`` is never returned.
 
 Schema artifact: ``ALERT_INDEXES`` (the ``alerts`` collection: unique
 ``alert_id``; ``timestamp`` descending; ``alert_type``; ``severity``), applied
-idempotently by ``ensure_indexes()`` as a safety net. Phase 7's ``init_mongo``
-script is canonical and is written from this constant.
+idempotently by ``ensure_indexes()`` as a safety net. The
+``scripts/db/init_mongo.py`` script is canonical and is written from this
+constant.
 
 Alerts can carry private context (conversation excerpts, speaker names,
 wellbeing readings); they live in the operator's MongoDB and nowhere in

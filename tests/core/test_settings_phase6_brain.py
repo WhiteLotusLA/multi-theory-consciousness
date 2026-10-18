@@ -1,6 +1,7 @@
 """Phase 6 Settings keys: providers, generation bounds, prompt caps, narration."""
 
 import os
+import typing
 from pathlib import Path
 
 import pytest
@@ -57,10 +58,13 @@ def test_provider_rejects_other_values(clean_env, monkeypatch):
     for choice in ("local", "anthropic", "mock"):
         monkeypatch.setenv("MTC_LLM_PROVIDER", choice)
         assert Settings().LLM_PROVIDER == choice
-    for other in ("openai", "google", "xai"):
+    for other in ("remote", "cloud", "Local", ""):
         monkeypatch.setenv("MTC_LLM_PROVIDER", other)
         with pytest.raises(ValidationError):
             Settings()
+    # The accepted set is exactly the three supported providers.
+    annotation = Settings.model_fields["LLM_PROVIDER"].annotation
+    assert set(typing.get_args(annotation)) == {"local", "anthropic", "mock"}
 
 
 def test_template_family_rejects_other_values(clean_env, monkeypatch):
@@ -100,13 +104,13 @@ def test_thinking_budget_bounds(clean_env, monkeypatch):
         Settings(ANTHROPIC_THINKING_BUDGET=-1)
 
 
-def test_vision_cannot_be_enabled(clean_env, monkeypatch):
-    assert Settings().VISION_ENABLED is False
+def test_vision_key_is_gone_and_ignored(clean_env, monkeypatch):
+    # The key had no reader; an env file that still sets it is ignored.
+    assert "VISION_ENABLED" not in Settings.model_fields
     monkeypatch.setenv("MTC_VISION_ENABLED", "true")
-    with pytest.raises(
-        ValidationError, match="vision input is not part of this release"
-    ):
-        Settings()
+    settings = Settings()
+    assert not hasattr(settings, "VISION_ENABLED")
+    assert "MTC_VISION_ENABLED" not in render_env_example(Settings)
 
 
 def test_provider_state_path_derives_under_data_directory(clean_env, monkeypatch):
@@ -237,7 +241,6 @@ def test_phase6_keys_land_in_their_sections():
         "THINKING_LOOP_MAX_RETRIES",
         "THINKING_LOOP_PENALTY_STEP",
         "PROVIDER_STATE_PATH",
-        "VISION_ENABLED",
         "HISTORY_TOKEN_BUDGET",
         "CHARS_PER_TOKEN",
         "PROMPT_MAX_THOUGHTS",

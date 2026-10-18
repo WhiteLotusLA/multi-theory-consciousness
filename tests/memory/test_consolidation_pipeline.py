@@ -654,3 +654,182 @@ async def test_cycle_without_memory_manager_says_so(settings, clock):
     result = await _pipeline(settings, clock).run_consolidation_cycle()
     assert result.memories_processed == 0
     assert result.skipped == "no memory manager"
+
+
+# ----------------------------------------------------------------------
+# Unmeasured scores stay None
+# ----------------------------------------------------------------------
+
+
+class RecordingVectors:
+    """A vector double that keeps the keyword arguments of every write."""
+
+    def __init__(self) -> None:
+        self.calls: List[Dict[str, Any]] = []
+
+    def store_memory(self, text, metadata=None, importance=1.0, **kwargs):
+        self.calls.append(
+            {"text": text, "metadata": metadata, "importance": importance, **kwargs}
+        )
+        return f"p{len(self.calls)}"
+
+
+@pytest.mark.asyncio
+async def test_cluster_without_salience_has_no_average_salience(settings, clock):
+    brain = FakeBrain(replies=["Unit returned to tides.", "Unit noticed the moon."])
+    gists = InMemoryThoughtGistStore()
+    pipeline = _pipeline(settings, clock, brain=brain, gist_store=gists)
+    unscored = _old_thoughts(3)
+    scored = [
+        _thought(10 + i, "the moon is bright tonight", minutes=i, salience_score=v)
+        for i, v in enumerate((0.2, 0.6))
+    ]
+    report = await pipeline.run_thought_consolidation(unscored + scored)
+    assert report.gists_created == 2
+    by_count = {g.source_count: g for g in report.gists}
+    assert by_count[3].avg_salience is None
+    assert by_count[2].avg_salience == pytest.approx(0.4)
+
+
+@pytest.mark.asyncio
+async def test_new_gist_gets_its_retention_computed_at_creation(
+    settings, clock, monkeypatch
+):
+    brain = FakeBrain(replies=["Unit returned to tides."])
+    gists = InMemoryThoughtGistStore()
+    pipeline = _pipeline(settings, clock, brain=brain, gist_store=gists)
+    report = await pipeline.run_thought_consolidation(_old_thoughts())
+    (gist,) = report.gists
+    assert gist.retention_strength == pytest.approx(
+        pipeline.compute_gist_retention(gist, gist.created_at)
+    )
+    assert gist.retention_strength == pytest.approx(1.0)
+    (stored,) = await gists.active_gists(min_retention=0.0)
+    assert stored.retention_strength == pytest.approx(1.0)
+
+    # The age-zero value of the curve equals 1.0, so a sentinel curve tells a
+    # computed retention apart from any default.
+    calls = []
+
+    def sentinel_curve(target, at):
+        calls.append((target.gist_id, at))
+        return 0.42
+
+    brain = FakeBrain(replies=["Unit returned to tides."])
+    gists = InMemoryThoughtGistStore()
+    pipeline = _pipeline(settings, clock, brain=brain, gist_store=gists)
+    monkeypatch.setattr(pipeline, "compute_gist_retention", sentinel_curve)
+    report = await pipeline.run_thought_consolidation(_old_thoughts())
+    (gist,) = report.gists
+    assert gist.retention_strength == pytest.approx(0.42)
+    # Once at creation, then once by the run's own refresh pass.
+    assert calls == [(gist.gist_id, gist.created_at), (gist.gist_id, clock())]
+    (stored,) = await gists.active_gists(min_retention=0.0)
+    assert stored.gist_id == gist.gist_id
+    assert stored.retention_strength == pytest.approx(0.42)
+
+
+@pytest.mark.asyncio
+async def test_gist_vector_weight_is_none_without_a_measured_emotion(settings, clock):
+    brain = FakeBrain(replies=["Unit returned to tides.", "Unit noticed the moon."])
+    vectors = RecordingVectors()
+    pipeline = _pipeline(settings, clock, brain=brain, vector_store=vectors)
+    unmeasured = [
+        _thought(i, "I keep wondering about tides", minutes=i, emotional_context={})
+        for i in range(3)
+    ]
+    measured = [
+        _thought(
+            10 + i,
+            "the moon is bright tonight",
+            minutes=i,
+            emotional_context={"awe": v, "note": "text"},
+        )
+        for i, v in enumerate((0.3, 0.7))
+    ]
+    report = await pipeline.run_thought_consolidation(unmeasured + measured)
+    assert report.gists_embedded == 2
+    weights = {
+        c["metadata"]["source_count"]: c["emotional_weight"] for c in vectors.calls
+    }
+    assert weights[3] is None
+    assert weights[2] == pytest.approx(0.7)
+
+
+@pytest.mark.asyncio
+async def test_refresh_computes_retention_for_a_gist_stored_without_one(
+    settings, clock
+):
+    gists = InMemoryThoughtGistStore()
+    await gists.add_gist(
+        ThoughtGist(
+            gist_id="unknown",
+            created_at=NOW - timedelta(days=28),
+            summary="s",
+            source_count=1,
+            source_thought_ids=[],
+        )
+    )
+    assert await gists.active_gists(min_retention=0.0) == []
+    pipeline = _pipeline(settings, clock, gist_store=gists)
+    assert await pipeline.refresh_gist_retention() == 1
+    (stored,) = await gists.active_gists(min_retention=0.0)
+    assert stored.gist_id == "unknown"
+    assert stored.retention_strength == pytest.approx(0.25)
+
+
+@pytest.mark.asyncio
+async def test_refresh_gist_retention_reaches_every_stored_gist(settings, clock):
+    gists = InMemoryThoughtGistStore()
+    for i in range(501):
+        await gists.add_gist(
+            ThoughtGist(
+                gist_id=f"g{i:03d}",
+                created_at=NOW - timedelta(days=14),
+                summary="s",
+                source_count=1,
+                source_thought_ids=[],
+                importance_score=i / 1000.0,
+                retention_strength=1.0,
+            )
+        )
+    pipeline = _pipeline(settings, clock, gist_store=gists)
+    assert await pipeline.refresh_gist_retention() == 501
+    stored = [g async for g in gists.iter_gists()]
+    assert len(stored) == 501
+    assert all(g.retention_strength == pytest.approx(0.5) for g in stored)
+
+
+def test_strategy_averages_measured_intensities_only(settings, clock):
+    pipeline = _pipeline(settings, clock)
+    mixed = [
+        {"emotional_intensity": 0.9},
+        {"emotional_intensity": None},
+        {"content": "no intensity key"},
+    ]
+    assert pipeline.select_strategy(mixed) is ConsolidationStrategy.SLEEP_CONSOLIDATION
+    unmeasured = [{"emotional_intensity": None}, {"emotional_intensity": None}]
+    assert (
+        pipeline.select_strategy(unmeasured) is ConsolidationStrategy.SPACED_REPETITION
+    )
+    row = pipeline._as_pipeline_memory({"id": 1, "content": "x", "importance": 5.0})
+    assert row["emotional_intensity"] is None
+    measured = pipeline._as_pipeline_memory(
+        {"id": 2, "content": "y", "importance": 5.0, "emotional_context": {"joy": 0.4}}
+    )
+    assert measured["emotional_intensity"] == pytest.approx(0.4)
+
+
+def test_emotional_arc_reads_only_contexts_with_the_dominant_emotion():
+    contexts = [
+        {"joy": 0.2},
+        {"calm": 0.1},
+        {"joy": 0.4},
+        {"calm": 0.1},
+        {"joy": 0.9},
+    ]
+    dominant, arc = MemoryConsolidationPipeline._emotional_arc(contexts)
+    assert dominant == "joy"
+    assert arc["start_intensity"] == pytest.approx(0.5)
+    assert arc["end_intensity"] == pytest.approx(0.5)
+    assert arc["trend"] == "steady"

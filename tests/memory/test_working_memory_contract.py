@@ -107,6 +107,18 @@ async def test_returned_documents_are_copies(memory):
 
 
 @pytest.mark.asyncio
+async def test_hit_rate_is_none_before_any_cache_read(memory):
+    fresh = await memory.get_metrics()
+    assert fresh["cache_hits"] == 0 and fresh["cache_misses"] == 0
+    assert fresh["cache_hit_rate_percent"] is None
+    await memory.cache_set("k", 1)  # a write is not a cache read
+    assert (await memory.get_metrics())["cache_hit_rate_percent"] is None
+    await memory.cache_get("absent")
+    assert (await memory.get_metrics())["cache_hit_rate_percent"] == pytest.approx(0.0)
+    await memory.disconnect()
+
+
+@pytest.mark.asyncio
 async def test_metrics_count_reads_writes_and_hits(memory):
     await memory.cache_set("k", 1)
     await memory.cache_get("k")

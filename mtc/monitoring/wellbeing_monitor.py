@@ -51,8 +51,9 @@ Persisted state
 ---------------
 ``to_state_dict`` and ``from_state_dict`` follow the module persistence
 contract (``scalars``, ``arrays``, ``histories``): the last contact, the last
-PAD timestamp, the cooldown stamps and the snapshot history. Phase 6 registers
-the monitor with the persistence hub under ``wellbeing``. The monitor reads no
+PAD timestamp, the cooldown stamps and the snapshot history. The runtime
+(``mtc.pipeline.runtime``) registers the monitor with the persistence hub
+under ``wellbeing``. The monitor reads no
 config key itself and opens no store. Instants are timezone-aware UTC from the
 injectable ``clock``.
 """

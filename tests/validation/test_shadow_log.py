@@ -1,6 +1,7 @@
 """Shadow signal log: append-only JSONL that never raises."""
 
 import json
+import os
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -109,3 +110,37 @@ def test_default_directory_skipped_under_pytest(tmp_path, monkeypatch, caplog):
     monkeypatch.delenv("PYTEST_CURRENT_TEST")
     assert ShadowSignalLogger("sig").log({"n": 2}) is True
     assert (target / "sig.jsonl").exists()
+
+
+@pytest.fixture
+def fresh_settings():
+    """Rebuild the process-wide Settings around the test, never keep its copy."""
+    from mtc.core.config import reset_settings
+
+    reset_settings()
+    yield reset_settings
+    reset_settings()
+
+
+def test_default_directory_is_resolved_against_project_root(
+    tmp_path, monkeypatch, fresh_settings
+):
+    from mtc.core.paths import shadow_log_dir
+
+    for key in list(os.environ):
+        if key.startswith("MTC_"):
+            monkeypatch.delenv(key, raising=False)
+    root = tmp_path / "root"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.setenv("MTC_PROJECT_ROOT", str(root))
+    monkeypatch.chdir(elsewhere)
+    fresh_settings()
+    directory = ShadowSignalLogger("sig").directory
+    assert directory == root / "logs" / "shadow_signals"
+    assert directory == shadow_log_dir()
+    assert directory.is_absolute()
+    # a relative SHADOW_LOG_DIR joins PROJECT_ROOT, not the working directory
+    monkeypatch.setenv("MTC_SHADOW_LOG_DIR", "custom/shadow")
+    fresh_settings()
+    assert ShadowSignalLogger("sig").directory == root / "custom" / "shadow"

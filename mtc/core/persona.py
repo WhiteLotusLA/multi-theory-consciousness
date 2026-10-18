@@ -10,9 +10,9 @@ self-description, communication-style notes, core values, the Big Five
 personality seed, optional core-memory block text, the prompt's style rules
 and the speaker block templates (``creator``, ``known`` and ``unverified``,
 chosen by the token-verified identity, never by a name). ``PERSONA_KEYS``
-lists the documented keys and their sub-keys; Phase 7's ``PersonaConfig``
-schema keeps the same keys, so a persona written by the wizard loads
-identically. A neutral example ships as ``config/persona.example.yaml``.
+lists the documented keys and their sub-keys; the onboarding schema's
+``PersonaConfig`` (``mtc.onboarding.schema``) keeps the same keys, so a
+persona written by the wizard loads identically. A neutral example ships as ``config/persona.example.yaml``.
 
 - A missing file is not an error: ``load_persona`` returns None (the neutral
   core blocks apply) and logs one WARNING per path.

@@ -19,8 +19,8 @@ later writes first among equal instants; ``_id`` is never returned.
 
 Schema artifact: ``PRIVACY_INDEXES`` (``event_id`` unique, ``timestamp``
 descending, ``user_id``, ``event_type``), applied idempotently by
-``ensure_indexes()`` or ``ensure_privacy_indexes()`` as a safety net; Phase 7's
-``init_mongo`` script is canonical.
+``ensure_indexes()`` or ``ensure_privacy_indexes()`` as a safety net; the
+``scripts/db/init_mongo.py`` script is canonical.
 
 Private data: events hold user ids, roles and access records. They live in the
 operator's MongoDB and nowhere in version control or logs; the store logs no
@@ -127,6 +127,7 @@ class MongoPrivacyAuditStore(MongoDocumentStore):
 def ensure_privacy_indexes(database: Any) -> int:
     """Create every index in ``PRIVACY_INDEXES`` (idempotent); return the count.
 
-    A safety net: Phase 7's ``init_mongo`` script is the canonical schema.
+    A safety net: the ``scripts/db/init_mongo.py`` script is the canonical
+    schema.
     """
     return mongo_call(apply_indexes, database, PRIVACY_INDEXES)

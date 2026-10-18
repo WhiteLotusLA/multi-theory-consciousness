@@ -40,6 +40,7 @@ from dataclasses import fields, replace
 from datetime import datetime, timedelta, timezone
 from typing import (
     Any,
+    AsyncIterator,
     Callable,
     Deque,
     Dict,
@@ -399,7 +400,8 @@ class InMemoryWorkingMemory:
         accesses = hits + self._metrics["cache_misses"]
         return {
             **self._metrics,
-            "cache_hit_rate_percent": (hits / accesses * 100.0) if accesses else 0.0,
+            # No rate is measured before the first cache read.
+            "cache_hit_rate_percent": (hits / accesses * 100.0) if accesses else None,
         }
 
     async def disconnect(self) -> None:
@@ -717,7 +719,12 @@ _GIST_FIELDS = {f.name for f in fields(ThoughtGist)} - {"gist_id"}
 
 
 class InMemoryThoughtGistStore:
-    """Thought gists held in process memory, keyed by ``gist_id``."""
+    """Thought gists held in process memory, keyed by ``gist_id``.
+
+    A gist whose retention is None (unknown) is left out of ``active_gists``
+    and never expired; ``iter_gists`` yields it. A None importance sorts after
+    every measured importance.
+    """
 
     def __init__(self, max_items: int = DEFAULT_MAX_ITEMS) -> None:
         self._max_items = _check_cap(max_items)
@@ -735,10 +742,39 @@ class InMemoryThoughtGistStore:
         self, min_retention: float = 0.2, limit: int = 100
     ) -> List[ThoughtGist]:
         kept = [
-            g for g in self._gists.values() if g.retention_strength >= min_retention
+            g
+            for g in self._gists.values()
+            if g.retention_strength is not None
+            and g.retention_strength >= min_retention
         ]
-        kept.sort(key=lambda g: (g.importance_score, g.created_at), reverse=True)
+        kept.sort(
+            key=lambda g: (
+                g.importance_score is not None,
+                g.importance_score if g.importance_score is not None else 0.0,
+                g.created_at,
+            ),
+            reverse=True,
+        )
         return [copy.deepcopy(g) for g in kept[: max(limit, 0)]]
+
+    async def iter_gists(self, batch: int = 500) -> AsyncIterator[ThoughtGist]:
+        """Yield every gist, any retention, by ``created_at`` then ``gist_id``.
+
+        ``batch`` bounds how many copies are taken per step; a batch below 1
+        raises ValueError.
+        """
+        if int(batch) < 1:
+            raise ValueError("batch must be at least 1")
+        size = int(batch)
+        keys = sorted(self._gists, key=lambda key: (self._gists[key].created_at, key))
+        for start in range(0, len(keys), size):
+            chunk = [
+                copy.deepcopy(self._gists[key])
+                for key in keys[start : start + size]
+                if key in self._gists
+            ]
+            for gist in chunk:
+                yield gist
 
     async def update_gist(self, gist_id: str, fields: Dict[str, Any]) -> bool:
         unknown = set(fields) - _GIST_FIELDS
@@ -755,11 +791,17 @@ class InMemoryThoughtGistStore:
         return True
 
     def expire(self, min_retention: float, dry_run: bool) -> int:
-        """Remove unprotected gists below the floor; used by the retention store."""
+        """Remove unprotected gists below the floor; used by the retention store.
+
+        A gist whose retention is None is unknown, not below the floor, and is
+        kept.
+        """
         doomed = [
             gist_id
             for gist_id, gist in self._gists.items()
-            if not gist.is_protected and gist.retention_strength < min_retention
+            if not gist.is_protected
+            and gist.retention_strength is not None
+            and gist.retention_strength < min_retention
         ]
         if not dry_run:
             for gist_id in doomed:
@@ -885,9 +927,10 @@ class InMemoryVectorStore:
         text: str,
         metadata: Optional[Dict[str, Any]] = None,
         importance: float = 1.0,
-        emotional_weight: float = 0.0,
+        emotional_weight: Optional[float] = None,
         point_id: Optional[str] = None,
     ) -> str:
+        """Embed and store ``text``; a None ``emotional_weight`` stays None."""
         vector = self._embed(text)
         payload = copy.deepcopy(metadata) if metadata else {}
         payload.update(
@@ -948,7 +991,13 @@ class InMemoryVectorStore:
 
 
 class InMemoryGraphStore:
-    """Concepts, memory links, concept relations and mentions in dicts."""
+    """Concepts, memory links, concept relations and mentions in dicts.
+
+    It follows the Neo4j store: a None relation strength is unmeasured (a new
+    edge stores None, an existing edge keeps its strength), related concepts
+    sort measured strengths first, strongest first, then None, then by name,
+    and a link to a missing concept is logged as a count, never by name.
+    """
 
     def __init__(self) -> None:
         self._concepts: Dict[str, Dict[str, str]] = {}
@@ -971,16 +1020,19 @@ class InMemoryGraphStore:
             )
             node["content_preview"] = memory_content[:200]
             linked = 0
+            skipped = 0
             for name in concept_names:
                 if name not in self._concepts:
-                    logger.warning("concept %r not found; skipping link", name)
+                    skipped += 1
                     continue
                 node["links"][name] = {
                     "relevance": relevance,
                     "extraction_method": extraction_method,
                 }
                 linked += 1
-            return linked
+        if skipped:
+            logger.warning("%d concept names not in the graph; links skipped", skipped)
+        return linked
 
     def list_concept_names(self, limit: Optional[int] = None) -> List[str]:
         with self._lock:
@@ -1009,7 +1061,7 @@ class InMemoryGraphStore:
         first: str,
         second: str,
         relationship: str = "relates_to",
-        strength: float = 0.5,
+        strength: Optional[float] = 0.5,
     ) -> bool:
         with self._lock:
             if first == second or first not in self._concepts:
@@ -1017,7 +1069,12 @@ class InMemoryGraphStore:
             if second not in self._concepts:
                 return False
             key = (first, second) if first < second else (second, first)
-            self._relations[key] = {"relationship": relationship, "strength": strength}
+            existing = self._relations.get(key)
+            if strength is None:
+                kept = existing["strength"] if existing is not None else None
+            else:
+                kept = float(strength)
+            self._relations[key] = {"relationship": relationship, "strength": kept}
             return True
 
     def get_related_concepts(
@@ -1035,7 +1092,13 @@ class InMemoryGraphStore:
                         "strength": edge["strength"],
                     }
                 )
-        rows.sort(key=lambda row: (-row["strength"], row["concept"]))
+        rows.sort(
+            key=lambda row: (
+                row["strength"] is None,
+                -row["strength"] if row["strength"] is not None else 0.0,
+                row["concept"],
+            )
+        )
         return rows[: max(limit, 0)]
 
     def delete_memory_nodes(self, memory_ids: Sequence[int]) -> int:

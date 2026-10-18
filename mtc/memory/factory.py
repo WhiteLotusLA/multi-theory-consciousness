@@ -28,8 +28,10 @@ and is reported as ``skipped``. Every component's ``status()`` (``backend``,
 The ``*_builder`` arguments replace the default constructors (tests, a GPU
 coordinator from ``mtc.neural.gpu_integration``, or a store an operator built
 by hand). The factory does not initialize the manager: the first call loads
-and seeds core memory. Phase 6 or 7 adds the per-store enable keys the wizard
-writes and passes them as the ``postgres``, ``vectors`` and ``graph`` flags.
+and seeds core memory. The caller reads the per-store enable keys
+(``POSTGRES_ENABLED``, ``QDRANT_ENABLED``, ``NEO4J_ENABLED``) and passes them
+as the ``postgres``, ``vectors`` and ``graph`` flags; this module reads none
+of them.
 No persisted state of its own.
 """
 

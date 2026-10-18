@@ -242,3 +242,48 @@ def test_hash_embedder_is_marked_non_semantic():
     assert HashEmbedder.semantic is False
     assert HashEmbedder().semantic is False
     assert SentenceTransformerEmbedder.semantic is True
+
+
+def _install_model_class(monkeypatch, model_cls):
+    module = types.ModuleType("sentence_transformers")
+    module.SentenceTransformer = model_cls
+    monkeypatch.setitem(sys.modules, "sentence_transformers", module)
+
+
+def test_dimension_is_read_through_whichever_name_the_model_has(
+    monkeypatch, settings_env
+):
+    import warnings
+
+    class Renamed(_FakeModel):
+        """A release that renamed the method and deprecated the old name."""
+
+        def __init__(self, name, device=None):
+            super().__init__(256)
+
+        def get_embedding_dimension(self) -> int:
+            return self._dim
+
+        def get_sentence_embedding_dimension(self) -> int:
+            warnings.warn("renamed to get_embedding_dimension", FutureWarning)
+            return self._dim
+
+    class Older(_FakeModel):
+        """A release that has only the old name."""
+
+        def __init__(self, name, device=None):
+            super().__init__(128)
+
+    settings_env(VECTOR_DIMENSIONS=256)
+    _install_model_class(monkeypatch, Renamed)
+    renamed = SentenceTransformerEmbedder()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert renamed.encode(["x"]).shape == (1, 256)
+    assert renamed.dim == 256
+
+    settings_env(VECTOR_DIMENSIONS=128)
+    _install_model_class(monkeypatch, Older)
+    older = SentenceTransformerEmbedder()
+    assert older.encode(["x"]).shape == (1, 128)
+    assert older.dim == 128

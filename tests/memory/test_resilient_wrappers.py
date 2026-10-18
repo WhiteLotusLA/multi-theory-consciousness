@@ -442,6 +442,41 @@ async def test_breadcrumbs_under_log_directory_when_enabled(
 
 
 @pytest.mark.asyncio
+async def test_breadcrumb_failure_is_warned_once_and_counted(
+    settings, monkeypatch, tmp_path, caplog
+):
+    from mtc.memory import resilient_wrappers
+
+    monkeypatch.setattr(resilient_wrappers, "_BREADCRUMB_WARNED", set(), raising=False)
+    (tmp_path / "blocker").write_text("a file where the log directory should be")
+    monkeypatch.setenv("MTC_STORE_FALLBACK_LOG_ENABLED", "true")
+    monkeypatch.setenv("MTC_LOG_DIRECTORY", "blocker/logs")
+    enabled = Settings()
+    pool = FakePool()
+    wrapped = ResilientPool(pool, breaker=_breaker(60.0), settings=enabled)
+    pool.down = True
+    with caplog.at_level(logging.DEBUG, logger="mtc.memory.resilient_wrappers"):
+        assert await wrapped.execute("W1", "arg-1") is BUFFERED
+        assert await wrapped.execute("W2", "arg-2") is BUFFERED
+    warnings = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and "breadcrumb" in r.getMessage()
+    ]
+    assert len(warnings) == 1
+    assert "postgresql.jsonl" in warnings[0].getMessage()
+    assert "arg-1" not in caplog.text and "arg-2" not in caplog.text
+    assert wrapped.status()["breadcrumb_failures"] == 2
+    inner = FlakyTurns()
+    inner.down = True
+    turns = ResilientMongoStore(inner, breaker=_breaker(60.0), settings=enabled)
+    with caplog.at_level(logging.DEBUG, logger="mtc.memory.resilient_wrappers"):
+        await _turn(turns, 1)
+    assert turns.status()["breadcrumb_failures"] == 1
+    assert wrapped.status()["breadcrumb_failures"] == 2
+
+
+@pytest.mark.asyncio
 async def test_status_names_mode_and_counts(settings):
     pool = FakePool()
     wrapped = ResilientPool(
@@ -458,6 +493,7 @@ async def test_status_names_mode_and_counts(settings):
         "dropped": 0,
         "replayed": 0,
         "rejected": 0,
+        "breadcrumb_failures": 0,
     }
     pool.down = True
     for name in ("a", "b", "c"):
@@ -523,6 +559,59 @@ async def test_pool_replay_drops_a_refused_entry_and_continues(settings, caplog)
     assert status["buffered"] == 0 and status["rejected"] == 1
     assert status["replayed"] == 2 and status["circuit"] == "closed"
     assert any("refused a buffered write" in r.getMessage() for r in caplog.records)
+
+
+class DriverErrorPool(FakePool):
+    """Raises a given driver error for the queries named in ``refuse``."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self.error = error
+        self.refuse = set()
+
+    def _gate(self, query):
+        if query in self.refuse:
+            raise self.error
+        super()._gate(query)
+
+
+@pytest.mark.asyncio
+async def test_real_interface_error_does_not_open_the_outage(settings):
+    asyncpg = pytest.importorskip("asyncpg")
+    error = asyncpg.InterfaceError(
+        "the server expects 2 arguments for this query, 1 was passed"
+    )
+    pool = DriverErrorPool(error)
+    pool.refuse = {"BAD"}
+    wrapped = ResilientPool(pool, breaker=_breaker(60.0), settings=settings)
+    with pytest.raises(asyncpg.InterfaceError):
+        await wrapped.execute("BAD", 1)
+    for index in range(5):
+        assert await wrapped.execute(f"GOOD{index}") == "OK"
+    assert [entry[1] for entry in pool.log] == [f"GOOD{i}" for i in range(5)]
+    assert await wrapped.fetch("SELECT") == [{"id": 1}]
+    status = wrapped.status()
+    assert status["available"] is True and status["mode"] == "live"
+    assert status["buffered"] == 0 and status["circuit"] == "closed"
+
+
+@pytest.mark.asyncio
+async def test_replay_drops_a_client_error_entry(settings):
+    pytest.importorskip("asyncpg")
+    from asyncpg.exceptions import _base
+
+    pool = DriverErrorPool(_base.DataError("invalid input for query argument $1"))
+    wrapped = ResilientPool(pool, breaker=_breaker(), settings=settings)
+    pool.down = True
+    for name in ("W1", "BAD", "W3"):
+        assert await wrapped.execute(name) is BUFFERED
+    pool.down = False
+    pool.refuse = {"BAD"}
+    assert await wrapped.fetch("SELECT") == [{"id": 1}]
+    assert [entry[1] for entry in pool.log] == ["W1", "W3"]
+    status = wrapped.status()
+    assert status["rejected"] == 1 and status["buffered"] == 0
+    assert status["replayed"] == 2 and status["circuit"] == "closed"
 
 
 @pytest.mark.asyncio

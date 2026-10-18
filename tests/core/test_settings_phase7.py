@@ -90,6 +90,62 @@ def test_changed_defaults(clean_env):
         Settings(THREADS=-1)
 
 
+def test_release_gate_safety_and_sleep_keys(clean_env, monkeypatch):
+    settings = Settings()
+    assert settings.SLEEP_PRUNE_DRY_RUN is False
+    assert settings.SAFETY_GATE_FAIL_CLOSED is True
+    assert settings.TRUST_COMPASS_DEEP_MODE is True
+    assert settings.EMERGENCY_SHUTDOWN_ENABLED is False
+    fields = Settings.model_fields
+    for name in (
+        "SLEEP_PRUNE_DRY_RUN",
+        "SAFETY_GATE_FAIL_CLOSED",
+        "TRUST_COMPASS_DEEP_MODE",
+        "EMERGENCY_SHUTDOWN_ENABLED",
+    ):
+        assert fields[name].annotation is bool, name
+        assert fields[name].description, name
+    emergency = fields["EMERGENCY_SHUTDOWN_ENABLED"].description
+    assert "suspends every untrusted conversation" in emergency
+    assert "denies the message" in emergency
+    assert _section_for("SLEEP_PRUNE_DRY_RUN") == "Runtime"
+    assert _section_for("SAFETY_GATE_FAIL_CLOSED") == "Safety and API"
+    assert _section_for("TRUST_COMPASS_DEEP_MODE") == "Safety and API"
+    for name in (
+        "TRUSTED_SPEAKERS",
+        "TRUST_ACTIVATION_BONUS",
+        "TRUSTED_EMOTION_TRUST",
+        "SPEAKER_TOKENS",
+        "DEFAULT_SPEAKER_TRUST",
+    ):
+        assert _section_for(name) == "Speakers and trust", name
+    for name in ("SLEEP_PRUNE_DRY_RUN", "TRUST_COMPASS_DEEP_MODE"):
+        monkeypatch.setenv(f"MTC_{name}", "true")
+    monkeypatch.setenv("MTC_SAFETY_GATE_FAIL_CLOSED", "false")
+    monkeypatch.setenv("MTC_EMERGENCY_SHUTDOWN_ENABLED", "true")
+    loaded = Settings()
+    assert loaded.SLEEP_PRUNE_DRY_RUN is True
+    assert loaded.SAFETY_GATE_FAIL_CLOSED is False
+    assert loaded.EMERGENCY_SHUTDOWN_ENABLED is True
+    monkeypatch.setenv("MTC_TRUST_COMPASS_DEEP_MODE", "false")
+    assert Settings().TRUST_COMPASS_DEEP_MODE is False
+
+
+def test_release_gate_descriptions():
+    fields = Settings.model_fields
+    phi = fields["PHI_IDLE_SAMPLE_S"].description
+    assert "idle samples repeat the last state" in phi
+    assert "pull the proxy toward its floor" in phi
+    budget = fields["ANTHROPIC_MAX_TOKENS"].description
+    assert "direct provider call" in budget
+    assert "conversation turns use LLM_MAX_TOKENS" in budget
+    # The gate state is unchecked whichever value the key has; only the
+    # outcome of the turn depends on it.
+    gate = fields["SAFETY_GATE_FAIL_CLOSED"].description
+    assert "the turn record says unchecked either way" in gate
+    assert "false processes the message and the turn record says" not in gate
+
+
 def test_no_key_lands_under_other():
     assert "Operations" in [title for title, _ in SECTIONS]
     other = [name for name in Settings.model_fields if _section_for(name) == "Other"]

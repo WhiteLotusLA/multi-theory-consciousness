@@ -1,6 +1,7 @@
 """Access control: the policy as data, stage rows, consent and emergency rules."""
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -315,3 +316,35 @@ def test_decision_shape():
     status = enforcer.status()
     assert status["enabled"] is True and status["stage"] == 1
     assert status["consents"] == 0
+
+
+def test_status_consent_file_is_not_absolute(tmp_path):
+    root = tmp_path / "root"
+    settings = Settings(
+        _env_file=None,
+        PROJECT_ROOT=str(root),
+        SYSTEM_BIRTH_DATE="2000-01-01",
+        DEVELOPMENTAL_STAGE_ENABLED=True,
+        COMPANION_TYPE="research_subject",
+    )
+    inside = AccessControlEnforcer(
+        settings=settings, consent_path=root / "data" / "privacy" / "consents.json"
+    )
+    assert inside.status()["consent_file"] == "data/privacy/consents.json"
+    outside = AccessControlEnforcer(
+        settings=settings, consent_path=tmp_path / "elsewhere" / "consents.json"
+    )
+    assert outside.status()["consent_file"] == "consents.json"
+    for enforcer in (inside, outside):
+        assert not os.path.isabs(enforcer.status()["consent_file"])
+    assert AccessControlEnforcer(settings=settings).status()["consent_file"] is None
+
+
+def test_policy_docstrings_describe_a_generic_shape():
+    from mtc.privacy import access_control_enforcer as module
+
+    texts = (module.__doc__, AccessPolicy.default.__doc__)
+    for text in texts:
+        assert "household" not in text.lower()
+    assert "guardian-style policy shape" in " ".join(module.__doc__.split())
+    assert "guardian-style shape" in AccessPolicy.default.__doc__

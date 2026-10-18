@@ -42,13 +42,50 @@ def test_absolute_paths_unchanged(clean_env, monkeypatch):
     assert home == Path.home() / "x"
 
 
-def test_settings_read_at_call_time(clean_env, monkeypatch):
-    monkeypatch.setattr(paths, "get_settings", lambda: Settings())
+@pytest.fixture
+def fresh_singleton():
+    from mtc.core import config
+
+    config.reset_settings()
+    yield config
+    config.reset_settings()
+
+
+def test_settings_read_at_call_time(clean_env, monkeypatch, fresh_singleton):
     monkeypatch.setenv("MTC_PROJECT_ROOT", str(clean_env / "one"))
+    fresh_singleton.reset_settings()
     assert paths.log_dir() == clean_env / "one" / "logs"
+    # The process-wide instance is built once: without a reset the helpers
+    # keep reading it.
     monkeypatch.setenv("MTC_PROJECT_ROOT", str(clean_env / "two"))
     monkeypatch.setenv("MTC_LOG_DIRECTORY", "var/log")
+    assert paths.log_dir() == clean_env / "one" / "logs"
+    fresh_singleton.reset_settings()
     assert paths.log_dir() == clean_env / "two" / "var" / "log"
+
+
+def test_display_path(clean_env, monkeypatch, fresh_singleton):
+    root = clean_env / "root"
+    settings = Settings(PROJECT_ROOT=str(root))
+    inside = root / "data" / "privacy" / "privacy_audit.jsonl"
+    cases = {
+        inside: "data/privacy/privacy_audit.jsonl",
+        str(inside): "data/privacy/privacy_audit.jsonl",
+        "data/consent.json": "data/consent.json",
+        clean_env / "elsewhere" / "consent.json": "consent.json",
+        root / ".." / "escape" / "f.txt": "f.txt",
+        "~/x/home_file.txt": "home_file.txt",
+    }
+    for given, expected in cases.items():
+        shown = paths.display_path(given, settings=settings)
+        assert isinstance(shown, str), given
+        assert shown == expected, given
+        assert not os.path.isabs(shown), given
+    # Without a Settings object the process-wide instance supplies the root.
+    monkeypatch.setenv("MTC_PROJECT_ROOT", str(root))
+    fresh_singleton.reset_settings()
+    assert paths.display_path(root / "logs" / "a.log") == "logs/a.log"
+    assert paths.display_path(clean_env / "b.log") == "b.log"
 
 
 def test_resolution_creates_no_directory(clean_env, monkeypatch):
@@ -74,8 +111,6 @@ def test_path_defaults_are_relative(clean_env):
     settings = Settings()
     checked = []
     for name in type(settings).model_fields:
-        if name == "TEMP_DIRECTORY":
-            continue
         if not (
             name.endswith("_DIR")
             or name.endswith("_DIRECTORY")

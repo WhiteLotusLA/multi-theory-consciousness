@@ -28,7 +28,9 @@ below follow the same rules. The vector, graph, concept-matcher and episode
 consolidator protocols are synchronous (their backends are blocking clients);
 callers in async code run them through ``asyncio.to_thread``. A backend that
 cannot reach its server raises ``StoreUnavailable``; it never answers a read
-with an invented or empty stand-in.
+with an invented or empty stand-in, except the working-memory outage fallback
+of ``ResilientRedisManager``, which serves only what was written to it during
+the outage and counts each such read (``served_from_fallback``).
 
 The safety audit, alert and privacy audit protocols (pinned by
 ``tests/memory/test_audit_store_contracts.py``) are async and follow the same
@@ -63,6 +65,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import (
     Any,
+    AsyncIterator,
     Dict,
     List,
     Mapping,
@@ -114,6 +117,9 @@ class SnapshotRecord:
     ``overall_score`` and ``phi_value`` are None when the assessment could not
     measure them; ``status`` and ``coverage`` carry the assessment's own
     vocabulary (``measured``, ``absent``, ``insufficient_data``).
+    ``passing_count`` stays an integer: under ``insufficient_data`` it reads 0
+    (no indicator passed) while ``overall_score`` is None, so a reader tells
+    "nothing measured" from the status and the overall, never from the count.
     """
 
     timestamp: datetime
@@ -266,6 +272,12 @@ class EpisodicStore(Protocol):
     is on a 0 to 10 scale and 10 must round-trip. Archiving moves a row to the
     memory type ``archived``, which recall and search exclude. Episodic rows
     hold conversation text and are private data at runtime.
+
+    Unmeasured values read None, never a default number: an episodic row's
+    ``consolidation_strength`` until a measured strength is written, and a
+    semantic row's ``strength`` and ``confidence`` when the record gave none.
+    The PostgreSQL columns have no default for them; the schema ships with
+    this first public release, so there is no installed base to migrate.
     """
 
     async def ensure_schema(self) -> None:
@@ -327,8 +339,13 @@ class EpisodicStore(Protocol):
         """Store one semantic memory and return its assigned id."""
         ...
 
-    async def mark_consolidated(self, ids: Sequence[int], strength: float) -> int:
-        """Mark rows consolidated with a strength; return the rows changed."""
+    async def mark_consolidated(
+        self, ids: Sequence[int], strength: Optional[float]
+    ) -> int:
+        """Mark rows consolidated with a strength; return the rows changed.
+
+        A None strength is unmeasured and leaves the stored strength as it was.
+        """
         ...
 
     async def touch(self, ids: Sequence[int]) -> None:
@@ -416,7 +433,11 @@ class WorkingMemory(Protocol):
         ...
 
     async def get_metrics(self) -> Dict[str, Any]:
-        """Return read, write, hit, miss and error counts."""
+        """Return read, write, hit, miss and error counts.
+
+        ``cache_hit_rate_percent`` is None until the first cache read: a rate
+        over no reads is not measured.
+        """
         ...
 
     async def disconnect(self) -> None:
@@ -684,7 +705,14 @@ class ConversationRepository(Protocol):
 
 @runtime_checkable
 class ThoughtGistStore(Protocol):
-    """Thought gists (private content), keyed by ``gist_id``."""
+    """Thought gists (private content), keyed by ``gist_id``.
+
+    A gist's ``retention_strength`` may be None (unknown: stored before any
+    refresh measured it). Such a gist is never at or above a ``min_retention``
+    floor, so ``active_gists`` leaves it out whatever the floor, and it is
+    never below one, so the retention store never expires it; ``iter_gists``
+    is how a refresh pass reaches it.
+    """
 
     async def add_gist(self, gist: ThoughtGist) -> str:
         """Store a gist and return its id."""
@@ -693,7 +721,19 @@ class ThoughtGistStore(Protocol):
     async def active_gists(
         self, min_retention: float = 0.2, limit: int = 100
     ) -> List[ThoughtGist]:
-        """Return gists with retention at or above the floor, most important first."""
+        """Return gists with retention at or above the floor, most important first.
+
+        A None retention is never returned; a None importance sorts after
+        every measured one.
+        """
+        ...
+
+    def iter_gists(self, batch: int = 500) -> AsyncIterator[ThoughtGist]:
+        """Yield every stored gist whatever its retention (None included).
+
+        Gists come ordered by ``created_at``, then ``gist_id``, read from the
+        backend ``batch`` at a time.
+        """
         ...
 
     async def update_gist(self, gist_id: str, fields: Dict[str, Any]) -> bool:
@@ -729,7 +769,10 @@ class NeuralRetentionStore(Protocol):
         ...
 
     async def expire_gists(self, min_retention: float, dry_run: bool) -> int:
-        """Remove unprotected gists whose retention is below the floor."""
+        """Remove unprotected gists whose retention is below the floor.
+
+        A gist whose retention is None (unknown) is never expired.
+        """
         ...
 
 
@@ -747,10 +790,14 @@ class VectorStore(Protocol):
         text: str,
         metadata: Optional[Dict[str, Any]] = None,
         importance: float = 1.0,
-        emotional_weight: float = 0.0,
+        emotional_weight: Optional[float] = None,
         point_id: Optional[str] = None,
     ) -> str:
-        """Embed and store ``text``; return the point id (upserting ``point_id``)."""
+        """Embed and store ``text``; return the point id (upserting ``point_id``).
+
+        ``emotional_weight`` is a measured emotion intensity or None when none
+        was measured; the payload keeps None as it is.
+        """
         ...
 
     def search_similar(
@@ -818,15 +865,24 @@ class GraphStore(Protocol):
         first: str,
         second: str,
         relationship: str = "relates_to",
-        strength: float = 0.5,
+        strength: Optional[float] = 0.5,
     ) -> bool:
-        """Relate two existing concepts; False when either does not exist."""
+        """Relate two existing concepts; False when either does not exist.
+
+        A None ``strength`` means unmeasured: a new edge stores no strength and
+        an existing edge keeps the strength it has (the relationship name is
+        still updated).
+        """
         ...
 
     def get_related_concepts(
         self, concept_name: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
-        """Return ``{"concept", "relationship", "strength"}`` rows, strongest first."""
+        """Return ``{"concept", "relationship", "strength"}`` rows.
+
+        Measured strengths come first, strongest first, then rows whose
+        strength is None; ties go by concept name.
+        """
         ...
 
     def delete_memory_nodes(self, memory_ids: Sequence[int]) -> int:

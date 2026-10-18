@@ -147,6 +147,47 @@ def test_content_type_map_overrides_keywords():
     assert fallback.classification is DataClassification.PRIVATE
 
 
+def test_keywords_can_raise_a_typed_verdict_but_never_lower_it():
+    classifier = DataClassifier(settings=_settings())
+    text = "my brother has a secret"
+    # The default keeps rule 1: the content type decides alone.
+    typed = classifier.classify(text, content_type="conversation")
+    assert typed.classification is DataClassification.RELATIONSHIP
+    assert typed.confidence == pytest.approx(0.95)
+    keyword = classifier.classify(text)
+    assert keyword.classification is DataClassification.PRIVATE
+    raised = classifier.classify(
+        text, content_type="conversation", keywords_can_raise=True
+    )
+    assert raised.classification is DataClassification.PRIVATE
+    assert raised.confidence == pytest.approx(keyword.confidence)
+    assert "conversation" in raised.reason and "relationship" in raised.reason
+    assert "raised to private" in raised.reason
+    assert raised.matched["private"] == ["secret"]
+    # Nothing protected in the text: the typed verdict is returned unchanged.
+    hello = classifier.classify(
+        "hello", content_type="conversation", keywords_can_raise=True
+    )
+    assert hello.classification is DataClassification.RELATIONSHIP
+    assert hello.confidence == pytest.approx(0.95)
+    assert hello.reason == classifier.classify("hello", "conversation").reason
+    # Keywords never lower a typed verdict.
+    core = classifier.classify(
+        text, content_type="core_memory", keywords_can_raise=True
+    )
+    assert core.classification is DataClassification.CORE
+    assert core.confidence == pytest.approx(0.95)
+    public = classifier.classify(
+        "my identity", content_type="public_fact", keywords_can_raise=True
+    )
+    assert public.classification is DataClassification.CORE
+    private = classifier.classify(
+        "the weather is mild", content_type="dream", keywords_can_raise=True
+    )
+    assert private.classification is DataClassification.PRIVATE
+    assert private.confidence == pytest.approx(0.95)
+
+
 def test_tags_raise_classification():
     classifier = DataClassifier(settings=_settings())
     assert classifier.classify("hello").classification is DataClassification.PUBLIC

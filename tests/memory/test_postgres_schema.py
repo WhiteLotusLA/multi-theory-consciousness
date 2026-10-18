@@ -6,16 +6,30 @@ throwaway database (``MTC_TEST_STORES=1``) and skip otherwise.
 
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Tuple
 
 import pytest
 
-from mtc.memory.episodic_store import EPISODIC_SCHEMA_SQL, PostgresEpisodicStore
+from mtc.memory.episodic_store import (
+    EPISODIC_SCHEMA_SQL,
+    PostgresEpisodicStore,
+    _episodic_row,
+    _semantic_row,
+)
 from mtc.memory.postgres_stores import RESEARCH_SCHEMA_SQL, PostgresSnapshotStore
 from mtc.memory.protocols import SnapshotRecord, StoreUnavailable
 
 SCHEMAS = {"research": RESEARCH_SCHEMA_SQL, "episodic": EPISODIC_SCHEMA_SQL}
 T0 = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+CORE_MIGRATION = (
+    Path(__file__).resolve().parents[2] / "migrations/postgres/001_core_schema.sql"
+)
+UNMEASURED_COLUMNS = (
+    ("episodic_memory", "consolidation_strength"),
+    ("semantic_memory", "strength"),
+    ("semantic_memory", "confidence"),
+)
 
 
 def _statements() -> List[Tuple[str, str]]:
@@ -114,8 +128,105 @@ def test_episodic_schema_has_the_indexes_the_queries_need():
     assert "source_memories bigint[]" in joined
 
 
+def _column_line(text: str, table: str, column: str) -> str:
+    """The definition line of ``column`` inside ``CREATE TABLE ... table``."""
+    match = re.search(
+        rf"CREATE TABLE IF NOT EXISTS {table} \((.*?)\n\s*\)", text, re.DOTALL
+    )
+    assert match, table
+    lines = [
+        line.strip()
+        for line in match.group(1).splitlines()
+        if line.strip().lower().startswith(column + " ")
+    ]
+    assert len(lines) == 1, (table, column, lines)
+    return lines[0]
+
+
+def _assert_unmeasured_columns_have_no_default(text: str) -> None:
+    for table, column in UNMEASURED_COLUMNS:
+        line = _column_line(text, table, column)
+        assert line.rstrip(",") == f"{column} DOUBLE PRECISION", (table, line)
+        assert "default" not in line.lower(), (table, line)
+
+
+def test_unmeasured_columns_have_no_default_in_the_module():
+    _assert_unmeasured_columns_have_no_default("\n".join(EPISODIC_SCHEMA_SQL))
+
+
+def test_unmeasured_columns_have_no_default_in_the_migration_file():
+    _assert_unmeasured_columns_have_no_default(CORE_MIGRATION.read_text())
+
+
+def test_row_readers_keep_a_null_strength_and_confidence():
+    episodic = {
+        "id": 1,
+        "content": "c",
+        "memory_type": "episodic",
+        "importance": 5.0,
+        "emotional_context": None,
+        "created_at": T0,
+        "last_accessed": T0,
+        "accessed_count": 0,
+        "consolidated": True,
+        "consolidation_strength": None,
+        "replay_count": 1,
+    }
+    assert _episodic_row(episodic)["consolidation_strength"] is None
+    assert _episodic_row(dict(episodic, consolidation_strength=0.0))[
+        "consolidation_strength"
+    ] == pytest.approx(0.0)
+    semantic = {
+        "id": 2,
+        "concept": "c",
+        "knowledge": "",
+        "associations": None,
+        "strength": None,
+        "confidence": None,
+        "emotional_context": None,
+        "source_memories": None,
+        "created_at": T0,
+        "updated_at": T0,
+        "last_accessed": T0,
+    }
+    row = _semantic_row(semantic)
+    assert row["strength"] is None and row["confidence"] is None
+    measured = _semantic_row(dict(semantic, strength=0.3, confidence=0.6))
+    assert measured["strength"] == pytest.approx(0.3)
+    assert measured["confidence"] == pytest.approx(0.6)
+
+
 class InterfaceError(Exception):
     """Named like the driver's connection error; matched by name only."""
+
+
+def test_client_side_driver_errors_are_not_outages():
+    asyncpg = pytest.importorskip("asyncpg")
+    from asyncpg.exceptions import _base
+
+    from mtc.memory.postgres_stores import is_unreachable
+
+    caller_errors = [
+        asyncpg.InterfaceError(
+            "the server expects 2 arguments for this query, 1 was passed"
+        ),
+        _base.DataError("invalid input for query argument $1"),
+        asyncpg.ClientConfigurationError("bad client configuration"),
+        asyncpg.UnsupportedClientFeatureError("unsupported feature"),
+    ]
+    for error in caller_errors:
+        assert is_unreachable(error) is False, type(error).__name__
+    outages = [
+        asyncpg.InterfaceError("pool is closed"),
+        asyncpg.InterfaceError("pool is closing"),
+        asyncpg.InterfaceError("connection is closed"),
+        asyncpg.ConnectionDoesNotExistError("connection was closed in the middle"),
+        ConnectionRefusedError("refused"),
+    ]
+    for error in outages:
+        assert is_unreachable(error) is True, (type(error).__name__, str(error))
+    # a subclass is the caller's error even when its text says closed
+    assert is_unreachable(_base.DataError("value is closed")) is False
 
 
 class RaisingPool:

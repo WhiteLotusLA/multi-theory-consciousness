@@ -11,10 +11,19 @@ Usage:
 Exit code 1 on any hit. The private extra denylist is read from
 $PRIVACY_DENYLIST_EXTRA or config/privacy/denylist.local.txt when present.
 
+Tree mode (no option, or --paths) prints how many files it scanned and how
+many it skipped as neither text nor an archive, by suffix, before the verdict.
+
 --staged audits the blobs in the index, not the working tree, so a file that
 was fixed on disk but not re-staged still blocks the commit. --patch-from
 audits every line added by the commits in REF..HEAD, file by file, so path
-allowlist rules apply; line numbers then count added lines within that file.
+allowlist rules apply; token and pattern hits then count added lines within
+that file. Split literals in Python files are assembled in each commit's own
+version of the file, on the lines that commit added: such a hit carries the
+file's line number and the commit (``@<short hash>``). A diff header the audit
+cannot parse (a path git quotes) is an encoding hit, never silence. A merge
+commit counts the lines its resolution adds (its diff against the automatic
+re-merge of its parents), so an edit made while merging is audited too.
 
 --runtime audits directories that need not be inside the repository (a log or
 a results directory after a run). Only the artifact rule is off there: .jsonl
@@ -26,15 +35,21 @@ counted as skipped next to the scanned count.
 """
 
 import argparse
+import dataclasses
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "mtc" / "devtools" / "privacy_audit.py"
+
+# Short commit hashes in patch-mode hits.
+SHORT_HASH = 12
 
 
 def _load_audit_module():
@@ -52,6 +67,7 @@ def _load_audit_module():
 
 
 _audit = _load_audit_module()
+Hit = _audit.Hit
 load_allowlist = _audit.load_allowlist
 load_denylist = _audit.load_denylist
 run_audit = _audit.run_audit
@@ -63,16 +79,26 @@ DENYLIST = ROOT / "config" / "privacy" / "denylist.txt"
 ALLOWLIST = ROOT / "config" / "privacy" / "allowlist.txt"
 LOCAL_EXTRA = ROOT / "config" / "privacy" / "denylist.local.txt"
 
+_COMMIT_LINE = re.compile(r"^commit:([0-9a-f]{40,64})$")
+_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
-def git_bytes(*args: str) -> bytes:
+
+def git_bytes(
+    *args: str, root: Optional[Path] = None, stdin: Optional[bytes] = None
+) -> bytes:
+    """Run a git command in ``root`` (default: this repository)."""
     return subprocess.run(
-        ["git", *args], cwd=ROOT, check=True, capture_output=True
+        ["git", *args],
+        cwd=root if root is not None else ROOT,
+        check=True,
+        capture_output=True,
+        input=stdin,
     ).stdout
 
 
-def git_paths(*args: str) -> list:
+def git_paths(*args: str, root: Optional[Path] = None) -> list:
     """Run a git command with -z output and return the NUL-separated paths."""
-    out = git_bytes(*args).decode("utf-8", errors="surrogateescape")
+    out = git_bytes(*args, root=root).decode("utf-8", errors="surrogateescape")
     return [p for p in out.split("\0") if p]
 
 
@@ -98,14 +124,56 @@ def materialize(tmp: Path, rel: str, data: bytes) -> Path:
     return target
 
 
-def staged_files(tmp: Path) -> list:
-    paths = git_paths("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z")
-    return [materialize(tmp, rel, git_bytes("show", f":{rel}")) for rel in paths]
+def staged_files(tmp: Path, root: Optional[Path] = None) -> list:
+    paths = git_paths(
+        "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z", root=root
+    )
+    return [
+        materialize(tmp, rel, git_bytes("show", f":{rel}", root=root)) for rel in paths
+    ]
 
 
-def added_lines_by_file(ref: str) -> dict:
-    """Map each path touched in ref..HEAD to the lines the commits added to it."""
-    added = {
+def _patch_text(ref: str, root: Optional[Path], *extra: str) -> str:
+    return git_bytes(
+        "-c",
+        "core.quotePath=false",
+        "log",
+        "-p",
+        "--no-color",
+        "--no-ext-diff",
+        "--diff-merges=remerge",
+        *extra,
+        f"{ref}..HEAD",
+        root=root,
+    ).decode("utf-8", errors="surrogateescape")
+
+
+def _header_target(line: str) -> Tuple[Optional[str], bool]:
+    """``(path, parsed)`` for a ``+++ `` header line.
+
+    ``b/<path>`` gives the path and the null device gives none; any other
+    form (a path git quotes) is not parsed. git ends the header of a path
+    that holds a space with one TAB, which is not part of the path (a name
+    that itself holds a TAB is quoted, so it is never parsed here).
+    """
+    target = line[4:]
+    if target.endswith("\t"):
+        target = target[:-1]
+    if target.startswith("b/"):
+        return target[2:], True
+    if target == "/dev/null":
+        return None, True
+    return None, False
+
+
+def added_lines(ref: str, root: Optional[Path] = None) -> Tuple[Dict[str, list], list]:
+    """Map each path touched in ref..HEAD to the lines the commits added to it.
+
+    Also returns one ``encoding`` hit per diff whose ``+++`` header names
+    neither ``b/<path>`` nor the null device: its lines are never dropped
+    silently.
+    """
+    added: Dict[str, list] = {
         rel: []
         for rel in git_paths(
             "log",
@@ -114,31 +182,142 @@ def added_lines_by_file(ref: str) -> dict:
             "--diff-filter=ACMR",
             "-z",
             f"{ref}..HEAD",
+            root=root,
         )
     }
-    patch = git_bytes(
-        "-c",
-        "core.quotePath=false",
-        "log",
-        "-p",
-        "--no-color",
-        "--no-ext-diff",
-        "--format=",
-        f"{ref}..HEAD",
-    ).decode("utf-8", errors="surrogateescape")
+    problems = []
     current = None
     in_header = False
-    for line in patch.splitlines():
+    for line in _patch_text(ref, root, "--format=").splitlines():
         if line.startswith("diff --git "):
             current, in_header = None, True
         elif in_header and line.startswith("+++ "):
-            target = line[4:]
-            current = target[2:] if target.startswith("b/") else None
+            current, parsed = _header_target(line)
+            if not parsed:
+                problems.append(Hit(line[4:], 0, "encoding", "unparsed diff header"))
         elif line.startswith("@@"):
             in_header = False
         elif not in_header and current is not None and line.startswith("+"):
             added.setdefault(current, []).append(line[1:])
-    return added
+    return added, problems
+
+
+def added_lines_by_file(ref: str, root: Optional[Path] = None) -> dict:
+    """Map each path touched in ref..HEAD to the lines the commits added to it."""
+    return added_lines(ref, root)[0]
+
+
+def added_line_numbers(
+    ref: str, root: Optional[Path] = None
+) -> Dict[Tuple[str, str], Set[int]]:
+    """``(commit, path) -> new-side line numbers`` each commit added to a .py file."""
+    numbers: Dict[Tuple[str, str], Set[int]] = {}
+    commit = None
+    current = None
+    in_header = False
+    for line in _patch_text(ref, root, "--format=commit:%H", "-U0").splitlines():
+        marker = _COMMIT_LINE.match(line)
+        if marker:
+            commit, current, in_header = marker.group(1), None, False
+        elif line.startswith("diff --git "):
+            current, in_header = None, True
+        elif in_header and line.startswith("+++ "):
+            current, _parsed = _header_target(line)
+        elif line.startswith("@@"):
+            in_header = False
+            hunk = _HUNK.match(line)
+            if hunk is None or commit is None or current is None:
+                continue
+            if not current.endswith(".py"):
+                continue
+            start = int(hunk.group(1))
+            count = int(hunk.group(2)) if hunk.group(2) is not None else 1
+            if count:
+                numbers.setdefault((commit, current), set()).update(
+                    range(start, start + count)
+                )
+    return numbers
+
+
+def post_images(
+    keys: Sequence[Tuple[str, str]], root: Optional[Path] = None
+) -> Dict[Tuple[str, str], bytes]:
+    """Each ``(commit, path)``'s file content, read through one cat-file batch."""
+    usable = [key for key in keys if "\n" not in key[1]]
+    if not usable:
+        return {}
+    request = "".join(f"{commit}:{path}\n" for commit, path in usable)
+    out = git_bytes(
+        "cat-file",
+        "--batch",
+        root=root,
+        stdin=request.encode("utf-8", errors="surrogateescape"),
+    )
+    images: Dict[Tuple[str, str], bytes] = {}
+    position = 0
+    for key in usable:
+        end = out.index(b"\n", position)
+        line = out[position:end]
+        position = end + 1
+        # A found object is "<oid> <type> <size>"; anything else names the
+        # request (which may hold spaces) and ends in "missing" or similar.
+        header = line.split(b" ")
+        if len(header) != 3 or not header[2].isdigit():
+            continue
+        if not all(c in b"0123456789abcdef" for c in header[0]):
+            continue
+        size = int(header[2])
+        images[key] = out[position : position + size]
+        position += size + 1
+    return images
+
+
+def assembled_hits_in_range(ref: str, root: Optional[Path], tokens) -> List[object]:
+    """Assembled-literal hits in the Python files the commits of ref..HEAD
+    touched, counted only on the lines each commit added, each carrying the
+    commit's short hash and the line number in that commit's version."""
+    numbers = added_line_numbers(ref, root)
+    images = post_images(list(numbers), root)
+    hits = []
+    for (commit, path), lines in numbers.items():
+        data = images.get((commit, path))
+        if data is None:
+            continue
+        text, _problem = _audit._decode(data)
+        for hit in _audit.assembled_hits(path, text, tokens, only_lines=lines):
+            hits.append(dataclasses.replace(hit, commit=commit[:SHORT_HASH]))
+    return hits
+
+
+def patch_hits(
+    ref: str,
+    root: Optional[Path] = None,
+    denylist: Sequence[str] = (),
+    allowlist: Sequence[object] = (),
+    extra: Optional[Sequence[str]] = None,
+) -> list:
+    """Every hit of patch mode for ref..HEAD in the repository at ``root``."""
+    root = root if root is not None else ROOT
+    added, problems = added_lines(ref, root)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        files = [
+            materialize(
+                tmp, rel, "\n".join(lines).encode("utf-8", errors="surrogateescape")
+            )
+            for rel, lines in added.items()
+        ]
+        hits = run_audit(
+            files,
+            denylist,
+            allowlist,
+            extra_denylist=extra,
+            root=tmp,
+            assemble_python=False,
+        )
+    tokens = _audit.compile_tokens(denylist, extra)
+    later = problems + assembled_hits_in_range(ref, root, tokens)
+    return hits + [h for h in later if not any(r.covers(h.path, h) for r in allowlist)]
 
 
 def main(argv=None) -> int:
@@ -156,8 +335,10 @@ def main(argv=None) -> int:
     allowlist = load_allowlist(ALLOWLIST)
     extra = extra_denylist()
 
-    def audit(files, root):
-        return run_audit(files, denylist, allowlist, extra_denylist=extra, root=root)
+    def audit(files, root, stats=None):
+        return run_audit(
+            files, denylist, allowlist, extra_denylist=extra, root=root, stats=stats
+        )
 
     if args.runtime:
         directories = [Path(item).expanduser().resolve() for item in args.runtime]
@@ -167,17 +348,7 @@ def main(argv=None) -> int:
         hits = run_runtime_audit(directories, denylist, allowlist, extra_denylist=extra)
         print(runtime_summary(directories))
     elif args.patch_from:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp = Path(tmp_dir)
-            files = [
-                materialize(
-                    tmp,
-                    rel,
-                    "\n".join(lines).encode("utf-8", errors="surrogateescape"),
-                )
-                for rel, lines in added_lines_by_file(args.patch_from).items()
-            ]
-            hits = audit(files, tmp)
+        hits = patch_hits(args.patch_from, ROOT, denylist, allowlist, extra)
     elif args.staged:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp = Path(tmp_dir)
@@ -191,7 +362,9 @@ def main(argv=None) -> int:
         else:
             files = [ROOT / p for p in git_paths("ls-files", "-z")]
             files = [f for f in files if f.exists()]
-        hits = audit(files, ROOT)
+        stats = _audit.AuditStats()
+        hits = audit(files, ROOT, stats)
+        print(_audit.tree_summary(stats))
 
     for hit in hits:
         print(hit)

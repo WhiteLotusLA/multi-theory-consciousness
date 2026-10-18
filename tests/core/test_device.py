@@ -1,15 +1,20 @@
 """The MTC_DEVICE switch: resolution order, overrides and honest errors."""
 
+import importlib.util
 import logging
 import os
+import subprocess
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
 from mtc.core import device
 from mtc.core.config import Settings
 from mtc.core.device import DeviceUnavailableError
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(autouse=True)
@@ -91,6 +96,68 @@ def test_resolver_without_torch(clean_env, monkeypatch):
     assert "torch is not installed" in str(info.value)
     with pytest.raises(DeviceUnavailableError):
         device.resolve_device("cpu", settings=settings)
+
+
+def test_cpu_choice_never_asks_for_torch(clean_env, monkeypatch):
+    def refuse():
+        raise AssertionError("the cpu choice asked for torch")
+
+    monkeypatch.setattr(device, "_import_torch", refuse)
+    monkeypatch.setenv("MTC_DEVICE", "cpu")
+    settings = Settings()
+    assert device.resolve_device_name(settings=settings) == "cpu"
+    assert device.resolve_device_name("cpu", settings=settings) == "cpu"
+    assert device.describe_device(settings) == {"name": "cpu", "source": "setting"}
+
+
+CPU_CHILD = """
+import sys
+import mtc.core.device as device
+before = "torch" in sys.modules
+name = device.resolve_device_name()
+described = device.describe_device()
+after = "torch" in sys.modules
+print(f"{before} {name} {described['name']} {after}")
+"""
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("torch") is None,
+    reason="torch is not installed, so nothing could load it",
+)
+def test_cpu_never_imports_torch(tmp_path):
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("MTC_") and key != "ANTHROPIC_API_KEY"
+    }
+    env.update(
+        {
+            "PYTHONPATH": str(ROOT),
+            "PYPHI_WELCOME_OFF": "yes",
+            "MTC_DEVICE": "cpu",
+            "MTC_LLM_PROVIDER": "mock",
+            "MTC_API_PORT": "0",
+            "MTC_POSTGRES_ENABLED": "false",
+            "MTC_MONGODB_ENABLED": "false",
+            "MTC_REDIS_ENABLED": "false",
+            "MTC_QDRANT_ENABLED": "false",
+            "MTC_NEO4J_ENABLED": "false",
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", CPU_CHILD],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    before, name, described, after = result.stdout.split()
+    assert (name, described) == ("cpu", "cpu")
+    assert before == "False", "importing mtc.core.device loaded torch"
+    assert after == "False", "resolving the cpu device loaded torch"
 
 
 def test_resolve_device_builds_a_torch_device(clean_env, monkeypatch):

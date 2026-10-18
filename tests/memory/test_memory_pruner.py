@@ -247,6 +247,106 @@ async def test_store_failure_is_counted_not_raised(store, clock):
     assert "vector store offline" in pruner.status()["errors"]["vectors"]
 
 
+class RecordingIndexes:
+    """Vector and graph doubles that record every delete they are asked for."""
+
+    def __init__(self) -> None:
+        self.vector_calls = []
+        self.graph_calls = []
+
+    def delete_memories(self, point_ids):
+        self.vector_calls.append(list(point_ids))
+        return len(point_ids)
+
+    def delete_memory_nodes(self, memory_ids):
+        self.graph_calls.append(list(memory_ids))
+        return len(memory_ids)
+
+    def status(self):
+        return {"backend": "fake", "available": True, "last_error": None}
+
+
+async def _three_forgettable(store, clock):
+    return [
+        await _row(store, clock, T0, f"forgettable {i}", importance=0.0)
+        for i in range(3)
+    ]
+
+
+class ShortDeleteStore(InMemoryEpisodicStore):
+    """Confirms one row of a delete, whatever it was asked for."""
+
+    def __init__(self, clock, confirmed: int = 1, fail: bool = False) -> None:
+        super().__init__(clock=clock)
+        self.confirmed = confirmed
+        self.fail = fail
+        self.delete_calls = []
+
+    async def delete(self, ids):
+        self.delete_calls.append(list(ids))
+        if self.fail:
+            raise RuntimeError("delete failed")
+        return self.confirmed
+
+
+@pytest.mark.asyncio
+async def test_counts_are_the_stores_confirmed_counts(clock):
+    store = ShortDeleteStore(clock, confirmed=1)
+    await _three_forgettable(store, clock)
+    indexes = RecordingIndexes()
+    pruner = MemoryPruner(episodic=store, vectors=indexes, graph=indexes, clock=clock)
+    result = await pruner.prune(dry_run=False)
+    assert len(store.delete_calls[0]) == 3
+    assert result["episodic_deleted"] == 1
+    assert result["errors"] == 0
+    # a partial count proceeds: the shortfall is rows already gone
+    assert len(indexes.vector_calls) == 1 and len(indexes.graph_calls) == 1
+    planned = await MemoryPruner(episodic=store, clock=clock).prune(dry_run=True)
+    assert planned["episodic_deleted"] == 3  # a dry run keeps the planned count
+
+
+@pytest.mark.asyncio
+async def test_failed_delete_reports_zero_and_keeps_the_indexes(clock):
+    store = ShortDeleteStore(clock, fail=True)
+    await _three_forgettable(store, clock)
+    indexes = RecordingIndexes()
+    pruner = MemoryPruner(episodic=store, vectors=indexes, graph=indexes, clock=clock)
+    result = await pruner.prune(dry_run=False)
+    assert result["episodic_deleted"] == 0
+    assert result["errors"] == 1
+    assert "delete failed" in pruner.status()["errors"]["episodic"]
+    assert indexes.vector_calls == [] and indexes.graph_calls == []
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_delete_keeps_the_indexes(clock):
+    store = ShortDeleteStore(clock, confirmed=0)
+    await _three_forgettable(store, clock)
+    indexes = RecordingIndexes()
+    pruner = MemoryPruner(episodic=store, vectors=indexes, graph=indexes, clock=clock)
+    result = await pruner.prune(dry_run=False)
+    assert result["episodic_deleted"] == 0
+    assert result["vectors_deleted"] == 0 and result["graph_nodes_deleted"] == 0
+    assert indexes.vector_calls == [] and indexes.graph_calls == []
+    assert result["errors"] == 1
+    assert pruner.status()["errors"]["episodic"] == (
+        "delete confirmed 0 of 3 rows; index entries kept"
+    )
+
+
+@pytest.mark.asyncio
+async def test_archive_count_is_the_stores_confirmed_count(clock):
+    class ShortArchiveStore(InMemoryEpisodicStore):
+        async def archive(self, ids):
+            await super().archive(ids)
+            return 0
+
+    store = ShortArchiveStore(clock=clock)
+    await _row(store, clock, T0, "fading", importance=1.0)
+    result = await MemoryPruner(episodic=store, clock=clock).prune(dry_run=False)
+    assert result["episodic_archived"] == 0
+
+
 @pytest.mark.asyncio
 async def test_retention_uses_injected_clock(store, clock):
     memory_id = await _row(store, clock, T0, "aging", importance=0.0)

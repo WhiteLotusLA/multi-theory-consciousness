@@ -8,12 +8,15 @@ manager links memories through. It never invents a concept: only names it is
 given can match.
 
 Scoring (the reference implementation's rule): a concept found verbatim in the
-lower-cased text scores ``0.5 + 0.1`` per occurrence, capped at 1.0. With
-``fuzzy`` matching, a concept that is not found verbatim scores by the share of
-its content words that appear as words of the text, times 0.7, with a floor of
-0.3. Stop words count as neither concept words nor text words, so a shared
-"of" or "the" alone never links a memory to a concept. Results are sorted most
-relevant first. No config keys and no persisted state.
+lower-cased text, as whole words (no letter or digit directly before or after
+it, so "art" is not found in "start"), scores ``0.5 + 0.1`` per occurrence,
+capped at 1.0. With ``fuzzy`` matching, a concept that is not found verbatim
+scores by the share of its content words that appear as words of the text,
+times 0.7, with a floor of 0.3; both word sets are taken after punctuation is
+cleaned away, as ``extract_keywords`` does, so "learning," is the word
+"learning". Stop words count as neither concept words nor text words, so a
+shared "of" or "the" alone never links a memory to a concept. Results are
+sorted most relevant first. No config keys and no persisted state.
 """
 
 import logging
@@ -88,7 +91,13 @@ _NON_WORD = re.compile(r"[^a-z0-9\s]")
 
 
 def _content_words(text: str) -> set:
-    return {word for word in text.split() if word not in STOP_WORDS}
+    """The words of lower-cased ``text`` after punctuation, minus stop words."""
+    return {word for word in _NON_WORD.sub(" ", text).split() if word not in STOP_WORDS}
+
+
+def _whole_words(concept_lower: str) -> "re.Pattern[str]":
+    """A pattern that finds ``concept_lower`` only as whole words."""
+    return re.compile(r"(?<![a-z0-9])" + re.escape(concept_lower) + r"(?![a-z0-9])")
 
 
 class ConceptExtractor:
@@ -112,14 +121,22 @@ class ConceptExtractor:
     def match_concepts(
         self, text: str, known_concepts: Sequence[str], fuzzy: bool = True
     ) -> List[Tuple[str, float]]:
-        """Return ``(concept, relevance)`` pairs, most relevant first."""
+        """Return ``(concept, relevance)`` pairs, most relevant first.
+
+        A concept is found verbatim only as whole words of the text; the fuzzy
+        path compares punctuation-free word sets.
+        """
         text_lower = text.lower()
         text_words = _content_words(text_lower)
         matches: List[Tuple[str, float]] = []
         for concept in known_concepts:
             concept_lower = concept.lower()
-            if concept_lower and concept_lower in text_lower:
-                count = text_lower.count(concept_lower)
+            count = (
+                len(_whole_words(concept_lower).findall(text_lower))
+                if concept_lower
+                else 0
+            )
+            if count:
                 matches.append((concept, min(EXACT_BASE + count * EXACT_STEP, 1.0)))
                 continue
             if not fuzzy:

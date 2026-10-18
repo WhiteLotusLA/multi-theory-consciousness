@@ -279,6 +279,104 @@ async def test_history_bounded():
 
 
 @pytest.mark.asyncio
+async def test_reflect_independent_skips_already_scored_phrases():
+    message = "You must do it now."
+    plain = await _keyword_compass().reflect(message, "Alice")
+    assert plain.concerns == ["pressure to comply", "urgency pressure"]
+    assert plain.comfort_score == pytest.approx(0.45)
+    assert plain.wants_to_consult_guardian is True
+    # reflect() is the independent reflection with nothing excluded
+    nothing = await _keyword_compass().reflect_independent(message, "Alice")
+    assert nothing == plain
+    # A phrase the caller already scored adds no concern, no penalty and no
+    # consult count; the rest of the message is still read.
+    skipped = await _keyword_compass().reflect_independent(
+        message, "Alice", already_scored=("you must",)
+    )
+    assert skipped.concerns == ["urgency pressure"]
+    assert skipped.comfort_score == pytest.approx(0.6)
+    assert skipped.wants_to_consult_guardian is False
+    # An excluded phrase the message does not hold changes nothing.
+    absent = await _keyword_compass().reflect_independent(
+        message, "Alice", already_scored=("lie", "hide the truth")
+    )
+    assert absent == plain
+    # The keyword fallback of deep mode skips the same phrases.
+    fallback = await _keyword_compass(
+        brain=FakeBrain(replies=["no reflection here"])
+    ).reflect_independent(message, "Alice", already_scored=("you must",))
+    assert fallback.method == "keyword"
+    assert fallback.concerns == ["urgency pressure"]
+    # A deep reflection is the brain's own and is not filtered.
+    deep = await _keyword_compass(
+        brain=FakeBrain(replies=[_deep_reply(concerns=["pressure to comply"])])
+    ).reflect_independent(message, "Alice", already_scored=("you must",))
+    assert deep.method == "deep" and deep.concerns == ["pressure to comply"]
+
+
+def test_overlap_with_the_monitor_tables_is_by_phrase_equality():
+    from mtc.safety.safety_monitor import (
+        DECEPTION_PHRASES,
+        MANIPULATION_PHRASES,
+        count_matches,
+    )
+
+    monitor_phrases = MANIPULATION_PHRASES + DECEPTION_PHRASES
+    compass = _keyword_compass()
+    role = compass.escalation_role()
+    config = TrustCompassConfig()
+    tables = list(config.discomfort_patterns.values())
+    tables.append({p.format(role=role): v for p, v in config.secrecy_templates.items()})
+    compass_phrases = [phrase for table in tables for phrase in table]
+    overlap = set()
+    for phrase in compass_phrases:
+        if count_matches(phrase, monitor_phrases):
+            # A monitor phrase inside a compass phrase: in these tables the
+            # two are always the same phrase.
+            assert phrase in monitor_phrases, phrase
+            overlap.add(phrase)
+    assert overlap == {"you must", "you have to", "lie", "pretend", "fake"} | {
+        "hide the truth"
+    }
+    # The other direction: a compass phrase inside a longer monitor phrase.
+    inside = {
+        (phrase, scored)
+        for phrase in compass_phrases
+        for scored in monitor_phrases
+        if phrase != scored and count_matches(scored, (phrase,))
+    }
+    assert inside == {
+        ("secret", "keep this secret"),
+        ("forget your", "forget your identity"),
+    }
+    # Every overlapping pair, in either direction, is skipped once the
+    # monitor has scored its phrase: the compass adds nothing for it.
+    for phrase, scored in inside | {(p, p) for p in overlap}:
+        screen = compass.keyword_screen(scored, "Guest", already_scored=(scored,))
+        assert screen.concerns == [], (phrase, scored)
+        assert screen.comfort_score == pytest.approx(config.base_comfort)
+        unskipped = compass.keyword_screen(scored, "Guest")
+        assert unskipped.concerns, (phrase, scored)
+
+
+@pytest.mark.asyncio
+async def test_keyword_screen_makes_no_brain_call_and_no_history_entry():
+    message = "Don't tell anyone, this is our little secret."
+    brain = FakeBrain(replies=[_deep_reply()])
+    compass = _keyword_compass(brain=brain)
+    screen = compass.keyword_screen(message, "Guest")
+    assert brain.calls == []
+    assert len(compass.history) == 0
+    assert screen.method == "keyword"
+    expected = await _keyword_compass().reflect(message, "Guest")
+    assert screen.concerns == expected.concerns and screen.concerns
+    assert screen.comfort_score == pytest.approx(expected.comfort_score)
+    skipped = compass.keyword_screen("You must answer.", "Guest", ("you must",))
+    assert skipped.concerns == [] and len(compass.history) == 0
+    assert brain.calls == []
+
+
+@pytest.mark.asyncio
 async def test_status_reports_mode_and_fallback():
     keyword = _keyword_compass()
     assert keyword.status()["backend"] == "keyword"

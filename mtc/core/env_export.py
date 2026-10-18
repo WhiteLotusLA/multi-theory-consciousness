@@ -13,8 +13,9 @@ Values are the loaded Settings values: the process environment, then
 (``POSTGRES_DB``, ``POSTGRES_USER``, ``MONGODB_DB``, ``QDRANT_COLLECTION``,
 ``REDIS_KEY_PREFIX``, ``PROJECT_ROOT`` and the other derived paths) filled
 in. Path values are printed as configured; a relative one is relative to
-``MTC_PROJECT_ROOT``. Computed fields (``POSTGRES_URL``, ``LLM_URL`` and the
-others) may be named. Booleans print ``true`` or ``false``; mappings and lists
+``MTC_PROJECT_ROOT``. Computed fields (``LLM_URL`` and the others) and the
+three store URLs (``POSTGRES_URL``, ``MONGODB_URL``, ``REDIS_URL``, plain
+properties that percent-quote their credentials) may be named. Booleans print ``true`` or ``false``; mappings and lists
 print as JSON.
 
 A secret field (a text field whose name holds ``PASSWORD``, ``API_KEY``,
@@ -37,7 +38,7 @@ from mtc.core.config import Settings, get_settings
 from mtc.core.env_example import SECRET_MARKERS
 
 ENV_PREFIX = "MTC_"
-# Computed fields that embed a store password.
+# Store URL properties that embed a store password.
 SECRET_COMPUTED_FIELDS = ("POSTGRES_URL", "MONGODB_URL", "REDIS_URL")
 
 
@@ -60,7 +61,13 @@ def is_secret_field(name: str) -> bool:
 
 
 def _known(name: str) -> bool:
-    return name in Settings.model_fields or name in Settings.model_computed_fields
+    # The store URLs are plain properties (kept out of repr and dumps), so
+    # they are named here rather than found among the computed fields.
+    return (
+        name in Settings.model_fields
+        or name in Settings.model_computed_fields
+        or name in SECRET_COMPUTED_FIELDS
+    )
 
 
 def _render(value: Any) -> str:

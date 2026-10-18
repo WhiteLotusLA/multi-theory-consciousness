@@ -11,6 +11,7 @@ local mode (``QdrantClient(":memory:")``, no server and no marker).
 """
 
 import functools
+import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -152,6 +153,16 @@ def test_store_then_search_finds_text(make_vector):
     assert store.status()["available"] is True
 
 
+def test_unmeasured_emotional_weight_is_stored_as_none(make_vector):
+    store = make_vector()
+    unmeasured = store.store_memory("a note written with no measured emotion")
+    measured = store.store_memory(
+        "a note with a measured emotion", emotional_weight=0.4
+    )
+    assert store.get_memory_by_id(unmeasured)["emotional_weight"] is None
+    assert store.get_memory_by_id(measured)["emotional_weight"] == pytest.approx(0.4)
+
+
 def test_min_score_filters(make_vector):
     store = make_vector()
     store.store_memory("alpha beta gamma delta")
@@ -265,6 +276,41 @@ def test_related_concepts_shape(make_graph):
     assert graph.get_related_concepts("missing") == []
     rows[0]["strength"] = 0.0
     assert graph.get_related_concepts("a")[0]["strength"] == 0.9
+
+
+def test_unmeasured_strength_keeps_the_existing_strength(make_graph):
+    graph = make_graph()
+    for name in ("a", "b", "c", "d"):
+        graph.merge_concept(name)
+    assert graph.relate_concepts("a", "b", "similar_to", 0.9) is True
+    assert graph.relate_concepts("a", "b", "part_of", None) is True
+    assert graph.relate_concepts("a", "c", strength=None) is True
+    assert graph.relate_concepts("a", "d", strength=0.1) is True
+    rows = graph.get_related_concepts("a")
+    # measured strengths first, strongest first, then None, then by name
+    assert rows == [
+        {"concept": "b", "relationship": "part_of", "strength": 0.9},
+        {"concept": "d", "relationship": "relates_to", "strength": 0.1},
+        {"concept": "c", "relationship": "relates_to", "strength": None},
+    ]
+    assert graph.relate_concepts("a", "missing", strength=None) is False
+
+
+def test_in_memory_link_logs_a_count_not_a_name(caplog):
+    graph = inmemory.InMemoryGraphStore()
+    graph.merge_concept("river")
+    with caplog.at_level(logging.DEBUG, logger="mtc.memory.inmemory"):
+        linked = graph.link_memory_to_concepts(
+            1, "one", ["river", "Lighthouse", "Harbourmaster"]
+        )
+    assert linked == 1
+    text = " ".join(record.getMessage() for record in caplog.records)
+    assert "Lighthouse" not in text and "Harbourmaster" not in text
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert warnings[0].getMessage() == (
+        "2 concept names not in the graph; links skipped"
+    )
 
 
 def test_delete_memory_nodes(make_graph):

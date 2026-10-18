@@ -69,9 +69,10 @@ def _choose(preference: Optional[str], settings: Optional[Settings]) -> Tuple[st
     if requested not in DEVICE_CHOICES:
         raise ValueError(f"device {requested!r} is not one of {DEVICE_CHOICES}")
 
-    torch_module = _import_torch()
+    # The cpu choice needs no backend probe, so it never loads torch.
     if requested == "cpu":
         return "cpu", source
+    torch_module = _import_torch()
     if requested == "auto":
         if torch_module is not None:
             if _mps_available(torch_module):

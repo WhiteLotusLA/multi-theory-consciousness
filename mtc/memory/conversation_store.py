@@ -32,10 +32,12 @@ before anything is sent.
 
 Schema artifact: ``CONVERSATION_SCHEMA_SQL``, registered in
 ``mtc.core.schema_registry.SCHEMA_ARTIFACTS`` and applied idempotently by
-``ensure_schema()`` as a safety net. Phase 7's migration written from this
-constant is canonical. The addressee column is part of the table definition
-(no runtime ALTER), the role column checks the four ``MESSAGE_ROLES`` (a
-plugin's reply is a ``tool`` row), participants have no default, and the DDL
+``ensure_schema()`` as a safety net. The migration file generated from this
+constant (``migrations/postgres/001_core_schema.sql``, written by
+``python3 -m mtc.db.migrations --write``) is canonical. The addressee column
+is part of the table definition (no runtime ALTER), the role column checks the
+four ``MESSAGE_ROLES`` (a plugin's reply is a ``tool`` row), participants have
+no default, and the DDL
 holds no database role, password, seed row or default participant. The
 module reads no config key; host, port, database and credentials come from
 Settings through the pool factory. The repository never closes the pool: its

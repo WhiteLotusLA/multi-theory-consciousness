@@ -80,6 +80,20 @@ class EmbeddingExtraMissingError(EmbeddingUnavailableError, ImportError):
     """The ``embeddings`` extra is not installed (also an ImportError)."""
 
 
+def _embedding_dimension(model: Any) -> Any:
+    """The model's output width, through whichever accessor it has.
+
+    Newer sentence-transformers releases name it ``get_embedding_dimension``
+    and flag the older ``get_sentence_embedding_dimension`` as deprecated; the
+    dependency has no upper bound, so the new name is used when present and
+    the old one otherwise (no version check, no warning).
+    """
+    accessor = getattr(model, "get_embedding_dimension", None)
+    if accessor is None:
+        accessor = model.get_sentence_embedding_dimension
+    return accessor()
+
+
 class SentenceTransformerEmbedder:
     """Sentence-transformers model, loaded on the first ``encode`` call."""
 
@@ -175,7 +189,7 @@ class SentenceTransformerEmbedder:
             raise self._fail(str(exc), exc) from exc
         try:
             model = SentenceTransformer(name, device=device)
-            reported = model.get_sentence_embedding_dimension()
+            reported = _embedding_dimension(model)
         except Exception as exc:
             raise self._fail(f"model {name!r} failed to load: {exc}", exc) from exc
         expected = (

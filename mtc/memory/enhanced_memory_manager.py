@@ -8,7 +8,8 @@ Core memory, episodic storage, recall and consolidation behind store seams
 - ``EpisodicStore`` holds the core blocks, episodic rows and semantic rows. A
   None store means ``InMemoryEpisodicStore``; ``PostgresEpisodicStore`` is the
   persistent one, and its schema artifact ``EPISODIC_SCHEMA_SQL`` is the safety
-  net for Phase 7's ``migrations/001``.
+  net for ``migrations/postgres/001_core_schema.sql``, which is generated from
+  it.
 - ``VectorStore`` (semantic recall), ``GraphStore`` with a ``ConceptMatcher``
   (concept links and enrichment) and ``EpisodeConsolidator`` (the substrate
   consolidator) are optional parts. An absent part is reported by
@@ -20,9 +21,10 @@ blocks and seeds any that are missing (never overwriting) from the persona
 (the ``persona`` argument or the file at ``PERSONA_PATH``) or the neutral
 templates filled from Settings (``SYSTEM_NAME``, ``CREATOR_NAME``,
 ``CREATOR_RELATIONSHIP``, ``CORE_VALUES`` and the Big Five seeds); see
-``mtc.memory.core_blocks``. ``seed_core_memory`` is the hook Phase 7's
-bootstrap calls. The manager keeps the last loaded blocks; when the store is
-unavailable it serves them marked stale (or, before any load, the rendered
+``mtc.memory.core_blocks``. ``seed_core_memory`` is the hook the database
+bootstrap's seeding step calls (``mtc db init``). The manager keeps the last
+loaded blocks; when the store is unavailable it serves them marked stale (or,
+before any load, the rendered
 blocks marked stale with source ``rendered``). While degraded, the next call
 after a backoff (``RECOVERY_BACKOFF_SECONDS`` doubling up to
 ``RECOVERY_BACKOFF_MAX_SECONDS`` on the injected clock) retries the load and
@@ -31,15 +33,18 @@ retry clears ``degraded`` and the stale mark.
 
 Storing: the episodic row is written first. Its id gives the vector point
 (``point_id_for_memory``) written with ``postgres_id``, ``memory_type`` and
-``created_at`` metadata, then concept links over the graph's concept names
-through the matcher (up to five concepts with relevance at least 0.3, method
-``keyword_matching``). Each side store runs in its own try: its failure is
-recorded in ``StoreResult.errors`` and ``status()`` and never undoes the row.
-An unavailable episodic store is reported, not raised. A row the pool buffered
-has no id yet, so it is counted as unindexed; Phase 7's re-embed backfill
-indexes it later. Synchronous vector, graph, matcher and consolidator calls run
-in ``asyncio.to_thread``. Nothing in this module composes a vector: an
-unavailable embedder means no point is written and the error says so.
+``created_at`` metadata and an ``emotional_weight`` that is the largest finite
+numeric value of the row's emotional context clamped to [0, 1], or None when
+the context holds no finite number, then concept links over the graph's
+concept names through the matcher (up to five concepts with relevance at
+least 0.3, method ``keyword_matching``). Each side store runs in its own try:
+its failure is recorded in ``StoreResult.errors`` and ``status()`` and never
+undoes the row. An unavailable episodic store is reported, not raised. A row
+the pool buffered has no id yet, so it is counted as unindexed; the re-embed
+backfill (``mtc.db.reembed``) indexes it later. Synchronous vector, graph,
+matcher and consolidator calls run in ``asyncio.to_thread``. Nothing in this
+module composes a vector: an unavailable embedder means no point is written
+and the error says so.
 
 Recall: vector hits are joined to their rows in one ``get_episodic`` call;
 a hit whose row is gone or archived is dropped and counted as an orphan, and a
@@ -52,17 +57,21 @@ Recency-anchored recall carries ``recency_anchored`` and no similarity score.
 Lifecycle boilerplate: rows matching ``boilerplate_patterns`` are kept out of
 recency recall and the recent-memory feed. The default pattern matches the
 end-of-conversation summary line ``Conversation with <name> ended. <n>
-messages exchanged.``; Phase 6's pipeline writes that format or passes its own
-pattern.
+messages exchanged.``; the conversation pipeline writes that format or passes
+its own pattern.
 
 Consolidation: with a consolidator, the unconsolidated rows are replayed as
 episodes and each pattern the pass discovered becomes a semantic row (method
 ``htm``); without one, rows are grouped by dominant emotion and each group of
-two or more becomes a semantic row (method ``simple``). Rows with no numeric
+two or more becomes a semantic row (method ``simple``). A simple semantic row
+carries the group-size strength, no confidence (nothing measures one) and, for
+its emotion, the mean of the members' measured values. Rows with no numeric
 emotional context form the ``unlabelled`` group, whose semantic row carries an
 empty emotional context (no emotion is invented for them). Both mark the rows
-consolidated; when the consolidator reports no anomaly the strength is
-unmeasured, the report says None and the stored strength is left unchanged. ``consolidate()`` is the sleep scheduler's ``Consolidator`` seam.
+consolidated. The simple path measures no consolidation strength, and neither
+does the htm path when the consolidator reports no anomaly: the report says
+None and the stored strength is left unchanged. ``consolidate()`` is the sleep
+scheduler's ``Consolidator`` seam.
 
 Episodic memories are private conversation content and live only in
 gitignored or operator-controlled stores. Config keys read: ``PERSONA_PATH``,
@@ -73,6 +82,7 @@ gitignored or operator-controlled stores. Config keys read: ``PERSONA_PATH``,
 
 import asyncio
 import logging
+import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -106,9 +116,8 @@ CONCEPT_LINK_METHOD = "keyword_matching"
 # Query concepts enriched with related concepts during recall.
 RECALL_QUERY_CONCEPTS = 3
 # The simple consolidation path's design values (no substrate consolidator).
+# It measures no strength and no confidence, so it writes neither.
 SIMPLE_MIN_GROUP = 2
-SIMPLE_CONFIDENCE = 0.7
-SIMPLE_STRENGTH = 0.5
 SIMPLE_THEME_CHARS = 50
 SIMPLE_THEME_ROWS = 3
 UNLABELLED_GROUP = "unlabelled"
@@ -420,7 +429,7 @@ class EnhancedMemoryManager:
                         "created_at": self._now().isoformat(),
                     },
                     importance=float(importance),
-                    emotional_weight=float(importance) / 10.0,
+                    emotional_weight=_measured_intensity(emotional_context),
                     point_id=wanted,
                 )
             except Exception as exc:  # noqa: BLE001 - any vector failure is recorded
@@ -804,22 +813,31 @@ class EnhancedMemoryManager:
             theme = " ".join(
                 m["content"][:SIMPLE_THEME_CHARS] for m in members[:SIMPLE_THEME_ROWS]
             )
+            emotional_context: Dict[str, float] = {}
+            if emotion != UNLABELLED_GROUP:
+                # The mean of the members' measured values for that emotion.
+                values = [
+                    _numeric(m.get("emotional_context"))[emotion]
+                    for m in members
+                    if emotion in _numeric(m.get("emotional_context"))
+                ]
+                emotional_context = {emotion: sum(values) / len(values)}
             await self.episodic.add_semantic(
                 {
                     "concept": f"{emotion}_pattern",
                     "associations": {"theme": theme},
                     "strength": min(1.0, len(members) / 10.0),
-                    "emotional_context": (
-                        {} if emotion == UNLABELLED_GROUP else {emotion: 1.0}
-                    ),
-                    "confidence": SIMPLE_CONFIDENCE,
+                    "emotional_context": emotional_context,
                     "source_memories": [m["id"] for m in members],
                 }
             )
             report["semantic_created"] += 1
             report["patterns_found"] += 1
+        # No consolidation strength is measured on this path: None leaves the
+        # stored strength as it was (None on a row never consolidated before).
+        report["consolidation_strength"] = None
         report["episodic_processed"] = await self.episodic.mark_consolidated(
-            [row["id"] for row in rows], SIMPLE_STRENGTH
+            [row["id"] for row in rows], None
         )
 
     async def consolidate(self) -> Dict[str, int]:
@@ -931,12 +949,31 @@ class EnhancedMemoryManager:
         logger.info("memory manager shut down")
 
 
+def _measured_intensity(context: Any) -> Optional[float]:
+    """The largest finite value of an emotional context clamped to [0, 1].
+
+    None when the context holds no finite number: an unmeasured emotion (a
+    NaN or infinite value included) is never written as a weight, and
+    importance never stands in for one.
+    """
+    values = list(_numeric(context).values())
+    if not values:
+        return None
+    return max(0.0, min(1.0, max(values)))
+
+
 def _numeric(context: Any) -> Dict[str, float]:
-    """The numeric entries of an emotional context mapping."""
+    """The finite numeric entries of an emotional context mapping.
+
+    A NaN or infinite value is unmeasurable and is left out, so it never
+    reads as a weight, a group's dominant emotion or part of a mean.
+    """
     if not isinstance(context, Mapping):
         return {}
     return {
         str(key): float(value)
         for key, value in context.items()
-        if isinstance(value, (int, float)) and not isinstance(value, bool)
+        if isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
     }

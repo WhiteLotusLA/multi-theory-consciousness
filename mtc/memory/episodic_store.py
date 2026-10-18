@@ -39,6 +39,11 @@ connection failure of a plain pool raises ``StoreUnavailable`` too
 the store unavailable, with the error, from a failed call until a later call
 reaches the server. ``mark_consolidated`` with a None strength leaves the
 stored strength unchanged (an unmeasured strength is never written as 0).
+Unmeasured values read None: an episodic row's ``consolidation_strength``
+before any measured consolidation, and a semantic row's ``strength`` or
+``confidence`` written without one. The schema gives those three columns no
+default, so a NULL is never a number in disguise; this is the first public
+release of the schema, so there is no installed base to migrate.
 
 Row shape: ``id``, ``content``, ``memory_type``, ``importance``,
 ``emotional_context`` (a dict, empty when none was given), ``created_at``,
@@ -48,8 +53,9 @@ Row shape: ``id``, ``content``, ``memory_type``, ``importance``,
 back by id.
 
 Schema artifact: ``EPISODIC_SCHEMA_SQL``, applied idempotently by
-``ensure_schema()`` as a safety net; Phase 7's ``migrations/001`` is the
-canonical schema and is written from this constant. No table holds a vector
+``ensure_schema()`` as a safety net; ``migrations/postgres/001_core_schema.sql``
+is the canonical schema and is generated from this constant by
+``python3 -m mtc.db.migrations --write``. No table holds a vector
 column and the schema needs no extension: the vectors live in the vector
 store, keyed by ``point_id_for_memory`` of the row id.
 """
@@ -91,7 +97,7 @@ EPISODIC_SCHEMA_SQL = (
         last_accessed TIMESTAMPTZ DEFAULT NOW(),
         accessed_count INTEGER DEFAULT 0,
         consolidated BOOLEAN DEFAULT FALSE,
-        consolidation_strength DOUBLE PRECISION DEFAULT 0,
+        consolidation_strength DOUBLE PRECISION,
         replay_count INTEGER DEFAULT 0,
         CHECK (importance >= 0 AND importance <= 10)
     )
@@ -122,8 +128,8 @@ EPISODIC_SCHEMA_SQL = (
         concept TEXT NOT NULL,
         knowledge TEXT DEFAULT '',
         associations JSONB DEFAULT '{}',
-        strength DOUBLE PRECISION DEFAULT 0.5,
-        confidence DOUBLE PRECISION DEFAULT 0.5,
+        strength DOUBLE PRECISION,
+        confidence DOUBLE PRECISION,
         emotional_context JSONB DEFAULT '{}',
         source_memories BIGINT[] DEFAULT '{}',
         created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -169,6 +175,11 @@ def _check_importance(importance: float) -> float:
     return value
 
 
+def _optional_float(value: Any) -> Optional[float]:
+    """A nullable value: None (absent or NULL) stays None, anything else a float."""
+    return None if value is None else float(value)
+
+
 def _check_semantic(record: Mapping[str, Any]) -> Dict[str, Any]:
     concept = str(record.get("concept") or "").strip()
     if not concept:
@@ -177,8 +188,8 @@ def _check_semantic(record: Mapping[str, Any]) -> Dict[str, Any]:
         "concept": concept,
         "knowledge": str(record.get("knowledge") or ""),
         "associations": copy.deepcopy(dict(record.get("associations") or {})),
-        "strength": float(record.get("strength", 0.5)),
-        "confidence": float(record.get("confidence", 0.5)),
+        "strength": _optional_float(record.get("strength")),
+        "confidence": _optional_float(record.get("confidence")),
         "emotional_context": copy.deepcopy(dict(record.get("emotional_context") or {})),
         "source_memories": [int(i) for i in record.get("source_memories") or []],
     }
@@ -268,7 +279,7 @@ class InMemoryEpisodicStore:
             "last_accessed": now,
             "accessed_count": 0,
             "consolidated": False,
-            "consolidation_strength": 0.0,
+            "consolidation_strength": None,
             "replay_count": 0,
         }
         return memory_id
@@ -450,7 +461,7 @@ def _episodic_row(row: Mapping[str, Any]) -> Dict[str, Any]:
         "last_accessed": _utc(row["last_accessed"]),
         "accessed_count": int(row["accessed_count"] or 0),
         "consolidated": bool(row["consolidated"]),
-        "consolidation_strength": float(row["consolidation_strength"] or 0.0),
+        "consolidation_strength": _optional_float(row["consolidation_strength"]),
         "replay_count": int(row["replay_count"] or 0),
     }
     if "relevance" in row.keys():
@@ -464,8 +475,8 @@ def _semantic_row(row: Mapping[str, Any]) -> Dict[str, Any]:
         "concept": row["concept"],
         "knowledge": row["knowledge"] or "",
         "associations": _as_dict(row["associations"]),
-        "strength": float(row["strength"]),
-        "confidence": float(row["confidence"]),
+        "strength": _optional_float(row["strength"]),
+        "confidence": _optional_float(row["confidence"]),
         "emotional_context": _as_dict(row["emotional_context"]),
         "source_memories": [int(i) for i in row["source_memories"] or []],
         "created_at": _utc(row["created_at"]),

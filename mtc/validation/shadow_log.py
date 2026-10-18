@@ -14,7 +14,9 @@ the first write, never earlier.
 
 Config: ``Settings.SHADOW_LOG_DIR`` (empty derives ``<LOG_DIRECTORY>/
 shadow_signals``), read at call time when no directory is passed to the
-constructor. Records may hold conversation-derived text and are private data.
+constructor and resolved against ``PROJECT_ROOT`` (``mtc.core.paths``), so
+the writer and the gate runner name the same directory whatever the working
+directory. Records may hold conversation-derived text and are private data.
 
 Test hygiene: the acceptance gates read the settings directory as live shadow
 evidence, and test runs exercise the same taps. So under pytest (the
@@ -31,17 +33,24 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from mtc.core.config import get_settings
+from mtc.core.paths import log_dir, shadow_log_dir
 
 logger = logging.getLogger(__name__)
 
 
 def resolve_shadow_directory() -> Path:
-    """The configured shadow log directory, read from settings at call time."""
+    """The configured shadow log directory, read from settings at call time.
+
+    The same directory ``mtc.core.paths.shadow_log_dir`` gives the gate
+    runner: a relative setting joins ``PROJECT_ROOT``, never the working
+    directory. An empty ``SHADOW_LOG_DIR`` derives
+    ``<LOG_DIRECTORY>/shadow_signals``, resolved the same way.
+    """
     settings = get_settings()
     configured = getattr(settings, "SHADOW_LOG_DIR", "") or ""
     if configured:
-        return Path(configured)
-    return Path(settings.LOG_DIRECTORY) / "shadow_signals"
+        return shadow_log_dir(settings)
+    return log_dir(settings) / "shadow_signals"
 
 
 class ShadowSignalLogger:

@@ -3,9 +3,10 @@ Redis Working Memory
 ====================
 
 ``RedisManager`` keeps a session's fast, short-lived state in Redis and
-implements the ``WorkingMemory`` protocol and Phase 4's
-``EmotionAveragesProvider``. Everything it stores is private conversation
-state and lives only in the operator's Redis.
+implements the ``WorkingMemory`` protocol and the emotion extractor's
+``EmotionAveragesProvider`` (``mtc.consciousness.emotion_extractor``).
+Everything it stores is private conversation state and lives only in the
+operator's Redis.
 
 Config keys read at call time: ``REDIS_KEY_PREFIX`` (every key starts with it),
 ``WORKING_MEMORY_CAPACITY`` (clamped to five to nine messages) and, through the
@@ -416,7 +417,10 @@ class RedisManager:
     # ------------------------------------------------------------------ metrics
 
     async def get_metrics(self) -> Dict[str, Any]:
-        """Counters plus the server's memory figures (None when unmeasured)."""
+        """Counters plus the server's memory figures (None when unmeasured).
+
+        ``cache_hit_rate_percent`` is None before the first cache read.
+        """
         hits = self._metrics["cache_hits"]
         accesses = hits + self._metrics["cache_misses"]
         used: Optional[float] = None
@@ -430,7 +434,8 @@ class RedisManager:
                 logger.warning("redis memory info unavailable: %s", exc)
         return {
             **self._metrics,
-            "cache_hit_rate_percent": (hits / accesses * 100.0) if accesses else 0.0,
+            # No rate is measured before the first cache read.
+            "cache_hit_rate_percent": (hits / accesses * 100.0) if accesses else None,
             "redis_memory_mb": used,
             "redis_peak_memory_mb": peak,
         }

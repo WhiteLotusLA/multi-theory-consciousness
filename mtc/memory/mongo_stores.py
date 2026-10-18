@@ -35,8 +35,9 @@ Document contract (pinned by ``tests/memory/test_store_contracts.py``):
   index on ``grab_id`` would otherwise treat every missing id as the same null.
 
 Schema artifact: ``DOCUMENT_INDEXES``, applied idempotently by each store's
-``ensure_indexes()`` or ``ensure_document_indexes()`` as a safety net. Phase 7's
-``init_mongo`` script is canonical. Speaker models, beliefs and grab entries
+``ensure_indexes()`` or ``ensure_document_indexes()`` as a safety net. The
+database bootstrap (``mtc db init --only mongodb``, also
+``scripts/db/init_mongo.py``) is canonical. Speaker models, beliefs and grab entries
 hold real names at runtime and are private data; they live in the operator's
 MongoDB and nowhere in version control or logs. The stores log no document
 content.
@@ -359,7 +360,8 @@ def ensure_document_indexes(
 ) -> int:
     """Create every index in ``DOCUMENT_INDEXES`` (idempotent); return the count.
 
-    A safety net: Phase 7's ``init_mongo`` script is the canonical schema.
+    A safety net: the database bootstrap (``mtc db init --only mongodb``)
+    applies the canonical schema.
     """
     target = database if database is not None else _lazy_database(settings=settings)
     return mongo_call(apply_indexes, target, DOCUMENT_INDEXES)

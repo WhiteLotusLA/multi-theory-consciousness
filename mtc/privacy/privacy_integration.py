@@ -84,18 +84,30 @@ class IntegratedPrivacySystem:
         content: str,
         content_type: Optional[str] = None,
         tags: Optional[Sequence[str]] = None,
+        *,
+        keywords_can_raise: bool = False,
     ) -> ClassificationResult:
-        """Classify without auditing."""
-        return self.classifier.classify(content, content_type, tags)
+        """Classify without auditing (``keywords_can_raise`` as in the
+        classifier: keywords may raise, never lower, a typed verdict)."""
+        return self.classifier.classify(
+            content, content_type, tags, keywords_can_raise=keywords_can_raise
+        )
 
     async def classify_data(
         self,
         content: str,
         content_type: Optional[str] = None,
         tags: Optional[Sequence[str]] = None,
+        *,
+        keywords_can_raise: bool = False,
     ) -> DataClassification:
-        """Classify and audit the classification; return the tier."""
-        result = self.classifier.classify(content, content_type, tags)
+        """Classify and audit the classification; return the tier.
+
+        ``keywords_can_raise`` is passed to the classifier (rule 1b).
+        """
+        result = self.classifier.classify(
+            content, content_type, tags, keywords_can_raise=keywords_can_raise
+        )
         await self.auditor.log_event(
             PrivacyEvent(
                 event_type=EventType.DATA_CLASSIFIED,

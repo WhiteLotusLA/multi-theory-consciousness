@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import re
 from datetime import date, datetime, timedelta, timezone
 
@@ -278,3 +279,18 @@ async def test_naive_event_timestamp_rejected(tmp_path):
     auditor = _auditor(tmp_path)
     with pytest.raises(ValueError):
         await auditor.log_event(_event(timestamp=datetime(2000, 1, 1)))
+
+
+def test_status_reports_no_absolute_path(tmp_path):
+    inside = _auditor(tmp_path)
+    status = inside.status()
+    assert status["jsonl_path"] == "data/privacy/privacy_audit.jsonl"
+    assert not os.path.isabs(status["jsonl_path"])
+    # the property keeps the real path for the writer
+    assert inside.jsonl_path == tmp_path / "data" / "privacy" / "privacy_audit.jsonl"
+    assert inside.jsonl_path.is_absolute()
+    outside = _auditor(
+        tmp_path / "root", jsonl_path=tmp_path / "elsewhere" / "trail.jsonl"
+    )
+    assert outside.status()["jsonl_path"] == "trail.jsonl"
+    assert _auditor(tmp_path, jsonl_enabled=False).status()["jsonl_path"] is None

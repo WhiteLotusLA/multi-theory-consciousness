@@ -18,9 +18,9 @@ The policy is data (``AccessPolicy``): one row per access stage giving each
 role's highest readable tier (None for no access), the stages at which consent
 can unlock a higher tier and at which access above ``PUBLIC`` is audited, a
 stage-independent row and the emergency rules. ``AccessPolicy.default()``
-encodes one household's policy shape, in which a creator sees everything at
-first and less as the stages advance while a researcher needs consent; it is a
-documented default meant to be replaced by an operator's own policy.
+encodes a guardian-style policy shape, in which a creator sees everything at
+first and less as the stages advance while a researcher needs consent; it is
+a documented default meant to be replaced by an operator's own policy.
 
 Default matrix (highest readable tier; "none" is no access; stages 3 to 6 are
 consent stages; the companion column is explicit and equals the guardian's):
@@ -71,6 +71,7 @@ from typing import Any, Callable, Dict, FrozenSet, List, Mapping, Optional, Tupl
 
 from mtc.consciousness.developmental_modulator import developmental_enabled
 from mtc.core.config import Settings, get_settings
+from mtc.core.paths import display_path
 from mtc.privacy.data_classifier import DataClassification, StagePolicy, access_stage
 
 logger = logging.getLogger(__name__)
@@ -216,7 +217,7 @@ class AccessPolicy:
 
     @classmethod
     def default(cls) -> AccessPolicy:
-        """The documented default policy (one household's shape)."""
+        """The documented default policy (a guardian-style shape)."""
         rows = _default_rows()
         return cls(
             rows=rows,
@@ -512,6 +513,9 @@ class AccessControlEnforcer:
         return matrix
 
     def status(self) -> Dict[str, Any]:
+        """The row in force and the consents; ``consent_file`` is shown
+        through ``mtc.core.paths.display_path``, never as an absolute path.
+        """
         _row, basis, stage, consent_applies = self._row()
         return {
             "enabled": self.enabled,
@@ -519,5 +523,9 @@ class AccessControlEnforcer:
             "basis": basis,
             "consent_applies": consent_applies,
             "consents": len(self._consents),
-            "consent_file": str(self._consent_path) if self._consent_path else None,
+            "consent_file": (
+                display_path(self._consent_path, self._settings)
+                if self._consent_path
+                else None
+            ),
         }

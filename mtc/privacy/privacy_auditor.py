@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
 
 from mtc.core.config import Settings, get_settings
-from mtc.core.paths import data_dir
+from mtc.core.paths import data_dir, display_path
 from mtc.memory.inmemory import InMemoryPrivacyAuditStore
 from mtc.memory.protocols import PrivacyAuditStore
 from mtc.privacy.data_classifier import DataClassification
@@ -487,7 +487,12 @@ class PrivacyAuditor:
         }
 
     def status(self) -> Dict[str, Any]:
-        """The store, the JSONL file and the error counts."""
+        """The store, the JSONL file and the error counts.
+
+        ``jsonl_path`` is shown through ``mtc.core.paths.display_path``
+        (relative to ``PROJECT_ROOT``, or the file name alone), never as
+        an absolute path; the ``jsonl_path`` property keeps the real one.
+        """
         try:
             store_status = self.store.status()  # type: ignore[attr-defined]
         except Exception:
@@ -498,7 +503,9 @@ class PrivacyAuditor:
             "available": self._store_available,
             "last_error": self._last_error,
             "store": store_status,
-            "jsonl_path": str(path) if path is not None else None,
+            "jsonl_path": (
+                display_path(path, self._settings) if path is not None else None
+            ),
             "events_held": len(self._events),
             "violations_held": len(self._violations),
             "store_errors": self._store_errors,

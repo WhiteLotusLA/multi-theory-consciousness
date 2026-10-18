@@ -74,7 +74,7 @@ def test_from_document_tolerates_missing_optional_fields():
     gist = ThoughtGist.from_document(minimal)
     assert gist.source_thought_ids == []
     assert gist.dominant_emotion is None  # no mood is invented for a missing key
-    assert gist.retention_strength == 1.0
+    assert gist.retention_strength is None  # unknown, never full strength
     assert gist.is_protected is False
     assert gist.protection_reason is None
     assert gist.last_retrieved is None
@@ -109,3 +109,29 @@ def test_to_document_is_a_copy():
     doc["emotional_arc"]["start"] = "changed"
     assert gist.source_thought_ids == ["t1", "t2", "t3"]
     assert gist.emotional_arc["start"] == "calm"
+
+
+def test_scores_are_none_until_measured():
+    bare = ThoughtGist(
+        gist_id="g4",
+        created_at=T0,
+        summary="s",
+        source_count=1,
+        source_thought_ids=["t1"],
+    )
+    assert bare.avg_salience is None
+    assert bare.importance_score is None
+    assert bare.retention_strength is None
+    minimal = {"gist_id": "g4", "created_at": T0, "summary": "s", "source_count": 1}
+    loaded = ThoughtGist.from_document(minimal)
+    assert loaded.avg_salience is None
+    assert loaded.importance_score is None
+    assert loaded.retention_strength is None
+    doc = _gist(avg_salience=None, importance_score=None, retention_strength=None)
+    stored = doc.to_document()
+    assert stored["avg_salience"] is None
+    assert stored["importance_score"] is None
+    assert stored["retention_strength"] is None
+    restored = ThoughtGist.from_document(stored)
+    assert restored == doc
+    assert restored.retention_strength is None

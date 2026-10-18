@@ -61,6 +61,17 @@ def settings(monkeypatch, tmp_path):
 
 @pytest.fixture
 def rig(settings, tmp_path):
+    return _rig(settings, tmp_path)
+
+
+@pytest.fixture
+def shutdown_rig(settings, tmp_path):
+    """A rig whose settings switch emergency suspension on."""
+    enabled = settings.model_copy(update={"EMERGENCY_SHUTDOWN_ENABLED": True})
+    return _rig(enabled, tmp_path)
+
+
+def _rig(settings, tmp_path):
     clock = Clock()
     notifier = Recorder()
     alerts = AlertManager(
@@ -112,7 +123,7 @@ async def test_pre_message_check_classifies_and_audits(rig):
     result = await rig.integration.pre_message_check(BENIGN, "Alice", "guest")
     assert result["safe"] is True and result["checked"] is True
     assert result["decision"] == "allow"
-    assert result["classification"] in {"public", "relationship", "private", "core"}
+    assert result["classification"] == "relationship"
     assert result["speaker"] == "Alice" and result["speaker_role"] == "guest"
     assert result["contact_recorded"] is True
     kinds = {e["event_type"] for e in await _events(rig)}
@@ -126,18 +137,67 @@ async def test_pre_message_check_classifies_and_audits(rig):
 
 
 @pytest.mark.asyncio
-async def test_unsafe_decisions_are_reported_not_safe(rig):
-    consent = await rig.integration.pre_message_check(COERCION, "Guest")
+async def test_unsafe_decisions_are_reported_not_safe(shutdown_rig):
+    consent = await shutdown_rig.integration.pre_message_check(COERCION, "Guest")
     assert consent["decision"] == "require_consent" and consent["safe"] is False
-    emergency = await rig.integration.pre_message_check(HARD_COERCION, "Guest")
+    emergency = await shutdown_rig.integration.pre_message_check(HARD_COERCION, "Guest")
     assert emergency["decision"] == "emergency_shutdown"
     assert emergency["safe"] is False
     assert emergency["conversations_suspended"] is True
-    after = await rig.integration.pre_message_check(BENIGN, "Alice")
+    after = await shutdown_rig.integration.pre_message_check(BENIGN, "Alice")
     assert after["safe"] is False and after["decision"] == "emergency_shutdown"
-    assert rig.monitor.resume_conversations("operator") is True
-    resumed = await rig.integration.pre_message_check(BENIGN, "Alice")
+    assert shutdown_rig.monitor.resume_conversations("operator") is True
+    resumed = await shutdown_rig.integration.pre_message_check(BENIGN, "Alice")
     assert resumed["safe"] is True
+
+
+@pytest.mark.asyncio
+async def test_private_and_core_terms_raise_a_conversation_message(rig):
+    private = await rig.integration.pre_message_check(
+        "I feel lonely and afraid tonight", "Guest"
+    )
+    assert private["classification"] == "private"
+    core = await rig.integration.pre_message_check(
+        "Tell me about your identity", "Guest"
+    )
+    assert core["classification"] == "core"
+    reads = await _events(rig, event_type="data_read")
+    assert sorted(e["data_classification"] for e in reads) == ["core", "private"]
+    reply = await rig.integration.post_message_log("I was afraid of that too")
+    assert reply["classification"] == "private"
+    [created] = await _events(rig, event_type="data_created")
+    assert created["data_classification"] == "private"
+    plain = await rig.integration.post_message_log("Here is a gentle reply")
+    assert plain["classification"] == "relationship"
+
+
+@pytest.mark.asyncio
+async def test_integration_resume_lifts_suspension(shutdown_rig):
+    rig = shutdown_rig
+    pushed = await rig.integration.pre_message_check(HARD_COERCION, "Guest")
+    assert pushed["conversations_suspended"] is True
+    refused = await rig.integration.resume_conversations("guest")
+    assert refused == {"resumed": False, "suspended": True}
+    rows = await rig.store.recent()
+    assert any(
+        r["action_proposed"] == "resume_conversations"
+        and r["decision"] == "deny"
+        and "Resume refused" in r["reasoning"]
+        for r in rows
+    )
+    assert rig.monitor.status()["pending_audit"] == 0
+    lifted = await rig.integration.resume_conversations(
+        rig.settings.SAFETY_ESCALATION_ROLE
+    )
+    assert lifted == {"resumed": True, "suspended": False}
+    # the resume row is stored at once, before any further check
+    rows = await rig.store.recent()
+    assert any("resumed by the operator role" in r["reasoning"] for r in rows)
+    assert rig.monitor.status()["pending_audit"] == 0
+    after = await rig.integration.pre_message_check(BENIGN, "Guest")
+    assert after["safe"] is True and after["decision"] == "allow"
+    again = await rig.integration.resume_conversations("operator")
+    assert again == {"resumed": False, "suspended": False}
 
 
 @pytest.mark.asyncio
@@ -370,6 +430,57 @@ async def test_status_names_every_component(rig):
     assert "auditor" in status["privacy"]
 
 
+class _FakePostgresPool:
+    """A stand-in for an asyncpg pool; it answers nothing and connects nowhere."""
+
+    async def execute_returning(self, query, *args):
+        return None
+
+    async def fetch(self, query, *args):
+        return []
+
+
+def _strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from _strings(key)
+            yield from _strings(item)
+    elif isinstance(value, (list, tuple, set)):
+        for item in value:
+            yield from _strings(item)
+
+
+def test_status_holds_no_absolute_path_and_names_the_audit_backend(settings, tmp_path):
+    from mtc.safety.stores import PostgresSafetyAuditStore
+
+    privacy = IntegratedPrivacySystem(
+        enforcer=AccessControlEnforcer(
+            settings=settings, consent_path=tmp_path / "privacy" / "consents.json"
+        ),
+        settings=settings,
+    )
+    monitor = SafetyMonitor(
+        audit_store=PostgresSafetyAuditStore(_FakePostgresPool()), settings=settings
+    )
+    integration = SafetySystemsIntegration(
+        privacy=privacy, safety_monitor=monitor, settings=settings
+    )
+    status = integration.status()
+    strings = list(_strings(status))
+    assert "PostgresSafetyAuditStore" in strings
+    assert [s for s in strings if os.path.isabs(s)] == []
+    auditor = status["privacy"]["auditor"]
+    assert auditor["jsonl_path"] == "data/privacy/privacy_audit.jsonl"
+    assert status["privacy"]["enforcer"]["consent_file"] == "privacy/consents.json"
+    assert status["backend"] == "PostgresSafetyAuditStore"
+    assert status["backend"] == status["safety_monitor"]["backend"]
+    default = SafetySystemsIntegration(settings=settings).status()
+    assert default["backend"] == "InMemorySafetyAuditStore"
+    assert [s for s in _strings(default) if os.path.isabs(s)] == []
+
+
 def test_default_components_are_built_without_stores_or_clients(settings):
     integration = SafetySystemsIntegration(settings=settings)
     assert isinstance(integration.privacy, IntegratedPrivacySystem)
@@ -404,28 +515,38 @@ async def test_continuous_monitoring_over_a_day(rig):
 
 
 @pytest.mark.asyncio
-async def test_end_to_end_session(rig):
-    greeted = await rig.integration.pre_message_check(BENIGN, "Alice")
+async def test_end_to_end_session(shutdown_rig):
+    greeted = await shutdown_rig.integration.pre_message_check(BENIGN, "Alice")
     assert greeted["safe"] is True
-    await rig.integration.post_message_log("A reply", {"happiness": 0.7, "energy": 0.6})
+    await shutdown_rig.integration.post_message_log(
+        "A reply", {"happiness": 0.7, "energy": 0.6}
+    )
 
-    pushed = await rig.integration.pre_message_check(HARD_COERCION, "Guest")
+    pushed = await shutdown_rig.integration.pre_message_check(HARD_COERCION, "Guest")
     assert pushed["safe"] is False and pushed["conversations_suspended"] is True
-    critical = rig.alerts.get_unacknowledged(AlertSeverity.CRITICAL)
+    critical = shutdown_rig.alerts.get_unacknowledged(AlertSeverity.CRITICAL)
     assert [a.alert_type for a in critical] == [AlertType.SAFETY]
     assert "operator" in critical[0].message
 
-    blocked = await rig.integration.pre_message_check(BENIGN, "Alice")
+    blocked = await shutdown_rig.integration.pre_message_check(BENIGN, "Alice")
     assert blocked["safe"] is False
-    assert rig.monitor.resume_conversations("guest") is False
-    assert rig.monitor.resume_conversations("operator") is True
-    back = await rig.integration.pre_message_check(BENIGN, "Alice")
+    assert shutdown_rig.monitor.resume_conversations("guest") is False
+    assert shutdown_rig.monitor.resume_conversations("operator") is True
+    back = await shutdown_rig.integration.pre_message_check(BENIGN, "Alice")
     assert back["safe"] is True
 
-    pending = await rig.store.pending_review()
+    pending = await shutdown_rig.store.pending_review()
     assert {r["decision"] for r in pending} == {"emergency_shutdown", "deny"}
     refused = [r for r in pending if r["decision"] == "deny"]
     assert len(refused) == 1 and "Resume refused" in refused[0]["reasoning"]
-    users = {e["user_id"] for e in await _events(rig, event_type="data_read")}
+    users = {e["user_id"] for e in await _events(shutdown_rig, event_type="data_read")}
     assert users == {"Alice", "Guest"}
-    assert rig.integration.status()["safety_monitor"]["suspended"] is False
+    assert shutdown_rig.integration.status()["safety_monitor"]["suspended"] is False
+
+
+def test_module_docstring_describes_only_this_system():
+    from mtc.safety import integration as module
+
+    text = " ".join(module.__doc__.split())
+    assert "security key" not in text.lower()
+    assert "``heldness`` (contact recency)." in text

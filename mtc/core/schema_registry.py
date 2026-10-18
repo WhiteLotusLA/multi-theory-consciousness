@@ -9,12 +9,12 @@ and payload indexes, the Neo4j constraints and neutral seed concepts, and the
 Redis key families. ``load_artifact`` imports one by its dotted path and
 returns the constant.
 
-Phase 7's migrations, ``init_mongo``, ``init_qdrant``, ``init_neo4j``,
-``bootstrap`` and ``verify`` read this registry and nothing else; they do not
-import store modules by name. Each store module keeps its own ``ensure_*``
-safety net, and Phase 7's scripts are canonical. A phase that adds a store
-registers its constant here (the conversation repository's DDL,
-``CONVERSATION_SCHEMA_SQL``, is registered under ``postgres``); a test scans
+The schema tooling under ``mtc.db`` (the migrations, the per-store
+initialisers, ``bootstrap`` and ``verify``) reads this registry and nothing
+else; it does not import store modules by name. Each store module keeps its
+own ``ensure_*`` safety net, and the ``mtc.db`` tooling is canonical. A change
+that adds a store registers its constant here (the conversation repository's
+DDL, ``CONVERSATION_SCHEMA_SQL``, is registered under ``postgres``); a test scans
 ``mtc`` for the artifact naming convention (``*_SCHEMA_SQL``, ``*_INDEXES``,
 ``COLLECTION_PARAMS``, ``PAYLOAD_INDEXES``, ``CONSTRAINTS``, ``KEY_FAMILIES``)
 and fails when a constant is not registered.

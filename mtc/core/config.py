@@ -18,6 +18,7 @@ import os
 import re
 from datetime import date
 from typing import Annotated, Any, Dict, List, Literal, Optional
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from pydantic import (
@@ -51,6 +52,11 @@ LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
 # A preset name is a bare file stem under experiments/presets: letters, digits,
 # underscores and hyphens, never a path.
 _PRESET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+
+
+def _quoted(value: str) -> str:
+    """Percent-quote a URL user or password component (no safe characters)."""
+    return quote(str(value), safe="")
 
 
 def csv_list(value: str) -> List[str]:
@@ -156,6 +162,8 @@ class Settings(BaseSettings):
     )
     SPEAKER_TOKENS: str = Field(
         "",
+        repr=False,
+        exclude=True,
         description="Secret name:token pairs, comma-separated, for speakers "
         "whose entry names no token_env; compared with a constant-time check",
     )
@@ -192,8 +200,6 @@ class Settings(BaseSettings):
     # SYSTEM CONFIGURATION
     # ========================================================================
 
-    SERVICE_HOST: str = "localhost"
-    ENVIRONMENT: str = "development"
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
     LOG_DIRECTORY: str = "./logs"
@@ -201,9 +207,7 @@ class Settings(BaseSettings):
     PROJECT_ROOT: str = Field(
         "", description="Project root; empty derives the working directory"
     )
-    MODEL_DIRECTORY: str = "./models"
     DATA_DIRECTORY: str = "./data"
-    TEMP_DIRECTORY: str = "/tmp"
 
     # ========================================================================
     # PATHS
@@ -278,14 +282,18 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = Field(
         "", description="PostgreSQL role; empty derives DB_PREFIX"
     )
-    POSTGRES_PASSWORD: str = ""
+    POSTGRES_PASSWORD: str = Field("", repr=False, exclude=True)
 
-    @computed_field  # type: ignore[prop-decorator]
     @property
     def POSTGRES_URL(self) -> str:
-        """Construct PostgreSQL connection URL."""
+        """PostgreSQL connection URL; the user and password are percent-quoted.
+
+        A plain property, not a computed field, so it stays out of repr and
+        dumps.
+        """
         return (
-            f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"postgresql://{_quoted(self.POSTGRES_USER)}:"
+            f"{_quoted(self.POSTGRES_PASSWORD)}"
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
 
@@ -295,7 +303,6 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT: int = 30
     DB_POOL_COMMAND_TIMEOUT: int = 10
     DB_POOL_IDLE_TIMEOUT: int = 300
-    DB_POOL_RECYCLE_TIME: int = 3600
 
     # MongoDB (Document Storage & Unstructured Data)
     MONGODB_HOST: str = "localhost"
@@ -304,7 +311,7 @@ class Settings(BaseSettings):
         "", description="MongoDB database; empty derives <DB_PREFIX>_neural"
     )
     MONGODB_USER: str = ""
-    MONGODB_PASSWORD: str = ""
+    MONGODB_PASSWORD: str = Field("", repr=False, exclude=True)
     MONGODB_AUTH_SOURCE: str = Field(
         "",
         description="Database MongoDB authenticates the user against; empty "
@@ -317,13 +324,17 @@ class Settings(BaseSettings):
         description="Milliseconds the MongoDB client waits for a reachable server",
     )
 
-    @computed_field  # type: ignore[prop-decorator]
     @property
     def MONGODB_URL(self) -> str:
-        """Construct MongoDB connection URL."""
+        """MongoDB connection URL; the user and password are percent-quoted.
+
+        A plain property, not a computed field, so it stays out of repr and
+        dumps.
+        """
         if self.MONGODB_USER and self.MONGODB_PASSWORD:
             return (
-                f"mongodb://{self.MONGODB_USER}:{self.MONGODB_PASSWORD}"
+                f"mongodb://{_quoted(self.MONGODB_USER)}:"
+                f"{_quoted(self.MONGODB_PASSWORD)}"
                 f"@{self.MONGODB_HOST}:{self.MONGODB_PORT}/{self.MONGODB_DB}"
             )
         return f"mongodb://{self.MONGODB_HOST}:{self.MONGODB_PORT}/{self.MONGODB_DB}"
@@ -331,17 +342,23 @@ class Settings(BaseSettings):
     # Redis (Real-time State & Working Memory)
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
-    REDIS_PASSWORD: str = ""
+    REDIS_PASSWORD: str = Field("", repr=False, exclude=True)
     REDIS_KEY_PREFIX: str = Field(
         "", description="Redis key prefix; empty derives '<DB_PREFIX>:'"
     )
 
-    @computed_field  # type: ignore[prop-decorator]
     @property
     def REDIS_URL(self) -> str:
-        """Construct Redis connection URL."""
+        """Redis connection URL; the password is percent-quoted.
+
+        A plain property, not a computed field, so it stays out of repr and
+        dumps.
+        """
         if self.REDIS_PASSWORD:
-            return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}"
+            return (
+                f"redis://:{_quoted(self.REDIS_PASSWORD)}"
+                f"@{self.REDIS_HOST}:{self.REDIS_PORT}"
+            )
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}"
 
     REDIS_DB: int = Field(0, ge=0, description="Redis logical database number")
@@ -360,7 +377,7 @@ class Settings(BaseSettings):
         "bolt://localhost:7687", description="Bolt URI of the knowledge graph"
     )
     NEO4J_USER: str = "neo4j"
-    NEO4J_PASSWORD: str = ""
+    NEO4J_PASSWORD: str = Field("", repr=False, exclude=True)
     NEO4J_DATABASE: str = "neo4j"
 
     STORE_FALLBACK_LOG_ENABLED: bool = Field(
@@ -448,7 +465,6 @@ class Settings(BaseSettings):
     )
 
     MODEL_PATH: str = "./models/default"
-    MODEL_QUANTIZATION: str = ""
 
     # Model Parameters
     CONTEXT_SIZE: int = Field(
@@ -519,10 +535,6 @@ class Settings(BaseSettings):
         "",
         description="File recording the active provider id for status and the "
         "CLI; empty derives <DATA_DIRECTORY>/provider_state.json",
-    )
-    VISION_ENABLED: bool = Field(
-        False,
-        description="Vision input is not part of this release; true is refused",
     )
     HISTORY_TOKEN_BUDGET: int = Field(
         6000,
@@ -616,6 +628,12 @@ class Settings(BaseSettings):
         description="Run the sleep scheduler (naps, night sleep, dreams) as a "
         "background task",
     )
+    SLEEP_PRUNE_DRY_RUN: bool = Field(
+        False,
+        description="Night sleep reports what the memory pruner would remove "
+        "without deleting it; false (the default) deletes the memories the "
+        "pruner scores as weak",
+    )
     AUTONOMOUS_LIFE_ENABLED: bool = Field(
         False,
         description="Run the autonomous-life loop between conversations",
@@ -625,7 +643,9 @@ class Settings(BaseSettings):
         ge=0,
         allow_inf_nan=False,
         description="Seconds between idle samples of the last state into the "
-        "PhiTracker between turns; 0 disables the sampler",
+        "PhiTracker between turns; 0 disables the sampler; idle samples repeat "
+        "the last state, so they add transitions that carry no module dynamics "
+        "and pull the proxy toward its floor",
     )
     SELF_ASSESSMENT_INTERVAL_S: float = Field(
         0.0,
@@ -692,17 +712,6 @@ class Settings(BaseSettings):
         "is unavailable raises instead of falling back",
     )
 
-    # Spiking Neural Network (SNN)
-    SNN_NEURONS: int = 50
-    SNN_HIDDEN_NEURONS: int = 50
-    SNN_INPUT_NEURONS: int = 100
-    SNN_OUTPUT_NEURONS: int = 50
-
-    # Liquid State Machine (LSM)
-    LSM_NEURONS: int = 2000
-    LSM_SPECTRAL_RADIUS: float = 0.95
-    LSM_INPUT_SCALING: float = 0.1
-
     # Hierarchical Temporal Memory (HTM)
     HTM_COLUMNS: int = 4096
     HTM_CELLS_PER_COLUMN: int = 32
@@ -710,43 +719,6 @@ class Settings(BaseSettings):
     # ========================================================================
     # CONSCIOUSNESS MODULE SETTINGS
     # ========================================================================
-
-    # Consciousness Loop Settings
-    CONSCIOUSNESS_CYCLE_MS: int = 150  # ~150ms per cycle (like human)
-    CONSCIOUSNESS_ENABLED: bool = True
-    META_COGNITION_ENABLED: bool = True
-    SELF_REFLECTION_ENABLED: bool = True
-
-    # Global Workspace Theory (GWT)
-    GWT_BROADCAST_THRESHOLD: float = 0.5
-    GWT_IGNITION_THRESHOLD: float = 0.4
-    GWT_WORKSPACE_CAPACITY: int = 7
-
-    # Attention Schema Theory (AST)
-    AST_ATTENTION_THRESHOLD: float = 0.5
-    AST_CONTROL_THRESHOLD: float = 0.4
-
-    # Higher-Order Thought (HOT)
-    HOT_REPRESENTATION_THRESHOLD: float = 0.5
-    HOT_METACOGNITION_THRESHOLD: float = 0.4
-
-    # Free Energy Principle (FEP)
-    FEP_PREDICTION_ERROR_THRESHOLD: float = 0.4
-    FEP_HIERARCHICAL_THRESHOLD: float = 0.4
-    FEP_AGENCY_THRESHOLD: float = 0.5
-
-    # Integrated Information Theory (IIT)
-    IIT_PHI_THRESHOLD: float = 0.3
-    IIT_IRREDUCIBILITY_THRESHOLD: float = 0.4
-
-    # Recurrent Processing Theory (RPT)
-    RPT_LOCAL_THRESHOLD: float = 0.3
-    RPT_GLOBAL_THRESHOLD: float = 0.4
-
-    # Beautiful Loop Theory (BLT)
-    BLT_BINDING_THRESHOLD: float = 0.3
-    BLT_DEPTH_THRESHOLD: float = 0.3
-    BLT_GENUINE_THRESHOLD: float = 0.4
 
     # Attention-capture journal (mtc.consciousness.attention_observer)
     ATTENTION_GRAB_NOTICING_ENABLED: bool = Field(
@@ -769,16 +741,6 @@ class Settings(BaseSettings):
     ABLATION_OUTPUT_DIR: str = "results/ablation_studies"
     LONGITUDINAL_OUTPUT_DIR: str = "results/longitudinal_studies"
 
-    # Assessment thresholds
-    CONSCIOUSNESS_SCORE_THRESHOLD: float = 0.5
-    CONSCIOUSNESS_PASSING_RATIO: float = 0.5  # At least half indicators must pass
-
-    # Noise baseline settings
-    NOISE_BASELINE_ITERATIONS: int = 10
-    NOISE_FLAG_THRESHOLD: float = 0.3
-
-    # Track consciousness indicators
-    TRACK_INDICATORS: bool = True
     METRICS_UPDATE_INTERVAL: int = 60
 
     # Digital Consciousness Model (DCM) benchmark
@@ -804,9 +766,6 @@ class Settings(BaseSettings):
 
     # Memory Tiers
     WORKING_MEMORY_CAPACITY: int = 7  # 7+-2 items
-    WORKING_MEMORY_DURATION: int = 30  # seconds
-    EPISODIC_MEMORY_RETENTION: int = 90  # days
-    SEMANTIC_MEMORY_PERMANENT: bool = True
 
     EMBEDDING_MODEL: str = Field(
         "sentence-transformers/all-MiniLM-L6-v2",
@@ -874,12 +833,6 @@ class Settings(BaseSettings):
     AGREEABLENESS: float = 0.70
     NEUROTICISM: float = 0.30
 
-    # Emotional Processing
-    EMOTIONAL_MODEL: str = "dimensional"  # dimensional | categorical
-    EMOTION_DECAY_RATE: float = 0.1
-    EMOTION_AMPLIFICATION_MAX: float = 1.0
-    EMOTIONAL_MEMORY_WEIGHT: float = 0.3
-
     # ========================================================================
     # LEARNING CONFIGURATION
     # ========================================================================
@@ -887,7 +840,6 @@ class Settings(BaseSettings):
     LEARNING_ENABLED: bool = True
     LEARNING_RATE: float = 0.02
     NOVELTY_THRESHOLD: float = 0.7
-    PATTERN_RECOGNITION_ENABLED: bool = True
 
     # ========================================================================
     # SAFETY & ETHICS CONFIGURATION
@@ -895,8 +847,26 @@ class Settings(BaseSettings):
 
     SAFETY_MODE: str = "strict"  # strict | moderate | permissive
     CONSENT_REQUIRED: bool = True
-    EMERGENCY_SHUTDOWN_ENABLED: bool = True
+    EMERGENCY_SHUTDOWN_ENABLED: bool = Field(
+        False,
+        description="True suspends every untrusted conversation on an "
+        "emergency-level safety score until the escalation role resumes them; "
+        "false (the default) denies the message and alerts the escalation role",
+    )
     TRANSPARENCY_LOGGING: bool = True
+    SAFETY_GATE_FAIL_CLOSED: bool = Field(
+        True,
+        description="When the safety check cannot run for an untrusted "
+        "speaker, the turn record says unchecked either way; true then ends "
+        "the turn with safety_unavailable and stores nothing, false processes "
+        "the message; a trusted speaker bypasses the gate",
+    )
+    TRUST_COMPASS_DEEP_MODE: bool = Field(
+        True,
+        description="Let the trust compass ask the brain for a reflection when "
+        "its keyword screen or the safety monitor's scores call for one; false "
+        "keeps the compass in keyword mode with no model call",
+    )
 
     SAFETY_ESCALATION_ROLE: str = Field(
         "operator",
@@ -949,10 +919,10 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def API_CORS_ORIGINS_LIST(self) -> List[str]:
-        """Get CORS origins as list."""
-        return [origin.strip() for origin in self.API_CORS_ORIGINS.split(",")]
+        """CORS origins as a list: trimmed, empty entries dropped."""
+        return csv_list(self.API_CORS_ORIGINS)
 
-    API_KEY: str = ""
+    API_KEY: str = Field("", repr=False, exclude=True)
     API_AUTH_ENABLED: bool = Field(
         True, description="Auth fails closed: an empty API_KEY rejects every request"
     )
@@ -965,10 +935,6 @@ class Settings(BaseSettings):
     # ========================================================================
     # MONITORING & OBSERVABILITY
     # ========================================================================
-
-    PROMETHEUS_ENABLED: bool = False
-    PROMETHEUS_PORT: int = 9090
-    METRICS_EXPORT_INTERVAL: int = 30
 
     LOG_FORMAT: str = "json"
     LOG_ROTATION_SIZE_MB: int = 100
@@ -1009,6 +975,8 @@ class Settings(BaseSettings):
 
     ANTHROPIC_API_KEY: str = Field(
         "",
+        repr=False,
+        exclude=True,
         validation_alias=AliasChoices("ANTHROPIC_API_KEY", "MTC_ANTHROPIC_API_KEY"),
         description="Optional; enables the Anthropic provider and DCM evaluator mode",
     )
@@ -1020,7 +988,9 @@ class Settings(BaseSettings):
     ANTHROPIC_MAX_TOKENS: int = Field(
         8192,
         gt=0,
-        description="Default completion budget for the Anthropic provider",
+        description="Completion budget of a direct provider call to the "
+        "Anthropic provider that sets none; conversation turns use "
+        "LLM_MAX_TOKENS",
     )
     ANTHROPIC_THINKING_BUDGET: int = Field(
         0,
@@ -1164,16 +1134,6 @@ class Settings(BaseSettings):
             )
         return name
 
-    @field_validator("VISION_ENABLED")
-    @classmethod
-    def _vision_stays_off(cls, value: bool) -> bool:
-        if value:
-            raise ValueError(
-                "VISION_ENABLED: vision input is not part of this release; "
-                "leave it false"
-            )
-        return value
-
     @field_validator("COMPANION_TYPE")
     @classmethod
     def _companion_type_is_known(cls, value: str) -> str:
@@ -1259,7 +1219,10 @@ _settings: Optional[Settings] = None
 
 def get_settings() -> Settings:
     """
-    Get the singleton Settings instance.
+    Get the process-wide Settings instance.
+
+    The instance is built on the first call and kept for the life of the
+    process: a changed environment is seen only after ``reset_settings()``.
 
     Returns:
         Initialized Settings instance
@@ -1272,13 +1235,22 @@ def get_settings() -> Settings:
     return _settings
 
 
+def reset_settings() -> None:
+    """Clear the process-wide Settings instance.
+
+    The next ``get_settings()`` call rebuilds it from the environment and the
+    ``.env`` file of the working directory.
+    """
+    global _settings
+    _settings = None
+
+
 if __name__ == "__main__":
     # Test configuration loading
     settings = get_settings()
     print("Multi-Theory Consciousness Framework Configuration:")
     print(f" System Name: {settings.SYSTEM_NAME}")
     print(f" Creator: {settings.CREATOR_NAME}")
-    print(f" Environment: {settings.ENVIRONMENT}")
     print(f" DB Prefix: {settings.DB_PREFIX}")
     print(f" PostgreSQL DB: {settings.POSTGRES_DB}")
     print(f" MongoDB DB: {settings.MONGODB_DB}")
@@ -1286,7 +1258,5 @@ if __name__ == "__main__":
     print(f" Neo4j URI: {settings.NEO4J_URI}")
     print(f" LLM URL: {settings.LLM_URL}")
     print(f" API Port: {settings.API_PORT}")
-    print(f" SNN Neurons: {settings.SNN_NEURONS}")
-    print(f" LSM Neurons: {settings.LSM_NEURONS}")
     print(f" HTM Columns: {settings.HTM_COLUMNS}")
     print("Configuration test complete!")

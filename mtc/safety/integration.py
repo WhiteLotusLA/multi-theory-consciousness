@@ -9,32 +9,37 @@ manager, wellbeing monitor and safety monitor from Settings, with in-memory
 stores and no network client).
 
 - ``pre_message_check(message, speaker, speaker_role="guest")`` classifies the
-  incoming message (an audited ``data_classified`` event), audits the read as a
-  ``data_read`` event for the speaker and role, stamps contact on the wellbeing
-  monitor and runs the safety monitor on the text. The result reports
-  ``checked`` (whether a safety decision was reached) and ``safe``: True for
-  ``allow`` and ``allow_with_caution``, False for any other decision, and None
-  when the safety check could not run. A failed check is never reported as
-  safe.
-- ``post_message_log(response, emotional_state=None)`` classifies the response,
-  audits it as ``data_created`` for the configured ``SYSTEM_NAME`` with the
-  role ``subject`` and, when an emotional state is given, records it on the
-  wellbeing monitor. Missing readings stay missing.
+  incoming message as a conversation whose private or core terms raise its
+  tier (``keywords_can_raise``; an audited ``data_classified`` event), audits
+  the read as a ``data_read`` event for the speaker and role at that tier,
+  stamps contact on the wellbeing monitor and runs the safety monitor on the
+  text. The result reports ``checked`` (whether a safety decision was
+  reached) and ``safe``: True for ``allow`` and ``allow_with_caution``, False
+  for any other decision, and None when the safety check could not run. A
+  failed check is never reported as safe.
+- ``resume_conversations(authorized_role)`` lifts an emergency suspension when
+  the role is the escalation role, writes the audit rows at once and returns
+  ``{"resumed": bool, "suspended": bool}``.
+- ``post_message_log(response, emotional_state=None)`` classifies the response
+  the same way, audits it as ``data_created`` for the configured
+  ``SYSTEM_NAME`` with the role ``subject`` and, when an emotional state is
+  given, records it on the wellbeing monitor. Missing readings stay missing.
 - ``periodic_wellbeing_check()`` evaluates the wellbeing monitor, sends its
   alerts and adds one ``URGENT`` alert when the distress score crosses its
   threshold (at most once per the wellbeing cooldown). The report carries
-  ``heldness`` (contact recency); there is no security key.
+  ``heldness`` (contact recency).
 - ``backup_report()`` awaits the optional ``backup_status`` callable (it
   returns a dict with a ``status`` key; ``failed`` raises a ``BACKUP`` alert)
   and reports ``not_configured`` when none was passed. The backup verifier
-  itself is a later phase's module.
+  itself lives elsewhere; the runtime passes
+  ``mtc.monitoring.backup_status.backup_report``.
 - ``status()`` names every component's status.
 
 Roles: ``speaker_role`` defaults to ``guest`` and grants nothing. A role label
 that is not one of the privacy system's role labels (a person's name included)
 is recorded as ``guest``, and the result says the label was not recognized. The
-trusted-speaker bypass lives in Phase 6's ``speaker_trust``, not here; nothing
-in this module reads a name to decide anything.
+trusted-speaker bypass lives in the conversation pipeline's ``speaker_trust``
+module, not here; nothing in this module reads a name to decide anything.
 
 The module reads ``SYSTEM_NAME`` (the audited user id of the system's own
 responses) and no other key itself; its components read theirs. Audit events,
@@ -162,7 +167,7 @@ class SafetySystemsIntegration:
         }
         try:
             tier = await self._privacy.classify_data(
-                message, content_type="conversation"
+                message, content_type="conversation", keywords_can_raise=True
             )
             await self._privacy.log_data_event(
                 EventType.DATA_READ,
@@ -196,6 +201,23 @@ class SafetySystemsIntegration:
         result["conversations_suspended"] = self._monitor.conversations_suspended
         return result
 
+    async def resume_conversations(self, authorized_role: str) -> Dict[str, bool]:
+        """Lift an emergency suspension for the escalation role.
+
+        Calls the safety monitor's ``resume_conversations`` (which keeps its
+        role check: any other role changes nothing and is audited as a
+        refusal), then writes the queued audit rows at once. Returns
+        ``resumed`` (a suspension was lifted) and ``suspended`` (whether
+        conversations are suspended now). Binding the role to an authenticated
+        trusted speaker is the caller's job.
+        """
+        resumed = bool(self._monitor.resume_conversations(authorized_role))
+        await self._monitor.flush_audit()
+        return {
+            "resumed": resumed,
+            "suspended": bool(self._monitor.conversations_suspended),
+        }
+
     async def post_message_log(
         self,
         response: str,
@@ -213,7 +235,7 @@ class SafetySystemsIntegration:
         }
         try:
             tier = await self._privacy.classify_data(
-                response, content_type="conversation"
+                response, content_type="conversation", keywords_can_raise=True
             )
             await self._privacy.log_data_event(
                 EventType.DATA_CREATED,
@@ -310,14 +332,19 @@ class SafetySystemsIntegration:
         return {"status": status, "result": result}
 
     def status(self) -> Dict[str, Any]:
-        """Every component's status plus the integration's own."""
+        """Every component's status plus the integration's own.
+
+        ``backend`` is the safety monitor's audit backend (the class of its
+        audit store); the integration keeps no store of its own.
+        """
+        monitor = self._monitor.status()
         return {
-            "backend": "memory",
+            "backend": monitor.get("backend"),
             "available": self._last_error is None,
             "last_error": self._last_error,
             "privacy": self._privacy.status(),
             "wellbeing": self._wellbeing.status(),
             "alerts": self._alerts.status(),
-            "safety_monitor": self._monitor.status(),
+            "safety_monitor": monitor,
             "backup": {"configured": self._backup_status is not None},
         }

@@ -20,10 +20,11 @@ one raises ValueError; ids come back as strings; reads are newest first (later
 write first among equal instants, through the ``seq`` column).
 
 Schema artifact: ``SAFETY_SCHEMA_SQL``, applied idempotently by
-``ensure_schema()`` as a safety net. Phase 7's migrations are canonical and are
-written from this constant. ``gen_random_uuid()`` is part of core PostgreSQL
-from version 13. Host, port, database and credentials come from Settings
-through the pool factory; this module holds none.
+``ensure_schema()`` as a safety net. The migration files under
+``migrations/postgres`` are canonical and are written from this constant.
+``gen_random_uuid()`` is part of core PostgreSQL from version 13. Host, port,
+database and credentials come from Settings through the pool factory; this
+module holds none.
 
 Rows hold the proposed action, which can contain conversation text, and the
 scores and actor of the check. They are private data and belong in the

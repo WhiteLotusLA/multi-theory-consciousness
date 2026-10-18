@@ -44,6 +44,11 @@ class ThoughtGist:
 
     ``dominant_emotion`` is the most prominent measured emotion of the source
     thoughts, or None when none of them carried one; no mood stands in for it.
+    ``avg_salience``, ``importance_score`` and ``retention_strength`` are None
+    until something measures them: a cluster without salience values has no
+    average, and a gist stored without a retention has an unknown one, which
+    the stores never expire and never return under a ``min_retention`` floor
+    until the next refresh computes it. No number stands in for them.
     """
 
     gist_id: str
@@ -59,11 +64,11 @@ class ThoughtGist:
     burst_windows: List[Dict[str, Any]] = field(default_factory=list)
 
     # Scoring
-    avg_salience: float = 0.0
+    avg_salience: Optional[float] = None
     total_access_count: int = 0
     content_variations: List[str] = field(default_factory=list)
-    importance_score: float = 0.0
-    retention_strength: float = 1.0
+    importance_score: Optional[float] = None
+    retention_strength: Optional[float] = None
 
     # Protection
     is_protected: bool = False
@@ -107,7 +112,9 @@ class ThoughtGist:
 
         ``gist_id``, ``created_at``, ``summary`` and ``source_count`` are
         required (a missing one raises KeyError); every other field falls back
-        to the dataclass default (a missing ``dominant_emotion`` reads None).
+        to the dataclass default. A missing ``dominant_emotion``,
+        ``avg_salience``, ``importance_score`` or ``retention_strength`` reads
+        None: no numeric default stands in for a score that was never stored.
         """
         return cls(
             gist_id=doc["gist_id"],
@@ -119,11 +126,11 @@ class ThoughtGist:
             emotional_arc=copy.deepcopy(doc.get("emotional_arc", {})),
             time_span=copy.deepcopy(doc.get("time_span", {})),
             burst_windows=copy.deepcopy(doc.get("burst_windows", [])),
-            avg_salience=doc.get("avg_salience", 0.0),
+            avg_salience=doc.get("avg_salience"),
             total_access_count=doc.get("total_access_count", 0),
             content_variations=list(doc.get("content_variations", [])),
-            importance_score=doc.get("importance_score", 0.0),
-            retention_strength=doc.get("retention_strength", 1.0),
+            importance_score=doc.get("importance_score"),
+            retention_strength=doc.get("retention_strength"),
             is_protected=doc.get("is_protected", False),
             protection_reason=doc.get("protection_reason"),
             retrieval_count=doc.get("retrieval_count", 0),

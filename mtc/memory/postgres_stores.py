@@ -18,14 +18,16 @@ timestamp raises ValueError before anything is sent. A null ``overall_score``
 or ``phi_value`` stays null.
 
 Schema artifact: ``RESEARCH_SCHEMA_SQL``, applied idempotently by
-``ensure_schema()`` as a safety net. Phase 7's ``migrations/002`` is the
-canonical schema and is written from this constant. Host, port, database and
+``ensure_schema()`` as a safety net. ``migrations/postgres/002_research_schema.sql``
+is the canonical schema and is generated from this constant by
+``python3 -m mtc.db.migrations --write``. Host, port, database and
 credentials come from Settings through the pool factory; this module holds none.
 The store never closes the pool: the pool is shared, and its owner closes it.
 """
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Dict, List, Mapping, Optional
 
@@ -87,10 +89,14 @@ _EVENT_COLUMNS = (
 
 
 # Driver exception class names (asyncpg) that mean the server was not reached.
-# They are matched by name so this module never imports the driver.
+# They are matched by name over the class hierarchy so this module never
+# imports the driver. InterfaceError is not among them: asyncpg raises it and
+# its subclasses (the client-side DataError, ClientConfigurationError,
+# UnsupportedClientFeatureError) for the caller's own mistakes, such as a wrong
+# argument count. Only an InterfaceError of exactly that class whose message
+# says the connection or pool is closed or closing is an outage (_CLOSED_TEXT).
 _UNREACHABLE_NAMES = frozenset(
     {
-        "InterfaceError",
         "ConnectionDoesNotExistError",
         "PostgresConnectionError",
         "ConnectionFailureError",
@@ -102,10 +108,22 @@ _UNREACHABLE_NAMES = frozenset(
 )
 
 
+_INTERFACE_ERROR = "InterfaceError"
+_CLOSED_TEXT = re.compile(r"\b(?:closed|closing)\b", re.IGNORECASE)
+
+
 def is_unreachable(exc: BaseException) -> bool:
-    """True when an exception means PostgreSQL could not be reached."""
+    """True when an exception means PostgreSQL could not be reached.
+
+    OSError, a timeout and the connection-class driver errors are outages. An
+    ``InterfaceError`` is one only when its own class (not a subclass) is named
+    ``InterfaceError`` and its message says closed or closing (a closed
+    connection or pool); every other client-side error is the caller's.
+    """
     if isinstance(exc, (OSError, asyncio.TimeoutError)):
         return True
+    if type(exc).__name__ == _INTERFACE_ERROR:
+        return bool(_CLOSED_TEXT.search(str(exc)))
     return any(cls.__name__ in _UNREACHABLE_NAMES for cls in type(exc).__mro__)
 
 

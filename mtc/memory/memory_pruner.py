@@ -23,7 +23,12 @@ returns integer counts).
   read one page per pass, and ``status()`` names that (``paging``).
 - A deleted row's vector point (``point_id_for_memory`` of the row id, so no
   search is needed) is deleted from the ``VectorStore`` and its memory node
-  from the ``GraphStore``.
+  from the ``GraphStore``. A real pass reports the archive and delete counts
+  the store confirmed (a call that fails reports 0), and the index deletes run
+  only when the store confirmed at least one deleted row: a delete that
+  confirms none (what a buffered delete reports) keeps the index entries and
+  is counted as an error. A partial count proceeds, since the shortfall is
+  rows already gone.
 - Substrate telemetry older than ``neural_max_age_days``, thoughts older than
   ``thought_max_age_days`` with coherence below ``thought_max_coherence`` and
   no child thoughts, and unprotected gists whose stored retention is below
@@ -34,8 +39,9 @@ returns integer counts).
 Learning experiences are never touched (no learning store is passed). A
 missing store is skipped and named in the result (``skipped_<store>``) and in
 ``status()``; a store failure is counted under ``errors`` and named in
-``status()``, never raised. ``dry_run`` (the default) counts what would be
-archived or deleted and changes nothing, so the vector and graph counts stay 0.
+``status()``, never raised. ``dry_run`` (the default) reports the planned
+archive and delete counts under the same keys and changes nothing, so the
+vector and graph counts stay 0.
 
 Retention follows the consolidation pipeline's forgetting curve with true
 half-lives: ``min(1, max(importance / 10 * 0.85, 0.5 ** (age / half_life) *
@@ -190,7 +196,11 @@ class MemoryPruner:
         return min(1.0, max(floor, base * (1.0 + access + recency)))
 
     async def prune(self, dry_run: bool = True) -> Dict[str, int]:
-        """Run one forgetting pass; return integer counts."""
+        """Run one forgetting pass; return integer counts.
+
+        ``episodic_archived`` and ``episodic_deleted`` are the planned counts
+        on a dry run and the counts the store confirmed on a real pass.
+        """
         now = self._now()
         result: Dict[str, int] = {
             "dry_run": int(bool(dry_run)),
@@ -285,19 +295,33 @@ class MemoryPruner:
         if self.paging and not dry_run:
             # A dry run leaves the resume point where it was.
             self._resume_after = None if exhausted else after
-        result["episodic_archived"] = len(to_archive)
-        result["episodic_deleted"] = len(to_delete)
         if dry_run:
+            # A dry run reports the planned counts under the same keys.
+            result["episodic_archived"] = len(to_archive)
+            result["episodic_deleted"] = len(to_delete)
             return
+        # A real pass reports what the store confirmed; a call that fails
+        # leaves its count at 0.
+        result["episodic_archived"] = 0
+        result["episodic_deleted"] = 0
         try:
             if to_archive:
-                await self.episodic.archive(to_archive)
+                result["episodic_archived"] = int(
+                    await self.episodic.archive(to_archive)
+                )
             if to_delete:
-                await self.episodic.delete(to_delete)
+                result["episodic_deleted"] = int(await self.episodic.delete(to_delete))
         except Exception as exc:  # noqa: BLE001 - counted, never raised
             self._fail("episodic", exc)
             return
         if not to_delete:
+            return
+        if result["episodic_deleted"] == 0:
+            # No row delete was confirmed (a buffered delete reports 0): the
+            # rows may still exist, so their index entries stay.
+            message = f"delete confirmed 0 of {len(to_delete)} rows; index entries kept"
+            self.last_errors["episodic"] = message
+            logger.warning("memory pruning of episodic: %s", message)
             return
         if self.vectors is not None:
             try:

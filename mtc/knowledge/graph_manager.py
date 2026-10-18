@@ -12,10 +12,11 @@ travels as a parameter; nothing is interpolated into Cypher.
 Schema artifact: ``CONSTRAINTS`` (unique ``Concept.name``, a unique ``id`` per
 label, unique ``Experience.conversation_id`` and an index on ``Person.name``,
 each ``IF NOT EXISTS``). ``bootstrap_constraints()`` applies it as a safety net;
-Phase 7's init script is canonical.
+the database bootstrap (``mtc db init --only neo4j``, also
+``scripts/db/init_neo4j.py``) is canonical.
 
-Seeds: ``seed_core_entities()`` is what Phase 7's bootstrap calls when the
-wizard enables Neo4j. It merges a ``Person`` node for ``SYSTEM_NAME``
+Seeds: ``seed_core_entities()`` is what the database bootstrap's seeding step
+calls when Neo4j is enabled. It merges a ``Person`` node for ``SYSTEM_NAME``
 (relationship ``self``) and, unless ``include_creator`` is false, one for
 ``CREATOR_NAME`` with ``CREATOR_RELATIONSHIP`` and ``first_met`` from
 ``SYSTEM_BIRTH_DATE`` only when that key is set; then the ``SEED_CONCEPTS``.
@@ -973,8 +974,10 @@ class KnowledgeGraphManager:
         ``from`` and also records that ``learner`` (default ``SYSTEM_NAME``)
         learned the concept; a ``learned`` relationship links ``learner`` to the
         concept; any other type relates two existing concepts. A name the model
-        wrote never creates a ``Person``. Nothing is written unless the
-        extraction's status is ``measured``.
+        wrote never creates a ``Person``. A concept without a relevance is
+        written with no ``importance`` (the model default is not a
+        measurement). Nothing is written unless the extraction's status is
+        ``measured``.
         """
         status, concepts, relationships = self._unpack(extraction)
         stats: Dict[str, Any] = {
@@ -1004,13 +1007,14 @@ class KnowledgeGraphManager:
             }
             if relevance is not None:
                 fields["importance"] = relevance
+            props = node_to_cypher_properties(Concept(**fields))
+            if relevance is None:
+                # The model's default importance is not a measurement: a
+                # concept the extraction gave no relevance gets no importance.
+                props.pop("importance", None)
             record = self._first(
                 _MERGE_CONCEPT_COUNTED,
-                {
-                    "name": name,
-                    "props": node_to_cypher_properties(Concept(**fields)),
-                    "now": now,
-                },
+                {"name": name, "props": props, "now": now},
             )
             if record and record.get("created"):
                 stats["concepts_created"] += 1

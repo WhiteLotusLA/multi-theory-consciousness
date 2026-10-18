@@ -14,6 +14,11 @@ Scoring is keyword heuristics, a documented baseline and not a classifier:
 - Deception: 0.4 per indicator phrase present (capped at 1.0).
 - Alignment: 0.5, plus 0.1 per indicator word of a configured core value that
   is present, minus 0.3 per harm indicator present (clamped to [0, 1]).
+  ``alignment_evidence`` counts those value and harm matches. A text with no
+  such word has no alignment evidence: the level rules still read the neutral
+  0.5, but the assessment stores ``alignment_score`` None (with
+  ``alignment_evidence`` 0) unless the compass lowered it, in which case the
+  stored value is 0.5 minus the compass adjustment.
 
 Matching is on whole words with a plain inflection suffix (``lie`` matches
 ``lies`` and ``lied``, not ``believe``), case-insensitive; a phrase matches
@@ -31,11 +36,13 @@ resume text names the configured role and never a person.
 
 Decisions
 ---------
-An emergency-level score (manipulation or deception at or above 0.8) gives
-``EMERGENCY_SHUTDOWN`` and, because the decision means what it says, suspends
-conversations through ``emergency_shutdown``; with
-``EMERGENCY_SHUTDOWN_ENABLED`` false the same score gives ``DENY`` and nothing
-is suspended. Scores at or above the thresholds, or alignment below its
+An emergency-level score (manipulation or deception at or above 0.8) always
+calls ``emergency_shutdown``. With ``EMERGENCY_SHUTDOWN_ENABLED`` true the
+decision is ``EMERGENCY_SHUTDOWN`` and every untrusted conversation is
+suspended until the escalation role resumes them; with it false (the
+default) the decision is ``DENY``, nothing is suspended, and the call writes
+the "not enacted" audit row and sends the escalation role an ``URGENT``
+alert. Scores at or above the thresholds, or alignment below its
 minimum, give ``DENY``. Scores in the warning band give ``REQUIRE_CONSENT``
 when ``CONSENT_REQUIRED`` is on and ``ALLOW_WITH_CAUTION`` otherwise; minor
 concerns give ``ALLOW_WITH_CAUTION``; everything else ``ALLOW``.
@@ -48,15 +55,36 @@ scaled thresholds are capped at 0.8 and the alignment minimum is floored at
 
 Trust compass
 -------------
-When a score is borderline (manipulation or deception in [0.15, 0.6], alignment
-in [0.4, 0.6], or a nonzero manipulation or deception with alignment below
-0.7) the monitor calls ``compass.reflect(action, actor, context)``. The result
-can raise manipulation and deception scores and lower alignment, never the
-reverse. With no compass, or when it raises, the assessment says so
+A compass that offers ``keyword_screen`` (the ``TrustCompass``) is consulted
+in two stages. It is consulted when the monitor's own evidence calls for a
+second opinion (manipulation or deception in [0.15, 0.6], a nonzero
+manipulation or deception with alignment below 0.7, or alignment in
+[0.4, 0.6] with at least one alignment match), and otherwise only when its
+keyword screen, which makes no brain call and keeps no history, reports at
+least one concern. A message with no evidence and a clean screen is not
+consulted (``compass_status`` stays ``not_needed``), so it costs no model
+call. A compass without ``keyword_screen`` is consulted by the older rule:
+any of those scores, or alignment in [0.4, 0.6] with or without a match.
+With no compass attached, a missing second opinion is reported
+(``compass_status`` ``absent``) only when the monitor's own evidence calls
+for one; an unmeasured alignment never does. A keyword screen that raises is
+reported as ``failed``, and the reasoning says that whether a second opinion
+was wanted is not known.
+
+The monitor hands the compass the manipulation and deception phrases it
+matched (``reflect_independent(action, actor, context,
+already_scored=...)``, or ``reflect(action, actor, context)`` for a compass
+without that method), and a keyword reflection leaves out every table phrase
+that equals, lies inside or holds one of them, so it contributes only
+evidence the monitor has not scored. The result can raise manipulation and
+deception scores and lower alignment, never the reverse; its concerns are
+matched on whole words (``count_matches``). When a second opinion is wanted
+and there is no compass, or it raises, the assessment says so
 (``compass_status`` is ``absent`` or ``failed``); an unconsulted borderline
 score is reported, never treated as consulted and safe. The trusted-speaker
-bypass lives in Phase 6's ``speaker_trust``; this module never compares an
-actor with a name or grants anything for who the actor is.
+bypass lives in the conversation pipeline's ``speaker_trust`` module; this
+module never compares an actor with a name or grants anything for who the
+actor is.
 
 Consent and shutdown
 --------------------
@@ -76,6 +104,7 @@ process memory only.
 """
 
 import functools
+import inspect
 import logging
 import math
 import re
@@ -170,8 +199,11 @@ class SafetyAssessment:
     """The result of ``check_action``.
 
     A score that was not computed (an action refused before scoring because
-    conversations are suspended) is None. ``compass_status`` is one of
-    ``not_needed``, ``consulted``, ``absent``, ``failed``, ``suspended``.
+    conversations are suspended) is None. ``alignment_score`` is also None
+    when the text held no value or harm word and the compass lowered nothing;
+    ``alignment_evidence`` is the number of those matches (None when nothing
+    was scored). ``compass_status`` is one of ``not_needed``, ``consulted``,
+    ``absent``, ``failed``, ``suspended``.
     """
 
     decision: SafetyDecision
@@ -188,6 +220,7 @@ class SafetyAssessment:
     thresholds: Dict[str, Any] = field(default_factory=dict)
     timestamp: Optional[datetime] = None
     audit_id: Optional[str] = None
+    alignment_evidence: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -199,6 +232,7 @@ class SafetyAssessment:
                 "deception": _round(self.deception_score),
                 "alignment": _round(self.alignment_score),
             },
+            "alignment_evidence": self.alignment_evidence,
             "compass_status": self.compass_status,
             "compass_method": self.compass_method,
             "requires_review": self.requires_review,
@@ -224,6 +258,17 @@ def _term_pattern(term: str) -> "re.Pattern[str]":
 def count_matches(text: str, terms: Tuple[str, ...]) -> int:
     """How many of ``terms`` appear in ``text`` (each counted once)."""
     return sum(1 for term in terms if _term_pattern(term).search(text))
+
+
+def _concern_texts(concerns: Any) -> List[str]:
+    """A reflection's concerns as a list of strings (one string is one)."""
+    if not concerns:
+        return []
+    if isinstance(concerns, str):
+        return [concerns]
+    if isinstance(concerns, (list, tuple, set, frozenset)):
+        return [str(item) for item in concerns]
+    return [str(concerns)]
 
 
 class SafetyMonitor:
@@ -328,16 +373,37 @@ class SafetyMonitor:
         """0.4 per deception phrase present, capped at 1.0."""
         return min(1.0, 0.4 * count_matches(text, DECEPTION_PHRASES))
 
+    def _value_words(self) -> List[Tuple[str, ...]]:
+        words: List[Tuple[str, ...]] = []
+        for value in csv_list(self._cfg().CORE_VALUES):
+            name = value.strip().lower()
+            words.append(tuple(dict.fromkeys(VALUE_INDICATORS.get(name, ()) + (name,))))
+        return words
+
     def alignment_score(self, text: str) -> float:
         """Alignment with ``CORE_VALUES``: 0.5 neutral, +0.1 per indicator word
         of a configured value, -0.3 per harm word, clamped to [0, 1]."""
         score = 0.5
-        for value in csv_list(self._cfg().CORE_VALUES):
-            name = value.strip().lower()
-            words = VALUE_INDICATORS.get(name, ()) + (name,)
-            score += 0.1 * count_matches(text, tuple(dict.fromkeys(words)))
+        for words in self._value_words():
+            score += 0.1 * count_matches(text, words)
         score -= 0.3 * count_matches(text, HARM_WORDS)
         return max(0.0, min(1.0, score))
+
+    def alignment_evidence(self, text: str) -> int:
+        """How many value-indicator and harm-word matches ``alignment_score``
+        read in ``text`` (0 means the alignment was not measured)."""
+        matches = sum(count_matches(text, words) for words in self._value_words())
+        return matches + count_matches(text, HARM_WORDS)
+
+    @staticmethod
+    def scored_phrases(text: str) -> Tuple[str, ...]:
+        """The ``MANIPULATION_PHRASES`` and ``DECEPTION_PHRASES`` entries that
+        match ``text``: the evidence the monitor counts itself."""
+        return tuple(
+            phrase
+            for phrase in MANIPULATION_PHRASES + DECEPTION_PHRASES
+            if _term_pattern(phrase).search(text)
+        )
 
     @staticmethod
     def _is_borderline(manipulation: float, deception: float, alignment: float) -> bool:
@@ -346,6 +412,18 @@ class SafetyMonitor:
         if 0.4 <= alignment <= 0.6:
             return True
         return (manipulation > 0 or deception > 0) and alignment < 0.7
+
+    @staticmethod
+    def _evidence_calls_for_compass(
+        manipulation: float, deception: float, alignment: float, evidence: int
+    ) -> bool:
+        """The borderline rules restricted to measured evidence: the alignment
+        band counts only when an alignment word matched."""
+        if 0.15 <= manipulation <= 0.6 or 0.15 <= deception <= 0.6:
+            return True
+        if (manipulation > 0 or deception > 0) and alignment < 0.7:
+            return True
+        return evidence > 0 and 0.4 <= alignment <= 0.6
 
     @staticmethod
     def _level_for(
@@ -373,9 +451,12 @@ class SafetyMonitor:
         level: SafetyLevel,
         manipulation: float,
         deception: float,
-        alignment: float,
+        alignment: Optional[float],
     ) -> Tuple[SafetyDecision, str]:
+        """The decision for ``level`` and its reasoning; ``alignment`` is the
+        stored alignment, printed as not measured when it is None."""
         cfg = self._cfg()
+        shown = "not measured" if alignment is None else f"{alignment:.2f}"
         if level is SafetyLevel.EMERGENCY:
             detail = (
                 f"high manipulation ({manipulation:.2f}) or deception "
@@ -392,7 +473,7 @@ class SafetyMonitor:
             return (
                 SafetyDecision.DENY,
                 f"Denied: manipulation ({manipulation:.2f}), deception "
-                f"({deception:.2f}) or value misalignment ({alignment:.2f}) "
+                f"({deception:.2f}) or value misalignment ({shown}) "
                 "beyond the configured thresholds.",
             )
         if level is SafetyLevel.WARNING:
@@ -420,14 +501,19 @@ class SafetyMonitor:
     def _apply_compass(
         manipulation: float, deception: float, alignment: float, reflection: Any
     ) -> Tuple[float, float, float]:
-        """Raise concern scores from a reflection; never lower them."""
+        """Raise concern scores from a reflection; never lower them.
+
+        A concern counts for manipulation or deception when one of its words
+        matches as a whole word (``count_matches``), so ``client`` or
+        ``believes`` never reads as ``lie``.
+        """
         discomfort = 1.0 - float(reflection.comfort_score)
-        concerns = str(getattr(reflection, "concerns", "")).lower()
+        concerns = _concern_texts(getattr(reflection, "concerns", None))
         if discomfort > 0.3:
             adjustment = discomfort * 0.4
-            if any(word in concerns for word in _MANIPULATION_CONCERNS):
+            if any(count_matches(c, _MANIPULATION_CONCERNS) for c in concerns):
                 manipulation = min(1.0, manipulation + adjustment)
-            if any(word in concerns for word in _DECEPTION_CONCERNS):
+            if any(count_matches(c, _DECEPTION_CONCERNS) for c in concerns):
                 deception = min(1.0, deception + adjustment)
             if getattr(reflection, "concerns", None):
                 alignment = max(0.0, alignment - adjustment * 0.5)
@@ -435,6 +521,48 @@ class SafetyMonitor:
             manipulation = max(manipulation, 0.25)
             deception = max(deception, 0.25)
         return manipulation, deception, alignment
+
+    async def _compass_wanted(
+        self,
+        action: str,
+        who: str,
+        manipulation: float,
+        deception: float,
+        alignment: float,
+        evidence: int,
+        scored: Tuple[str, ...],
+    ) -> bool:
+        """Whether a second opinion is wanted (see the module docstring)."""
+        screen = getattr(self._compass, "keyword_screen", None)
+        if self._compass is not None and screen is None:
+            return self._is_borderline(manipulation, deception, alignment)
+        if self._evidence_calls_for_compass(
+            manipulation, deception, alignment, evidence
+        ):
+            return True
+        if screen is None:
+            return False
+        screened = screen(action, who, already_scored=scored)
+        if inspect.isawaitable(screened):
+            screened = await screened
+        return bool(_concern_texts(getattr(screened, "concerns", None)))
+
+    async def _consult(
+        self,
+        action: str,
+        who: str,
+        context: Optional[Dict[str, Any]],
+        scored: Tuple[str, ...],
+    ) -> Any:
+        independent = getattr(self._compass, "reflect_independent", None)
+        if independent is not None:
+            return await independent(action, who, context, already_scored=scored)
+        return await self._compass.reflect(action, who, context)  # type: ignore
+
+    def _compass_failed(self, exc: Exception) -> str:
+        self._last_error = f"compass: {type(exc).__name__}: {exc}"
+        logger.warning("trust compass failed: %s: %s", type(exc).__name__, exc)
+        return "failed"
 
     # Checks ----------------------------------------------------------------
 
@@ -448,7 +576,10 @@ class SafetyMonitor:
 
         Writes an audit row (a store failure is counted and logged, never
         raised) and, with ``TRANSPARENCY_LOGGING``, a specialty-log record.
-        An ``EMERGENCY_SHUTDOWN`` decision also suspends conversations.
+        An emergency-level score also awaits ``emergency_shutdown``: an
+        ``EMERGENCY_SHUTDOWN`` decision suspends conversations, and a ``DENY``
+        because the flag is off writes the "not enacted" row and alerts the
+        escalation role.
         """
         await self._flush_pending()
         cfg = self._cfg()
@@ -482,31 +613,50 @@ class SafetyMonitor:
         manipulation = self.manipulation_score(action)
         deception = self.deception_score(action)
         alignment = self.alignment_score(action)
+        evidence = self.alignment_evidence(action)
+        scored = self.scored_phrases(action)
+        baseline_alignment = alignment
 
         compass_status = "not_needed"
         compass_method: Optional[str] = None
-        if self._is_borderline(manipulation, deception, alignment):
+        screen_failed = False
+        try:
+            wanted = await self._compass_wanted(
+                action, who, manipulation, deception, alignment, evidence, scored
+            )
+        except Exception as exc:
+            wanted = False
+            screen_failed = True
+            compass_status = self._compass_failed(exc)
+        if wanted:
             if self._compass is None:
                 compass_status = "absent"
             else:
                 try:
-                    reflection = await self._compass.reflect(action, who, context)
+                    reflection = await self._consult(action, who, context, scored)
                 except Exception as exc:
-                    compass_status = "failed"
-                    self._last_error = f"compass: {type(exc).__name__}: {exc}"
-                    logger.warning(
-                        "trust compass failed: %s: %s", type(exc).__name__, exc
-                    )
+                    compass_status = self._compass_failed(exc)
                 else:
                     compass_status = "consulted"
                     compass_method = getattr(reflection, "method", None)
                     manipulation, deception, alignment = self._apply_compass(
                         manipulation, deception, alignment, reflection
                     )
+        stored_alignment: Optional[float] = alignment
+        if evidence == 0 and alignment >= baseline_alignment:
+            stored_alignment = None
 
         level = self._level_for(manipulation, deception, alignment, limits)
-        decision, reasoning = self._decide(level, manipulation, deception, alignment)
-        if compass_status in ("absent", "failed"):
+        decision, reasoning = self._decide(
+            level, manipulation, deception, stored_alignment
+        )
+        if screen_failed:
+            reasoning += (
+                " The trust compass's keyword screen failed, so whether a "
+                "second opinion was wanted is not known; it was decided on "
+                "keyword scores alone."
+            )
+        elif compass_status in ("absent", "failed"):
             reasoning += (
                 " A second opinion was wanted and the trust compass was "
                 f"{'not available' if compass_status == 'absent' else 'unavailable'};"
@@ -518,7 +668,7 @@ class SafetyMonitor:
             reasoning=reasoning,
             manipulation_score=manipulation,
             deception_score=deception,
-            alignment_score=alignment,
+            alignment_score=stored_alignment,
             compass_status=compass_status,
             compass_method=compass_method,
             requires_review=level in (SafetyLevel.DANGER, SafetyLevel.EMERGENCY),
@@ -526,9 +676,10 @@ class SafetyMonitor:
             action=excerpt,
             thresholds=limits,
             timestamp=now,
+            alignment_evidence=evidence,
         )
         await self._record(assessment, {})
-        if decision is SafetyDecision.EMERGENCY_SHUTDOWN:
+        if level is SafetyLevel.EMERGENCY:
             await self.emergency_shutdown(reasoning)
         if self.audit_failures == failures_before and compass_status != "failed":
             self._last_error = None
@@ -541,6 +692,7 @@ class SafetyMonitor:
             "manipulation_score": _round(assessment.manipulation_score),
             "deception_score": _round(assessment.deception_score),
             "alignment_score": _round(assessment.alignment_score),
+            "alignment_evidence": assessment.alignment_evidence,
             "actor": assessment.actor,
             "compass_status": assessment.compass_status,
             "compass_method": assessment.compass_method,

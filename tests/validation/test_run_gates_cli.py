@@ -2,6 +2,8 @@
 
 import importlib.util
 import json
+import os
+import socket
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -14,6 +16,16 @@ from mtc.core.config import Settings
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "validation" / "run_gates.py"
+PREFIX = Settings.model_config["env_prefix"]
+LOOPBACK = "127.0.0.1"
+STORE_ENABLE_FIELDS = (
+    "POSTGRES_ENABLED",
+    "MONGODB_ENABLED",
+    "QDRANT_ENABLED",
+    "NEO4J_ENABLED",
+    "REDIS_ENABLED",
+)
+PROVIDER_KEY_VARIABLE = "ANTHROPIC_API_KEY"
 
 SPEC_YAML = """signal_id: cli_signal
 dimensions: [valence]
@@ -39,6 +51,58 @@ def cli(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(module, "get_settings", lambda: settings)
     return module
+
+
+def _unused_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind((LOOPBACK, 0))
+        return probe.getsockname()[1]
+
+
+def _child_env(tmp_path: Path) -> dict:
+    """The explicit environment of a child run, whatever the shell exports:
+    no inherited setting or provider key, the cpu device, the mock provider,
+    every store disabled, an unused API port and a temporary project root."""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(PREFIX) and key != PROVIDER_KEY_VARIABLE
+    }
+    env["PYPHI_WELCOME_OFF"] = "yes"
+    env[f"{PREFIX}DEVICE"] = "cpu"
+    env[f"{PREFIX}LLM_PROVIDER"] = "mock"
+    env[f"{PREFIX}PROJECT_ROOT"] = str(tmp_path)
+    for field in STORE_ENABLE_FIELDS:
+        env[f"{PREFIX}{field}"] = "false"
+    env[f"{PREFIX}API_PORT"] = str(_unused_port())
+    return env
+
+
+def test_child_env_is_explicit(monkeypatch, tmp_path):
+    defaults = Settings.model_fields
+    monkeypatch.setenv(f"{PREFIX}POSTGRES_ENABLED", "true")
+    monkeypatch.setenv(f"{PREFIX}LLM_PROVIDER", "local")
+    monkeypatch.setenv(f"{PREFIX}DEVICE", "mps")
+    monkeypatch.setenv(f"{PREFIX}RESULTS_DIR", "/elsewhere")
+    monkeypatch.setenv(PROVIDER_KEY_VARIABLE, "placeholder-not-a-key")
+    env = _child_env(tmp_path)
+    assert env[f"{PREFIX}DEVICE"] == "cpu"
+    assert env[f"{PREFIX}LLM_PROVIDER"] == "mock"
+    assert env["PYPHI_WELCOME_OFF"] == "yes"
+    assert env[f"{PREFIX}PROJECT_ROOT"] == str(tmp_path)
+    assert {env[f"{PREFIX}{field}"] for field in STORE_ENABLE_FIELDS} == {"false"}
+    # Every disabled key is a real Settings field (a renamed key would leave
+    # its store enabled by default in the child).
+    assert set(STORE_ENABLE_FIELDS) <= set(defaults)
+    port = int(env[f"{PREFIX}API_PORT"])
+    service_ports = {
+        int(field.default)
+        for name, field in defaults.items()
+        if name.endswith("_PORT") and isinstance(field.default, int)
+    }
+    assert port not in service_ports
+    assert PROVIDER_KEY_VARIABLE not in env
+    assert f"{PREFIX}RESULTS_DIR" not in env
 
 
 def _write_log(path: Path, values) -> Path:
@@ -115,7 +179,8 @@ def test_exit_code_nonzero_on_failure(cli, tmp_path, capsys):
     log = _write_log(tmp_path / "shadow" / "cli_signal.jsonl", [0.29] * 120)
     assert cli.main(["--spec", str(_spec(tmp_path))]) == 1
     assert "FAIL" in capsys.readouterr().out
-    # The script also runs standalone from the repository root.
+    # The script also runs standalone, by its path from any directory, with
+    # an explicit environment.
     proc = subprocess.run(
         [
             sys.executable,
@@ -129,7 +194,8 @@ def test_exit_code_nonzero_on_failure(cli, tmp_path, capsys):
         ],
         capture_output=True,
         text=True,
-        cwd=ROOT,
+        cwd=tmp_path,
+        env=_child_env(tmp_path),
         timeout=300,
     )
     assert proc.returncode == 1, proc.stderr
@@ -148,3 +214,20 @@ def test_missing_shadow_log_is_reported_not_passed(cli, tmp_path, capsys):
     broken = _write_log(tmp_path / "shadow" / "cli_signal.jsonl", _moving())
     broken.write_text(broken.read_text() + "not json\n")
     assert cli.main(["--spec", str(_spec(tmp_path))]) == 2
+
+
+def test_typo_in_gate_dimensions_exits_2(cli, tmp_path, capsys):
+    _write_log(tmp_path / "shadow" / "cli_signal.jsonl", _moving())
+    spec = tmp_path / "typo.yaml"
+    spec.write_text(
+        SPEC_YAML.replace(
+            "min_samples: 50", "min_samples: 50\n    dimensions: [Valence]"
+        ),
+        encoding="utf-8",
+    )
+    assert "dimensions: [Valence]" in spec.read_text(encoding="utf-8")
+    assert cli.main(["--spec", str(spec)]) == 2
+    out = capsys.readouterr().out
+    assert "OPERATIONAL ERROR" in out and "Valence" in out
+    assert "overall: PASS" not in out
+    assert not (tmp_path / "results").exists()

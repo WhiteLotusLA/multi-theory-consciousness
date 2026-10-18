@@ -11,6 +11,14 @@ How a verdict is reached:
 
 1. A ``content_type`` found in the content-type map decides alone, at
    confidence 0.95 (``DEFAULT_CONTENT_TYPE_MAP`` unless one is passed).
+
+   1b. With ``keywords_can_raise=True`` the keyword verdict of rules 2 and 3
+   is computed as well and the more protected of the two is returned: a
+   higher keyword tier carries its own confidence and a reason that names
+   both verdicts; otherwise the typed verdict is returned unchanged. Keywords
+   never lower a typed verdict. The safety integration classifies every
+   message this way, so a conversation message that holds private or core
+   terms is audited at that tier.
 2. Otherwise the text is matched against three keyword sets and the tags
    against three tag sets; the most protected tier with a match wins. The
    confidence is 0.6 plus 0.1 per match for core (at most 0.9), 0.5 plus 0.1
@@ -317,17 +325,42 @@ class DataClassifier:
         content: str,
         content_type: Optional[str] = None,
         tags: Optional[Sequence[str]] = None,
+        *,
+        keywords_can_raise: bool = False,
     ) -> ClassificationResult:
-        """Classify one piece of content (see the module docstring)."""
+        """Classify one piece of content (see the module docstring).
+
+        ``keywords_can_raise`` (rule 1b) lets the keyword verdict raise, never
+        lower, the verdict of a mapped content type.
+        """
         if content_type and content_type in self._content_types:
             tier = self._content_types[content_type]
-            return ClassificationResult(
+            typed = ClassificationResult(
                 classification=tier,
                 confidence=CONTENT_TYPE_CONFIDENCE,
                 matched={"core": [], "private": [], "relationship": []},
                 reason=f"content type {content_type!r} maps to {tier.value}",
             )
+            if not keywords_can_raise:
+                return typed
+            keyword = self._keyword_verdict(content, tags)
+            if keyword.classification <= tier:
+                return typed
+            return ClassificationResult(
+                classification=keyword.classification,
+                confidence=keyword.confidence,
+                matched=keyword.matched,
+                reason=(
+                    f"{typed.reason}; raised to {keyword.classification.value}: "
+                    f"{keyword.reason}"
+                ),
+            )
+        return self._keyword_verdict(content, tags)
 
+    def _keyword_verdict(
+        self, content: str, tags: Optional[Sequence[str]]
+    ) -> ClassificationResult:
+        """Rules 2 and 3 of the module docstring: keywords, tags, protection."""
         text = content or ""
         tag_set = {str(t).strip().lower() for t in (tags or ())}
         matched = {

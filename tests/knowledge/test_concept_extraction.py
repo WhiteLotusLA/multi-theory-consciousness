@@ -51,3 +51,27 @@ def test_satisfies_concept_matcher():
     extractor = create_concept_extractor()
     assert isinstance(extractor, ConceptMatcher)
     assert extractor.match_concepts(text="", known_concepts=[], fuzzy=True) == []
+
+
+def test_exact_match_needs_word_boundaries():
+    extractor = ConceptExtractor()
+    assert extractor.match_concepts("the start of the party", ["art"]) == []
+    assert extractor.match_concepts("art and more art", ["art"]) == [("art", 0.7)]
+    assert extractor.match_concepts("Art, then (art).", ["art"]) == [("art", 0.7)]
+    assert extractor.match_concepts(
+        "neural networks learn", ["neural networks"], fuzzy=False
+    ) == [("neural networks", 0.6)]
+
+
+def test_fuzzy_match_ignores_punctuation():
+    extractor = ConceptExtractor()
+    matches = extractor.match_concepts(
+        "I enjoy learning, slowly.", ["machine learning"]
+    )
+    assert matches == [("machine learning", 0.35)]
+    assert (
+        extractor.match_concepts(
+            "I enjoy learning, slowly.", ["machine learning"], fuzzy=False
+        )
+        == []
+    )

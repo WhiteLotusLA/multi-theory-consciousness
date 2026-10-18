@@ -412,6 +412,18 @@ async def test_metrics_report_hit_rate_and_errors(fake, settings):
 
 
 @pytest.mark.asyncio
+async def test_hit_rate_is_none_before_any_cache_read(fake, settings):
+    manager = _manager(fake, settings)
+    assert (await manager.get_metrics())["cache_hit_rate_percent"] is None
+    await manager.cache_set("k", 1)
+    assert (await manager.get_metrics())["cache_hit_rate_percent"] is None
+    await manager.cache_get("k")
+    assert (await manager.get_metrics())["cache_hit_rate_percent"] == pytest.approx(
+        100.0
+    )
+
+
+@pytest.mark.asyncio
 async def test_missing_redis_names_the_extra(settings, monkeypatch):
     monkeypatch.setitem(sys.modules, "redis", None)
     monkeypatch.setitem(sys.modules, "redis.asyncio", None)

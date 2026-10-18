@@ -367,3 +367,113 @@ def test_example_spec_is_runnable():
     assert not report.overall_pass  # no evidence is not a pass
     assert all("insufficient" in r.reason for r in report.results)
     assert EXAMPLE_SPEC.read_text().isascii()
+
+
+COUPLING = {
+    "feature_key": "feature",
+    "feature_name": "synthetic feature",
+    "min_abs_corr": 0.3,
+    "max_p": 0.05,
+    "seed": 1,
+    "n_permutations": 200,
+}
+
+
+def _uncoupled_records():
+    rng = np.random.default_rng(29)
+    signal = _moving()
+    return _records(signal, rng.normal(0, 1, signal.size))
+
+
+def _typo_spec():
+    return {
+        "signal_id": "synthetic_signal",
+        "dimensions": ["valence"],
+        "gates": {
+            "movement": MOVE,
+            "content_coupling": {**COUPLING, "dimensions": ["Valence"]},
+        },
+    }
+
+
+def test_filter_naming_an_unknown_dimension_is_an_error():
+    records = _uncoupled_records()
+    with pytest.raises(ValueError) as caught:
+        run_signal_gates(_typo_spec(), records, now=NOW)
+    message = str(caught.value)
+    assert "content_coupling" in message and "Valence" in message
+    # With the right name the claim is tested, and it fails on this data.
+    fixed = _typo_spec()
+    fixed["gates"]["content_coupling"]["dimensions"] = ["valence"]
+    report = run_signal_gates(fixed, records, now=NOW)
+    assert [(r.gate, r.passed) for r in report.results] == [
+        ("movement", True),
+        ("content_coupling", False),
+    ]
+    assert report.overall_pass is False
+
+
+def test_empty_filter_and_empty_dimensions_are_errors():
+    records = _records(_moving())
+    empty_filter = {
+        "signal_id": "s",
+        "dimensions": ["valence"],
+        "gates": {"movement": {**MOVE, "dimensions": []}},
+    }
+    with pytest.raises(ValueError, match="movement"):
+        run_signal_gates(empty_filter, records, now=NOW)
+    no_dimensions = {"signal_id": "s", "dimensions": [], "gates": {"movement": MOVE}}
+    with pytest.raises(ValueError, match="movement"):
+        run_signal_gates(no_dimensions, records, now=NOW)
+    # The null-beating gate needs no dimension and still runs once.
+    null_only = {
+        "signal_id": "s",
+        "dimensions": [],
+        "gates": {
+            "null_beating": {
+                "real_metric": 0.9,
+                "null_metrics": [0.1, 0.2, 0.3],
+                "metric_name": "m",
+            }
+        },
+    }
+    report = run_signal_gates(null_only, records, now=NOW)
+    assert [r.gate for r in report.results] == ["null_beating"]
+
+
+def test_every_configured_gate_has_a_result(monkeypatch):
+    signal = _moving()
+    rng = np.random.default_rng(13)
+    records = _records(signal, signal * 0.9 + rng.normal(0, 0.1, signal.size))
+    spec = {
+        "signal_id": "synthetic_signal",
+        "dimensions": ["valence", "arousal"],
+        "gates": {
+            "movement": {**MOVE, "dimensions": ["valence"]},
+            "range_honesty": {
+                "claimed_min": -1.0,
+                "claimed_max": 1.0,
+                "required_regions": [[-1.0, 0.0, "negative"], [0.0, 1.0, "positive"]],
+                "min_hits_per_region": 3,
+                "dimensions": ["valence"],
+            },
+            "content_coupling": {**COUPLING, "dimensions": ["valence"]},
+            "null_beating": {
+                "real_metric": 0.9,
+                "null_metrics": [0.1, 0.2, 0.3],
+                "metric_name": "m",
+            },
+        },
+    }
+    report = run_signal_gates(spec, records, now=NOW)
+    assert {r.gate for r in report.results} == set(spec["gates"])
+    # The second line of defence: with the filter check bypassed, a gate that
+    # ran nowhere is still reported, as a failure.
+    from mtc.validation import gates as gates_module
+
+    monkeypatch.setattr(gates_module, "_check_dimension_filters", lambda *a: None)
+    bypassed = run_signal_gates(_typo_spec(), _uncoupled_records(), now=NOW)
+    assert {r.gate for r in bypassed.results} == {"movement", "content_coupling"}
+    [missing] = [r for r in bypassed.results if r.gate == "content_coupling"]
+    assert missing.passed is False and "configured but not run" in missing.reason
+    assert bypassed.overall_pass is False

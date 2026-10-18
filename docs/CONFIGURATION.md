@@ -10,15 +10,11 @@ Every key is read through `get_settings()`. Values come from the process environ
 |---|---|---|
 | `MTC_SYSTEM_NAME` | `ConsciousnessAgent` |  |
 | `MTC_CREATOR_NAME` | `Creator` |  |
-| `MTC_SERVICE_HOST` | `localhost` |  |
-| `MTC_ENVIRONMENT` | `development` |  |
 | `MTC_DEBUG` | `false` |  |
 | `MTC_LOG_LEVEL` | `INFO` |  |
 | `MTC_LOG_DIRECTORY` | `./logs` |  |
 | `MTC_PROJECT_ROOT` | `(empty)` | Project root; empty derives the working directory |
-| `MTC_MODEL_DIRECTORY` | `./models` |  |
 | `MTC_DATA_DIRECTORY` | `./data` |  |
-| `MTC_TEMP_DIRECTORY` | `/tmp` |  |
 | `MTC_LOG_FORMAT` | `json` |  |
 | `MTC_LOG_ROTATION_SIZE_MB` | `100` |  |
 | `MTC_LOG_ROTATION_BACKUPS` | `5` |  |
@@ -69,7 +65,6 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_DB_POOL_TIMEOUT` | `30` |  |
 | `MTC_DB_POOL_COMMAND_TIMEOUT` | `10` |  |
 | `MTC_DB_POOL_IDLE_TIMEOUT` | `300` |  |
-| `MTC_DB_POOL_RECYCLE_TIME` | `3600` |  |
 | `MTC_MONGODB_HOST` | `localhost` |  |
 | `MTC_MONGODB_PORT` | `27017` |  |
 | `MTC_MONGODB_DB` | `(empty)` | MongoDB database; empty derives <DB_PREFIX>_neural |
@@ -114,7 +109,6 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_LLM_EXTRA_BODY` | `{}` | JSON object merged last into every local request body, for server-specific fields; empty means none |
 | `MTC_LLM_BACKEND` | `(empty)` | Model server scripts/ops/start_llm.sh launches: mlx_lm, llama_cpp, or empty when the operator runs the server another way |
 | `MTC_MODEL_PATH` | `./models/default` |  |
-| `MTC_MODEL_QUANTIZATION` | `(empty)` |  |
 | `MTC_CONTEXT_SIZE` | `32768` | Context window in tokens the model server is started with and the brain's history budget stays inside; a larger window allocates a larger key-value cache |
 | `MTC_BATCH_SIZE` | `512` |  |
 | `MTC_TEMPERATURE` | `0.6` |  |
@@ -129,7 +123,7 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_USE_MLOCK` | `false` | Pin the whole model in memory (mlock); fails unless the operating system's memory-lock limit is raised |
 | `ANTHROPIC_API_KEY` | `(empty)` | Optional; enables the Anthropic provider and DCM evaluator mode |
 | `MTC_ANTHROPIC_MODEL` | `(empty)` | Anthropic model id for the DCM evaluator's claude mode and the Anthropic provider; empty disables claude mode |
-| `MTC_ANTHROPIC_MAX_TOKENS` | `8192` | Default completion budget for the Anthropic provider |
+| `MTC_ANTHROPIC_MAX_TOKENS` | `8192` | Completion budget of a direct provider call to the Anthropic provider that sets none; conversation turns use LLM_MAX_TOKENS |
 | `MTC_ANTHROPIC_THINKING_BUDGET` | `0` | 0 asks for adaptive thinking when a caller wants reasoning; a positive value sends a fixed thinking budget, only for models that still accept one, at least 1024 and below ANTHROPIC_MAX_TOKENS |
 | `MTC_ANTHROPIC_SAMPLING_ENABLED` | `false` | Send temperature (or top_p, never both) and top_k to Anthropic; current models reject sampling parameters, so leave false unless the configured model accepts them |
 
@@ -142,7 +136,6 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_THINKING_LOOP_MAX_RETRIES` | `2` | Retries after a detected thinking loop, each with a raised penalty; when they run out the turn has no answer |
 | `MTC_THINKING_LOOP_PENALTY_STEP` | `0.2` | Amount the template family's penalty field rises on each thinking-loop retry |
 | `MTC_PROVIDER_STATE_PATH` | `(empty)` | File recording the active provider id for status and the CLI; empty derives <DATA_DIRECTORY>/provider_state.json |
-| `MTC_VISION_ENABLED` | `false` | Vision input is not part of this release; true is refused |
 | `MTC_HISTORY_TOKEN_BUDGET` | `6000` | Token budget for conversation history in one prompt; the brain also keeps history inside CONTEXT_SIZE less the reply and system prompt |
 | `MTC_CHARS_PER_TOKEN` | `3.5` | Characters per token for the conservative token estimate |
 | `MTC_PROMPT_MAX_THOUGHTS` | `5` | Most recent thoughts the prompt shows |
@@ -175,8 +168,9 @@ Every key is read through `get_settings()`. Values come from the process environ
 |---|---|---|
 | `MTC_PIPELINE_PRESET` | `(empty)` | Preset name under experiments/presets applied to the live workspace and cycle switches (for example legacy_v04); empty uses the live defaults |
 | `MTC_SLEEP_SCHEDULER_ENABLED` | `true` | Run the sleep scheduler (naps, night sleep, dreams) as a background task |
+| `MTC_SLEEP_PRUNE_DRY_RUN` | `false` | Night sleep reports what the memory pruner would remove without deleting it; false (the default) deletes the memories the pruner scores as weak |
 | `MTC_AUTONOMOUS_LIFE_ENABLED` | `false` | Run the autonomous-life loop between conversations |
-| `MTC_PHI_IDLE_SAMPLE_S` | `0.0` | Seconds between idle samples of the last state into the PhiTracker between turns; 0 disables the sampler |
+| `MTC_PHI_IDLE_SAMPLE_S` | `0.0` | Seconds between idle samples of the last state into the PhiTracker between turns; 0 disables the sampler; idle samples repeat the last state, so they add transitions that carry no module dynamics and pull the proxy toward its floor |
 | `MTC_SELF_ASSESSMENT_INTERVAL_S` | `0.0` | Seconds between self-assessment round trips through the brain, compared with the latest baseline; 0 disables them |
 | `MTC_THINKING_HEARTBEAT_S` | `15.0` | Seconds of silence between the API's thinking heartbeats while a turn generates |
 
@@ -185,13 +179,6 @@ Every key is read through `get_settings()`. Values come from the process environ
 | Variable | Default | Description |
 |---|---|---|
 | `MTC_DEVICE` | `auto` | Compute device for every torch and encoder module: auto (MPS, then CUDA, then CPU), cpu, mps or cuda; an explicit device that is unavailable raises instead of falling back |
-| `MTC_SNN_NEURONS` | `50` |  |
-| `MTC_SNN_HIDDEN_NEURONS` | `50` |  |
-| `MTC_SNN_INPUT_NEURONS` | `100` |  |
-| `MTC_SNN_OUTPUT_NEURONS` | `50` |  |
-| `MTC_LSM_NEURONS` | `2000` |  |
-| `MTC_LSM_SPECTRAL_RADIUS` | `0.95` |  |
-| `MTC_LSM_INPUT_SCALING` | `0.1` |  |
 | `MTC_HTM_COLUMNS` | `4096` |  |
 | `MTC_HTM_CELLS_PER_COLUMN` | `32` |  |
 
@@ -212,27 +199,6 @@ Every key is read through `get_settings()`. Values come from the process environ
 
 | Variable | Default | Description |
 |---|---|---|
-| `MTC_CONSCIOUSNESS_CYCLE_MS` | `150` |  |
-| `MTC_CONSCIOUSNESS_ENABLED` | `true` |  |
-| `MTC_META_COGNITION_ENABLED` | `true` |  |
-| `MTC_SELF_REFLECTION_ENABLED` | `true` |  |
-| `MTC_GWT_BROADCAST_THRESHOLD` | `0.5` |  |
-| `MTC_GWT_IGNITION_THRESHOLD` | `0.4` |  |
-| `MTC_GWT_WORKSPACE_CAPACITY` | `7` |  |
-| `MTC_AST_ATTENTION_THRESHOLD` | `0.5` |  |
-| `MTC_AST_CONTROL_THRESHOLD` | `0.4` |  |
-| `MTC_HOT_REPRESENTATION_THRESHOLD` | `0.5` |  |
-| `MTC_HOT_METACOGNITION_THRESHOLD` | `0.4` |  |
-| `MTC_FEP_PREDICTION_ERROR_THRESHOLD` | `0.4` |  |
-| `MTC_FEP_HIERARCHICAL_THRESHOLD` | `0.4` |  |
-| `MTC_FEP_AGENCY_THRESHOLD` | `0.5` |  |
-| `MTC_IIT_PHI_THRESHOLD` | `0.3` |  |
-| `MTC_IIT_IRREDUCIBILITY_THRESHOLD` | `0.4` |  |
-| `MTC_RPT_LOCAL_THRESHOLD` | `0.3` |  |
-| `MTC_RPT_GLOBAL_THRESHOLD` | `0.4` |  |
-| `MTC_BLT_BINDING_THRESHOLD` | `0.3` |  |
-| `MTC_BLT_DEPTH_THRESHOLD` | `0.3` |  |
-| `MTC_BLT_GENUINE_THRESHOLD` | `0.4` |  |
 | `MTC_ATTENTION_GRAB_NOTICING_ENABLED` | `false` | Record captured and emotional attention shifts in the attention-capture journal |
 
 ## Continuous thought
@@ -253,25 +219,16 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_ASSESSMENT_OUTPUT_DIR` | `results/consciousness_assessments` |  |
 | `MTC_ABLATION_OUTPUT_DIR` | `results/ablation_studies` |  |
 | `MTC_LONGITUDINAL_OUTPUT_DIR` | `results/longitudinal_studies` |  |
-| `MTC_CONSCIOUSNESS_SCORE_THRESHOLD` | `0.5` |  |
-| `MTC_CONSCIOUSNESS_PASSING_RATIO` | `0.5` |  |
-| `MTC_NOISE_BASELINE_ITERATIONS` | `10` |  |
-| `MTC_NOISE_FLAG_THRESHOLD` | `0.3` |  |
-| `MTC_TRACK_INDICATORS` | `true` |  |
 | `MTC_METRICS_UPDATE_INTERVAL` | `60` |  |
 | `MTC_DCM_API_URL` | `https://dcm.rethinkpriorities.org/schemes/133/json` | Digital Consciousness Model scheme JSON |
 | `MTC_DCM_CACHE_DIR` | `data/dcm_cache` | Cache directory for the fetched DCM scheme and evaluator results, created on first write; the bundled spec and baselines are shipped data read from data/dcm or the package |
 | `MTC_DCM_EVALUATOR_MODE` | `local` | DCM evaluator: local (chat-completions server), claude (Anthropic API) or manual |
-| `MTC_METRICS_EXPORT_INTERVAL` | `30` |  |
 
 ## Memory
 
 | Variable | Default | Description |
 |---|---|---|
 | `MTC_WORKING_MEMORY_CAPACITY` | `7` |  |
-| `MTC_WORKING_MEMORY_DURATION` | `30` |  |
-| `MTC_EPISODIC_MEMORY_RETENTION` | `90` |  |
-| `MTC_SEMANTIC_MEMORY_PERMANENT` | `true` |  |
 | `MTC_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Sentence-transformers model the embedder loads; its output width must equal VECTOR_DIMENSIONS |
 | `MTC_RELATIONSHIP_KEYWORDS` | `family,friend,parent,mother,father,sibling,sister,brother,partner,spouse,child,daughter,son,grandparent,pet` | Comma-separated whole words the consolidation pipeline and the data classifier read as relationship mentions |
 | `MTC_RAG_TOP_K` | `10` | Memories the pipeline's retrieval asks the memory manager for |
@@ -290,14 +247,9 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_EXTRAVERSION` | `0.6` |  |
 | `MTC_AGREEABLENESS` | `0.7` |  |
 | `MTC_NEUROTICISM` | `0.3` |  |
-| `MTC_EMOTIONAL_MODEL` | `dimensional` |  |
-| `MTC_EMOTION_DECAY_RATE` | `0.1` |  |
-| `MTC_EMOTION_AMPLIFICATION_MAX` | `1.0` |  |
-| `MTC_EMOTIONAL_MEMORY_WEIGHT` | `0.3` |  |
 | `MTC_LEARNING_ENABLED` | `true` |  |
 | `MTC_LEARNING_RATE` | `0.02` |  |
 | `MTC_NOVELTY_THRESHOLD` | `0.7` |  |
-| `MTC_PATTERN_RECOGNITION_ENABLED` | `true` |  |
 
 ## Safety and API
 
@@ -305,8 +257,10 @@ Every key is read through `get_settings()`. Values come from the process environ
 |---|---|---|
 | `MTC_SAFETY_MODE` | `strict` |  |
 | `MTC_CONSENT_REQUIRED` | `true` |  |
-| `MTC_EMERGENCY_SHUTDOWN_ENABLED` | `true` |  |
+| `MTC_EMERGENCY_SHUTDOWN_ENABLED` | `false` | True suspends every untrusted conversation on an emergency-level safety score until the escalation role resumes them; false (the default) denies the message and alerts the escalation role |
 | `MTC_TRANSPARENCY_LOGGING` | `true` |  |
+| `MTC_SAFETY_GATE_FAIL_CLOSED` | `true` | When the safety check cannot run for an untrusted speaker, the turn record says unchecked either way; true then ends the turn with safety_unavailable and stores nothing, false processes the message; a trusted speaker bypasses the gate |
+| `MTC_TRUST_COMPASS_DEEP_MODE` | `true` | Let the trust compass ask the brain for a reflection when its keyword screen or the safety monitor's scores call for one; false keeps the compass in keyword mode with no model call |
 | `MTC_SAFETY_ESCALATION_ROLE` | `operator` | Role label (never a person's name) the safety monitor and the trust compass name when a matter needs a human: escalation text, secrecy phrases and resume authority |
 | `MTC_MANIPULATION_THRESHOLD` | `0.7` | Manipulation score in [0, 1] at or above which the safety monitor treats an action as manipulative |
 | `MTC_DECEPTION_THRESHOLD` | `0.8` | Deception score in [0, 1] at or above which the safety monitor treats an action as deceptive |
@@ -320,8 +274,6 @@ Every key is read through `get_settings()`. Values come from the process environ
 | `MTC_WEBSOCKET_ENABLED` | `true` |  |
 | `MTC_WEBSOCKET_PING_INTERVAL` | `30` |  |
 | `MTC_WEBSOCKET_PING_TIMEOUT` | `10` |  |
-| `MTC_PROMETHEUS_ENABLED` | `false` |  |
-| `MTC_PROMETHEUS_PORT` | `9090` |  |
 
 ## Operations
 

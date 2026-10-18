@@ -3,7 +3,12 @@
 from pathlib import Path
 
 from mtc.core.config import Settings
-from mtc.core.env_example import render_configuration_md, render_env_example
+from mtc.core.env_example import (
+    SECTIONS,
+    _section_for,
+    render_configuration_md,
+    render_env_example,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -29,6 +34,18 @@ def test_every_rendered_key_is_a_settings_field():
     for key in keys:
         name = key[len("MTC_") :] if key.startswith("MTC_") else key
         assert name in fields, key
+
+
+def test_every_section_prefix_names_a_field():
+    # A removed key leaves no stale prefix behind in the section table.
+    fields = list(Settings.model_fields)
+    for title, prefixes in SECTIONS:
+        for prefix in prefixes:
+            assert any(
+                _section_for(name) == title
+                and (name == prefix or name.startswith(prefix))
+                for name in fields
+            ), (title, prefix)
 
 
 def test_secrets_render_empty():

@@ -62,6 +62,29 @@ async def test_classify_audits_the_event(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_classify_data_passes_keywords_can_raise(tmp_path):
+    system = _system(tmp_path)
+    content = "my brother told me a secret"
+    typed = await system.classify_data(content, content_type="conversation")
+    assert typed is DC.RELATIONSHIP
+    raised = await system.classify_data(
+        content, content_type="conversation", keywords_can_raise=True
+    )
+    assert raised is DC.PRIVATE
+    events = [
+        e
+        for e in system.auditor.events_for_user("system")
+        if e.event_type is EventType.DATA_CLASSIFIED
+    ]
+    assert [e.data_classification for e in events] == [DC.RELATIONSHIP, DC.PRIVATE]
+    assert "raised to private" in events[-1].metadata["reason"]
+    assert system.classify(
+        content, "conversation", keywords_can_raise=True
+    ).classification is (DC.PRIVATE)
+    assert system.auditor.event_count() == 2
+
+
+@pytest.mark.asyncio
 async def test_check_access_maps_role_strings(tmp_path):
     system = _system(tmp_path, day=1100)  # stage 3
     allowed, reason = await system.check_access("Operator", "creator", DC.RELATIONSHIP)

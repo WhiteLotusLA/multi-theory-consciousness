@@ -324,11 +324,36 @@ def test_process_llm_extraction_maps_categories(settings):
     assert merged["curiosity"]["category"] == "emotion"
     assert merged["odd"]["category"] == "general"
     assert merged["river"]["importance"] == 0.9
-    assert merged["odd"]["importance"] == Concept.model_fields["importance"].default
+    assert "importance" not in merged["odd"]
     assert stats["concepts_created"] == 2 and stats["concepts_found"] == 1
     assert stats["memory_linked"] is True and stats["status"] == "measured"
     links = [p for q, p, _ in driver.calls if "REFERENCES_IN" in q]
     assert {p["link_props"]["extraction_method"] for p in links} == {"llm"}
+
+
+def test_llm_extraction_writes_no_importance_without_relevance(settings):
+    merges: List[Dict[str, Any]] = []
+
+    def handler(query, params):
+        if "MERGE (c:Concept {name: $name})" in query:
+            merges.append(params)
+            return [{"created": True}]
+        if "REFERENCES_IN" in query:
+            return [{"linked": 1}]
+        return []
+
+    manager, _ = _manager(settings, handler)
+    extraction = ConceptExtraction(
+        concepts=[
+            ExtractedConcept("lantern", "object", None),
+            ExtractedConcept("harbour", "place", 0.8),
+        ],
+        status="measured",
+    )
+    manager.process_llm_extraction(extraction, 7, memory_content="text")
+    props = {params["name"]: params["props"] for params in merges}
+    assert "importance" not in props["lantern"]
+    assert props["harbour"]["importance"] == pytest.approx(0.8)
 
 
 def test_process_llm_extraction_relationships_need_existing_people(settings):

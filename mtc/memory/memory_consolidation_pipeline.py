@@ -16,12 +16,19 @@ systems consolidation model (Born and Wilhelm, 2012):
   checked for protection, and each unprotected cluster becomes a
   ``ThoughtGist`` summarised by the brain (``run_thought_consolidation``).
   A cluster whose thoughts carry no numeric emotion score gets
-  ``dominant_emotion`` None and no emotional arc, and its prompt says no
-  emotion was measured. Gists go to the ``ThoughtGistStore`` and are embedded
-  in the vector store with payload type ``gist``.
+  ``dominant_emotion`` None and no emotional arc, its prompt says no emotion
+  was measured, and its vector point carries ``emotional_weight`` None. A
+  cluster without salience values gets ``avg_salience`` None. A new gist's
+  retention is computed at creation (age zero). Gists go to the
+  ``ThoughtGistStore`` and are embedded in the vector store with payload type
+  ``gist``.
 - Retention: the forgetting curve for memories and gists (true half-lives
   ``memory_half_life_days`` and ``gist_half_life_days``), the gist lifecycle
-  classes, conflict resolution and connection strengthening.
+  classes, conflict resolution and connection strengthening. The refresh pass
+  walks every stored gist through ``ThoughtGistStore.iter_gists``, so a gist
+  stored without a retention gets one on the next pass.
+- A memory row without a numeric emotional context has ``emotional_intensity``
+  None; strategy selection averages the measured intensities only.
 
 The brain is reached only through ``BrainProtocol``. Without a brain every
 model step is skipped and the report says so; ``NoAnswerError`` or an empty
@@ -207,6 +214,10 @@ def _as_utc(value: Any) -> Optional[datetime]:
     if value.tzinfo is None or value.utcoffset() is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _numeric_values(context: Any) -> List[float]:
@@ -477,13 +488,25 @@ class MemoryConsolidationPipeline:
 
     def select_strategy(self, memories: List[Dict[str, Any]]) -> ConsolidationStrategy:
         """High emotion: sleep consolidation; high repetition: active rehearsal;
-        otherwise spaced repetition."""
+        otherwise spaced repetition.
+
+        The emotion test averages the memories whose ``emotional_intensity``
+        is a number; a memory without one is left out, not read as 0.
+        """
         if not memories:
             return ConsolidationStrategy.SLEEP_CONSOLIDATION
         intensities = [
-            float(m.get("emotional_intensity", 0.0) or 0.0) for m in memories
+            float(m["emotional_intensity"])
+            for m in memories
+            if _is_number(m.get("emotional_intensity"))
         ]
-        if sum(intensities) / len(intensities) > self.config.strategy_emotion_threshold:
+        # The mean of the measured intensities only; with none measured the
+        # emotion test does not pass.
+        if (
+            intensities
+            and sum(intensities) / len(intensities)
+            > self.config.strategy_emotion_threshold
+        ):
             return ConsolidationStrategy.SLEEP_CONSOLIDATION
         repetitions = [float(m.get("repetitions", 0) or 0) for m in memories]
         if (
@@ -611,7 +634,11 @@ class MemoryConsolidationPipeline:
         return connections
 
     def _as_pipeline_memory(self, row: Mapping[str, Any]) -> Dict[str, Any]:
-        """Turn a memory manager row (importance 0 to 10) into a pipeline memory."""
+        """Turn a memory manager row (importance 0 to 10) into a pipeline memory.
+
+        ``emotional_intensity`` is the largest numeric value of the row's
+        emotional context clamped to [0, 1], or None when it holds no number.
+        """
         context = row.get("emotional_context") or {}
         values = _numeric_values(context)
         memory = dict(row)
@@ -620,7 +647,7 @@ class MemoryConsolidationPipeline:
         memory["importance"] = float(row.get("importance", 0.0) or 0.0) / 10.0
         memory["access_count"] = int(row.get("accessed_count", 0) or 0)
         memory.setdefault(
-            "emotional_intensity", max(0.0, min(1.0, max(values))) if values else 0.0
+            "emotional_intensity", max(0.0, min(1.0, max(values))) if values else None
         )
         for key in ("tags", "participants"):
             if key not in memory and isinstance(context, Mapping):
@@ -803,7 +830,10 @@ class MemoryConsolidationPipeline:
         The conversation term is 1 when a thought id names a conversation or
         the representative mentions a relationship keyword as a whole word.
         The expression term is the fraction of the cluster's thoughts marked
-        ``expressed`` (0 when none carries the mark).
+        ``expressed`` (0 when none carries the mark). The emotion term is the
+        largest numeric emotion value of the cluster clamped to [0, 1], and 0
+        when no context holds a number: the score is a documented weighted
+        sum, so an absent term contributes nothing.
         """
         cfg = self.config
         emotions = [
@@ -863,7 +893,12 @@ class MemoryConsolidationPipeline:
         contexts: Sequence[Any],
     ) -> Tuple[Optional[str], Dict[str, Any]]:
         """The dominant emotion and its arc, or ``(None, {})`` when no context
-        carries a numeric score: no mood is assumed for unmeasured thoughts."""
+        carries a numeric score: no mood is assumed for unmeasured thoughts.
+
+        The start and end intensities average the first and the last three
+        contexts that carry a numeric value for the dominant emotion; a
+        context without it is left out, not read as 0.
+        """
         sums: Dict[str, float] = {}
         for ctx in contexts:
             if isinstance(ctx, Mapping):
@@ -873,9 +908,13 @@ class MemoryConsolidationPipeline:
         if not sums:
             return None, {}
         dominant = max(sums, key=sums.get)
-        dicts = [c for c in contexts if isinstance(c, Mapping)]
-        start = [float(c.get(dominant, 0.0) or 0.0) for c in dicts[:3]]
-        end = [float(c.get(dominant, 0.0) or 0.0) for c in dicts[-3:]]
+        carrying = [
+            float(c[dominant])
+            for c in contexts
+            if isinstance(c, Mapping) and _is_number(c.get(dominant))
+        ]
+        start = carrying[:3]
+        end = carrying[-3:]
         start_avg = sum(start) / len(start) if start else 0.0
         end_avg = sum(end) / len(end) if end else 0.0
         if end_avg > start_avg + 0.1:
@@ -968,7 +1007,7 @@ class MemoryConsolidationPipeline:
             emotional_arc=arc,
             time_span=time_span,
             burst_windows=bursts,
-            avg_salience=sum(salience) / len(salience) if salience else 0.0,
+            avg_salience=sum(salience) / len(salience) if salience else None,
             total_access_count=0,
             content_variations=variations[: self.config.max_variations],
             importance_score=self.score_cluster_importance(
@@ -979,6 +1018,8 @@ class MemoryConsolidationPipeline:
         if protected:
             gist.is_protected = True
             gist.protection_reason = reason
+        # Retention at age zero, computed by the forgetting curve, not a default.
+        gist.retention_strength = self.compute_gist_retention(gist, gist.created_at)
         return gist, None
 
     async def generate_gist(
@@ -1082,7 +1123,7 @@ class MemoryConsolidationPipeline:
                         "importance_score": gist.importance_score,
                     },
                     importance=gist.importance_score,
-                    emotional_weight=max(emotions) if emotions else 0.0,
+                    emotional_weight=max(emotions) if emotions else None,
                 )
                 report.gists_embedded += 1
             except Exception as exc:  # noqa: BLE001 - embedding is optional
@@ -1178,19 +1219,22 @@ class MemoryConsolidationPipeline:
             return "fading"
         return "expired"
 
-    async def refresh_gist_retention(self, limit: int = 500) -> int:
-        """Recompute and store ``retention_strength`` for stored gists.
+    async def refresh_gist_retention(self, batch: int = 500) -> int:
+        """Recompute and store ``retention_strength`` for every stored gist.
 
-        The retention store expires gists by this stored value, so the pass
-        runs before pruning. Returns the gists updated; a gist whose age is
-        unknown keeps its stored value and is counted in ``status()``.
+        The pass walks ``ThoughtGistStore.iter_gists`` (``batch`` gists per
+        read), never ``active_gists``: a gist stored without a retention is
+        never returned under a floor, so only a walk over every gist can
+        compute it. The retention store expires gists by this stored value, so
+        the pass runs before pruning. Returns the gists updated; a gist whose
+        age is unknown keeps its stored value and is counted in ``status()``.
         """
         if self.gist_store is None:
             return 0
         now = self._now()
         updated = 0
         self.last_unmeasured_gists = 0
-        for gist in await self.gist_store.active_gists(min_retention=0.0, limit=limit):
+        async for gist in self.gist_store.iter_gists(batch=batch):
             retention = self.compute_gist_retention(gist, now)
             if retention is None:
                 self.last_unmeasured_gists += 1

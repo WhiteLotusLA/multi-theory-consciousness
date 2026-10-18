@@ -15,7 +15,7 @@ store for its own kind. A persistent factory asked for an item cap skips.
 
 import asyncio
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Optional
 
@@ -234,6 +234,22 @@ async def test_round_trip_per_store(make_store):
     dreams = make_store("dream")
     await dreams.add_dream({"text": "d"})
     assert (await dreams.recent_dreams(5))[0]["text"] == "d"
+
+
+@pytest.mark.asyncio
+async def test_insufficient_data_snapshot_keeps_an_integer_passing_count(make_store):
+    snaps = make_store("snapshot")
+    record = replace(
+        _snapshot(0, score=None),
+        passing_count=0,
+        status="insufficient_data",
+        coverage=None,
+        theory_scores={},
+    )
+    await snaps.add_snapshot(record)
+    latest = await snaps.latest_snapshot()
+    assert latest.overall_score is None and latest.status == "insufficient_data"
+    assert latest.passing_count == 0 and isinstance(latest.passing_count, int)
 
 
 @pytest.mark.asyncio
