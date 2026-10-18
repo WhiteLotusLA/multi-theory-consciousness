@@ -1,20 +1,20 @@
 Overrides: {'fep': {'planning_horizon': 10, 'num_actions': 2, 'num_hidden_states': 2, 'learning_rate_A': 0.3, 'learning_rate_B': 0.15}, 'blt': {'field_evidencing_threshold': 0.3}}
 Computing noise baseline...
 ---
-overall_score:     0.021675
-passing_count:     1
+overall_score:     0.017317
+passing_count:     0
 total_indicators:  30
-assessment_status: measured
-coverage:          1.000
+assessment_status: partial
+coverage:          0.800
 phi_source_used:   phi_tracker_iit4
-ae_score:           0.000000
+ae_score:           0.002917
 ast_score:          0.000000
 blt_score:          0.000000
-fep_score:          0.081411
+fep_score:          0.042338
 gwt_score:          0.000000
 hot_score:          0.000000
-iit_score:          0.026167
-rpt_score:          0.005109
-processing_ms:     170.7
+iit_score:          0.034115
+rpt_score:          0.008566
+processing_ms:     1789.9
 warmup_cycles:     25
-total_seconds:     87.4
+total_seconds:     92.5

@@ -1,28 +1,31 @@
 {
-  "session_id": "fbafb038",
-  "timestamp": "2026-10-05T05:48:22.878055",
-  "overall_score": 0.380308480434173,
+  "session_id": "8c32dfd3",
+  "timestamp": "2026-10-18T01:18:42.991884",
+  "overall_score": 0.275203096148249,
   "status": "partial",
-  "coverage": 0.6333333333333333,
+  "coverage": 0.5333333333333333,
   "insufficient_indicators": [
+    "global_broadcast",
+    "ignition_dynamics",
+    "global_ignition_nuanced",
+    "attention_schema",
     "prediction_error_minimization",
     "integrated_information",
-    "bayesian_binding_quality",
-    "epistemic_depth",
-    "genuine_implementation"
+    "recurrent_processing",
+    "bayesian_binding_quality"
   ],
   "architecture_functional": false,
-  "confidence": 0.3365,
-  "passing_count": 14,
+  "confidence": 0.295,
+  "passing_count": 11,
   "total_indicators": 30,
   "theory_scores": {
-    "GWT": 0.5372274750050667,
-    "AST": 0.27973949086021477,
-    "HOT": 0.7175879036082303,
-    "FEP": 0.3356511260433237,
-    "IIT": 0.0,
-    "RPT": 0.225109458011921,
-    "AE": 0.15705637628968908
+    "AST": 0.4492724170303527,
+    "HOT": 0.6283168214414684,
+    "FEP": 0.24730317778977215,
+    "RPT": 0.0983298662206521,
+    "AE": 0.15241279777610828,
+    "BLT": 0.5000968076650132,
+    "GWT": 0.1891463218406756
   },
   "negative_indicators": {
     "purely_reactive": {
@@ -46,82 +49,58 @@
     "global_broadcast": {
       "name": "global_broadcast",
       "theory": "Global Workspace Theory",
-      "status": "measured",
-      "score": 1.0,
-      "confidence": 0.4,
+      "status": "insufficient_data",
+      "score": null,
+      "confidence": 0.0,
       "threshold": 0.5,
-      "passes_threshold": true,
+      "passes_threshold": false,
       "evidence": {
-        "broadcasts": 3,
-        "coverage": 1.0,
-        "module_active": true,
-        "status": "measured",
-        "raw_score": 1.0,
-        "noise_baseline": 0.16458540168129115,
-        "noise_saturated": false
+        "missing": "global_workspace.broadcast.coverage_ratio",
+        "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.08702278137207031
+      "measurement_time_ms": 0.11110305786132812
     },
     "ignition_dynamics": {
       "name": "ignition_dynamics",
       "theory": "Global Workspace Theory",
-      "status": "measured",
-      "score": 0.626436846554945,
-      "confidence": 0.4,
+      "status": "insufficient_data",
+      "score": null,
+      "confidence": 0.0,
       "threshold": 0.4,
-      "passes_threshold": true,
+      "passes_threshold": false,
       "evidence": {
-        "ignitions": 3,
-        "ignition_rate": 0.6,
-        "sustain_rate": 1.0,
-        "module_active": true,
-        "status": "measured",
-        "raw_score": 0.76,
-        "noise_baseline": 0.3575383498434354,
-        "noise_saturated": false
+        "missing": "global_workspace.ignition.sustain_rate",
+        "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.0457763671875
+      "measurement_time_ms": 0.047206878662109375
     },
     "global_ignition_nuanced": {
       "name": "global_ignition_nuanced",
       "theory": "Global Workspace Theory",
-      "status": "measured",
-      "score": 0.7242842541903236,
-      "confidence": 0.4,
+      "status": "insufficient_data",
+      "score": null,
+      "confidence": 0.0,
       "threshold": 0.4,
-      "passes_threshold": true,
+      "passes_threshold": false,
       "evidence": {
-        "ignitions": 3,
-        "sustain_rate": 1.0,
-        "decay_measure": null,
-        "module_active": true,
-        "status": "measured",
-        "raw_score": 0.8,
-        "noise_baseline": 0.2746152403712997,
-        "noise_saturated": false
+        "missing": "global_workspace.ignition.sustain_rate",
+        "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.03314018249511719
+      "measurement_time_ms": 0.032901763916015625
     },
     "attention_schema": {
       "name": "attention_schema",
       "theory": "Attention Schema Theory",
-      "status": "measured",
-      "score": 0.11020656469007681,
-      "confidence": 0.62,
+      "status": "insufficient_data",
+      "score": null,
+      "confidence": 0.0,
       "threshold": 0.5,
       "passes_threshold": false,
       "evidence": {
-        "has_focus": true,
-        "total_updates": 2,
-        "history_length": 2,
-        "prediction_accuracy": 0.0,
-        "module_active": true,
-        "status": "measured",
-        "raw_score": 0.22733333333333333,
-        "noise_baseline": 0.1316336623707054,
-        "noise_saturated": false
+        "missing": "attention_schema.prediction_accuracy",
+        "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.009775161743164062
+      "measurement_time_ms": 0.007867813110351562
     },
     "attention_control": {
       "name": "attention_control",
@@ -140,7 +119,7 @@
         "noise_baseline": 0.09211011857461857,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.0040531158447265625
+      "measurement_time_ms": 0.0059604644775390625
     },
     "higher_order_representations": {
       "name": "higher_order_representations",
@@ -151,34 +130,34 @@
       "threshold": 0.5,
       "passes_threshold": true,
       "evidence": {
-        "hots_generated": 11,
+        "hots_generated": 14,
         "cycle_count": 5,
-        "coverage_ratio": 2.2,
+        "coverage_ratio": 2.8,
         "module_active": true,
         "status": "measured",
         "raw_score": 1.0,
         "noise_baseline": 0.43,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.03314018249511719
+      "measurement_time_ms": 0.031948089599609375
     },
     "metacognition": {
       "name": "metacognition",
       "theory": "Higher-Order Thought Theory",
       "status": "measured",
-      "score": 0.6046589577480614,
+      "score": 0.4728786103307486,
       "confidence": 0.6,
       "threshold": 0.4,
       "passes_threshold": true,
       "evidence": {
-        "introspections": 11,
-        "overall_confidence": 0.5,
-        "activity_rate": 1.0,
+        "introspections": 3,
+        "overall_confidence": 0.6,
+        "activity_rate": 0.6,
         "activity_status": "measured",
         "cycle_count": 5,
         "module_active": true,
         "status": "measured",
-        "raw_score": 0.7,
+        "raw_score": 0.6,
         "noise_baseline": 0.24116150883009171,
         "noise_saturated": false
       },
@@ -188,20 +167,20 @@
       "name": "sparse_smooth_coding",
       "theory": "Higher-Order Thought Theory",
       "status": "measured",
-      "score": 0.815143206135409,
+      "score": 0.7217073567538057,
       "confidence": 0.5,
       "threshold": 0.3,
       "passes_threshold": true,
       "evidence": {
-        "avg_error": 0.0824928378626858,
-        "sparsity_proxy": 0.8350143242746284,
+        "avg_error": 0.12418883513961007,
+        "sparsity_proxy": 0.7516223297207798,
         "module_active": true,
         "status": "measured",
-        "raw_score": 0.8350143242746284,
+        "raw_score": 0.7516223297207798,
         "noise_baseline": 0.1074946596432647,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.030994415283203125
+      "measurement_time_ms": 0.047206878662109375
     },
     "prediction_error_minimization": {
       "name": "prediction_error_minimization",
@@ -216,7 +195,7 @@
         "missing": "active_inference.inference_history (10 prediction errors)",
         "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.0209808349609375
+      "measurement_time_ms": 0.022172927856445312
     },
     "hierarchical_prediction": {
       "name": "hierarchical_prediction",
@@ -235,29 +214,29 @@
         "noise_baseline": 0.24878144998801965,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.014781951904296875
+      "measurement_time_ms": 0.0152587890625
     },
     "temporal_prediction_depth": {
       "name": "temporal_prediction_depth",
       "theory": "Free Energy Principle",
       "status": "measured",
-      "score": 0.33153986833192806,
+      "score": 0.3181558550364153,
       "confidence": 0.6,
       "threshold": 0.3,
       "passes_threshold": true,
       "evidence": {
         "planning_horizon": 5.0,
-        "avg_error": 0.0824928378626858,
+        "avg_error": 0.12418883513961007,
         "belief_history_depth": 5,
         "free_energy_history_depth": 5,
         "total_inferences": 5,
         "module_active": true,
         "status": "measured",
-        "raw_score": 0.3752521486411942,
+        "raw_score": 0.3627433494581169,
         "noise_baseline": 0.06539250171911784,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.01621246337890625
+      "measurement_time_ms": 0.017881393432617188
     },
     "agent_environment_coupling": {
       "name": "agent_environment_coupling",
@@ -276,7 +255,7 @@
         "noise_baseline": 0.04331370849898476,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.012159347534179688
+      "measurement_time_ms": 0.014066696166992188
     },
     "affect_coherence": {
       "name": "affect_coherence",
@@ -294,7 +273,7 @@
         "noise_baseline": 0.19724801375800655,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.0019073486328125
+      "measurement_time_ms": 0.00095367431640625
     },
     "integrated_information": {
       "name": "integrated_information",
@@ -311,7 +290,7 @@
         "missing": "phi_tracker result (warming up or failed) and neural_states for the calculator",
         "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.0019073486328125
+      "measurement_time_ms": 0.0030994415283203125
     },
     "irreducibility": {
       "name": "irreducibility",
@@ -326,10 +305,10 @@
         "reason": "neural_states not provided",
         "status": "absent",
         "raw_score": 0.0,
-        "noise_baseline": 0.819773748117588,
+        "noise_baseline": 0.7990063461184519,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.0019073486328125
+      "measurement_time_ms": 0.00095367431640625
     },
     "causal_emergence": {
       "name": "causal_emergence",
@@ -347,30 +326,21 @@
         "noise_baseline": 0.4682530589405219,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.00095367431640625
+      "measurement_time_ms": 0.0011920928955078125
     },
     "recurrent_processing": {
       "name": "recurrent_processing",
       "theory": "Recurrent Processing Theory",
-      "status": "measured",
-      "score": 0.7322278251769967,
-      "confidence": 0.6,
+      "status": "insufficient_data",
+      "score": null,
+      "confidence": 0.0,
       "threshold": 0.4,
-      "passes_threshold": true,
+      "passes_threshold": false,
       "evidence": {
-        "coverage": 1.0,
-        "cycles": 5,
-        "broadcasts": 3,
-        "gwt_term": 0.8,
-        "rpt_average_global": null,
-        "rpt_measurements": 0,
-        "module_active": true,
-        "status": "measured",
-        "raw_score": 0.8,
-        "noise_baseline": 0.2530964050607594,
-        "noise_saturated": false
+        "missing": "global_workspace.broadcast.coverage_ratio",
+        "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.03218650817871094
+      "measurement_time_ms": 0.029802322387695312
     },
     "algorithmic_recurrence": {
       "name": "algorithmic_recurrence",
@@ -406,7 +376,7 @@
         "noise_baseline": 0.16569021569197784,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.0011920928955078125
+      "measurement_time_ms": 0.0016689300537109375
     },
     "oscillatory_binding_coherence": {
       "name": "oscillatory_binding_coherence",
@@ -430,17 +400,17 @@
       "name": "agency",
       "theory": "Agency & Embodiment",
       "status": "measured",
-      "score": 0.21878115771745923,
+      "score": 0.20949400069029764,
       "confidence": 0.3,
       "threshold": 0.5,
       "passes_threshold": false,
       "evidence": {
         "inferences": 5,
         "model_updates": 4,
-        "free_energy": 2.4147220050434686,
+        "free_energy": 1.6719129580300334,
         "module_active": true,
         "status": "measured",
-        "raw_score": 0.3836435352959708,
+        "raw_score": 0.37631626800209994,
         "noise_baseline": 0.21103225966340214,
         "noise_saturated": false
       },
@@ -464,7 +434,7 @@
         "noise_baseline": 0.11348733365172695,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.0040531158447265625
+      "measurement_time_ms": 0.00476837158203125
     },
     "bayesian_binding_quality": {
       "name": "bayesian_binding_quality",
@@ -475,58 +445,73 @@
       "threshold": 0.3,
       "passes_threshold": false,
       "evidence": {
-        "missing": "beautiful_loop.cycle_count",
+        "missing": "beautiful_loop.average_binding_quality",
         "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.010967254638671875
+      "measurement_time_ms": 0.04100799560546875
     },
     "epistemic_depth": {
       "name": "epistemic_depth",
       "theory": "Beautiful Loop Theory",
-      "status": "insufficient_data",
-      "score": null,
-      "confidence": 0.0,
+      "status": "measured",
+      "score": 0.38480899994541096,
+      "confidence": 0.6,
       "threshold": 0.3,
-      "passes_threshold": false,
+      "passes_threshold": true,
       "evidence": {
-        "missing": "beautiful_loop.cycle_count",
-        "status": "insufficient_data"
+        "avg_depth": 1.8,
+        "peak_depth": 3,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.45,
+        "noise_baseline": 0.10596871548641687,
+        "noise_saturated": false
       },
-      "measurement_time_ms": 0.003814697265625
+      "measurement_time_ms": 0.0209808349609375
     },
     "genuine_implementation": {
       "name": "genuine_implementation",
       "theory": "Beautiful Loop Theory",
-      "status": "insufficient_data",
-      "score": null,
-      "confidence": 0.0,
+      "status": "measured",
+      "score": 0.6153846153846153,
+      "confidence": 0.575,
       "threshold": 0.4,
-      "passes_threshold": false,
+      "passes_threshold": true,
       "evidence": {
-        "missing": "beautiful_loop.cycle_count",
-        "status": "insufficient_data"
+        "avg_loop_quality": 0.5300177410248634,
+        "field_evidencing_count": 0,
+        "has_field_evidencing": false,
+        "has_loop_quality": true,
+        "has_strange_loop": true,
+        "peak_depth": 3,
+        "conditions_met": 2,
+        "module_active": true,
+        "status": "measured",
+        "raw_score": 0.6666666666666666,
+        "noise_baseline": 0.13333333333333333,
+        "noise_saturated": false
       },
-      "measurement_time_ms": 0.0021457672119140625
+      "measurement_time_ms": 0.0171661376953125
     },
     "sequential_module_querying": {
       "name": "sequential_module_querying",
       "theory": "Global Workspace Theory",
       "status": "measured",
-      "score": 0.33541627428006504,
+      "score": 0.3782926436813512,
       "confidence": 0.8,
       "threshold": 0.3,
       "passes_threshold": true,
       "evidence": {
         "cycles": 5,
         "total_competitions": 5,
-        "avg_candidates": 3.8,
+        "avg_candidates": 4.2,
         "module_active": true,
         "status": "measured",
-        "raw_score": 0.69,
+        "raw_score": 0.71,
         "noise_baseline": 0.5335425951573204,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.031948089599609375
+      "measurement_time_ms": 0.029087066650390625
     },
     "organized_percepts": {
       "name": "organized_percepts",
@@ -537,15 +522,15 @@
       "threshold": 0.3,
       "passes_threshold": true,
       "evidence": {
-        "perceptual_candidates": 13,
-        "avg_local_recurrence": 0.0,
+        "perceptual_candidates": 14,
+        "avg_local_recurrence": null,
         "module_active": true,
         "status": "measured",
         "raw_score": 0.5,
         "noise_baseline": 0.1758430161217371,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.030040740966796875
+      "measurement_time_ms": 0.029087066650390625
     },
     "flexible_responsiveness": {
       "name": "flexible_responsiveness",
@@ -567,13 +552,13 @@
         "noise_baseline": 0.6026666666666667,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.048160552978515625
+      "measurement_time_ms": 0.051021575927734375
     },
     "online_reportable_learning": {
       "name": "online_reportable_learning",
       "theory": "Higher-Order Thought Theory",
       "status": "measured",
-      "score": 0.45054945054945056,
+      "score": 0.3186813186813187,
       "confidence": 0.56,
       "threshold": 0.3,
       "passes_threshold": true,
@@ -582,36 +567,37 @@
         "has_recent_experiences": true,
         "module_active": true,
         "status": "measured",
-        "raw_score": 0.5,
+        "raw_score": 0.38,
         "noise_baseline": 0.09,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.0152587890625
+      "measurement_time_ms": 0.014066696166992188
     },
     "complex_agency": {
       "name": "complex_agency",
       "theory": "Free Energy Principle",
       "status": "measured",
-      "score": 0.5244869881212536,
+      "score": 0.09613126014900862,
       "confidence": 0.6,
       "threshold": 0.3,
-      "passes_threshold": true,
+      "passes_threshold": false,
       "evidence": {
         "policy_count": 1024,
         "policy_diversity": 1.0,
         "urgent_drives": 0,
         "drive_conflict": 0.0,
-        "free_energy_variance": 0.08511923752436693,
-        "prediction_variance": 1.0,
+        "free_energy_variance": 0.004958569242951244,
+        "prediction_variance": 0.099,
         "module_active": true,
         "status": "measured",
-        "raw_score": 0.7,
+        "raw_score": 0.42975141545770745,
         "noise_baseline": 0.36910243777619556,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.03409385681152344
+      "measurement_time_ms": 0.030279159545898438
     }
   },
   "ablation_config": null,
-  "processing_time_ms": 2.4399757385253906
+  "processing_time_ms": 2.663850784301758,
+  "failures": {}
 }

@@ -15,10 +15,14 @@ What each test compares and needs:
   ``phi_source_used`` line changes.
 - The assessment test holds every field of the report (statuses, counts,
   keys and booleans exactly, floats within 1e-9). Left out: the session id,
-  the timestamp and the timing fields. Nothing follows the wall clock: the
-  seeded CLI pins the introspection cooldown at 0.0, so the three counter
-  readouts are compared too. It needs pymdp only: a five-cycle warmup
-  leaves the tracker warming up, so the report is the same with and without
+  the timestamp and the timing fields. The seeded CLI pins the introspection
+  cooldown at 0.0, which removes the wall-clock gate, so the three counter
+  readouts are compared in full. One residual clock term is on record: on
+  a machine 25 times slower one evidence value
+  (``genuine_implementation.evidence.avg_loop_quality``) moves by 1.2e-9;
+  the measurement is in ``docs/MIGRATION_FROM_V04.md`` under "What the
+  cooldown pin removes". It needs pymdp only: a five-cycle warmup leaves
+  the tracker warming up, so the report is the same with and without
   PyPhi.
 
 When a comparison fails, the message lists every differing line or field and
@@ -122,7 +126,8 @@ def test_v050_assessment_fixture_reproduces(tmp_path):
     )
     assert result.returncode == 0, result.stderr[-2000:]
     report = json.loads(json_path.read_text())
-    # The seeded CLI pins the introspection cooldown at 0.0, so no field of
-    # the report follows the wall clock and every field is compared
+    # The seeded CLI pins the introspection cooldown at 0.0, which removes the
+    # wall-clock gate, so every field is compared (one recorded residual at a
+    # clock 25 times slower: see the module docstring)
     differences = assessment_diff(baseline, report)
     assert differences == [], _failure_message(differences)
