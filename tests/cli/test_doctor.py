@@ -487,11 +487,21 @@ def _needs_column() -> Dict[str, str]:
     return needs
 
 
+def _names(detail: str, indicator: str) -> bool:
+    """True when ``detail`` holds ``indicator`` as a whole name."""
+    return re.search(rf"(?<![a-z_]){indicator}(?![a-z_])", detail) is not None
+
+
+def _reads_active_inference(cell: str) -> bool:
+    return "active inference" in cell.lower() or bool(re.search(r"`fep` extra", cell))
+
+
 def test_extras_statements_agree_with_the_mapping_document(environment):
     """What the extras check says about indicators and extras is what the
     committed mapping document holds: its Needs column names the fep extra
-    in a row and the neural extra in none. If a row comes to name the neural
-    extra, the neural detail has to name that indicator and this fails."""
+    in a row, active inference in others and the neural extra in none. If a
+    row comes to name the neural extra, the neural detail has to name that
+    indicator and this fails."""
     needs = _needs_column()
     named: Dict[str, List[str]] = {}
     for indicator, cell in needs.items():
@@ -507,18 +517,56 @@ def test_extras_statements_agree_with_the_mapping_document(environment):
     module_text = " ".join(doctor.__doc__.split())
     assert f"The Needs column of ``{doctor.MAPPING_DOCUMENT}``" in module_text
     assert "names the ``fep`` extra in a row" in module_text
+    assert "active inference in others" in module_text
     assert "the ``neural`` extra in none" in module_text
     for text in (module_text, *doctor.EXTRA_EFFECTS.values()):
         assert "no committed table" not in text.lower()
 
-    environment.absent.update({"torch", "pymdp"})
-    extras = by_name(doctor.run_doctor(settings_for(environment)))["extras"]
-    assert extras.data["missing_extras"] == ["fep", "neural"]
-    # Neither detail names a single indicator: fep stops all of them and the
-    # document ties none to the neural extra.
+    # The constant doctor names is the document's own list: every row whose
+    # Needs cell names the fep extra or active inference, in document order.
+    reading = [name for name, cell in needs.items() if _reads_active_inference(cell)]
+    assert list(doctor.FEP_INDICATORS) == reading
+    assert set(named["fep"]) <= set(doctor.FEP_INDICATORS)
+
+    # Only the neural extra missing: the document ties no indicator to it, so
+    # the detail names none.
+    environment.absent.add("torch")
+    neural = by_name(doctor.run_doctor(settings_for(environment)))["extras"]
     assert len(needs) >= 30
     for indicator in needs:
-        assert indicator not in extras.detail, indicator
+        assert not _names(neural.detail, indicator), indicator
+
+    # Both missing: the fep detail names exactly the indicators that read
+    # active inference and the neural detail still names none.
+    environment.absent.add("pymdp")
+    extras = by_name(doctor.run_doctor(settings_for(environment)))["extras"]
+    assert extras.data["missing_extras"] == ["fep", "neural"]
+    fep_part, neural_part = extras.detail.split("; neural extra missing: ")
+    for indicator in needs:
+        assert _names(fep_part, indicator) == (
+            indicator in doctor.FEP_INDICATORS
+        ), indicator
+        assert not _names(neural_part, indicator), indicator
+
+
+def test_fep_detail_names_the_indicators_that_read_the_extra(environment):
+    environment.absent.add("pymdp")
+    extras = by_name(doctor.run_doctor(settings_for(environment)))["extras"]
+    assert extras.status is CheckStatus.FAILED and extras.required is True
+    assert extras.data["fep_indicators"] == list(doctor.FEP_INDICATORS)
+    assert len(doctor.FEP_INDICATORS) >= 5
+    for indicator in doctor.FEP_INDICATORS:
+        assert _names(extras.detail, indicator), indicator
+    assert "sparse_smooth_coding" in extras.detail
+    assert f"the Needs column of {doctor.MAPPING_DOCUMENT}" in extras.detail
+    assert "MISSING EXTRA" in extras.detail
+    # The statement stays one fact about the install: nothing is measured.
+    assert "none of the indicators is measured" in extras.detail
+    # With the extra installed the field is absent, not an empty list.
+    environment.absent.clear()
+    extras = by_name(doctor.run_doctor(settings_for(environment)))["extras"]
+    assert extras.status is CheckStatus.OK
+    assert "fep_indicators" not in extras.data
 
 
 def test_embedding_model_absent_is_warning_with_fetch_hint(environment):
@@ -628,6 +676,45 @@ def test_fetch_models_downloads_one_weight_set_not_every_export(environment):
     assert result.data["fetched_files"] == 14
     assert result.data["left_out_files"] == len(hub.files) - 14
     assert "14 files" in result.detail and "16" in result.detail
+
+
+def test_fetch_detail_claims_no_more_than_was_measured(environment):
+    """The filter keeps every file that is not an export, so four of the 14
+    files fetched for the default model (the readme, the attributes file, a
+    training script and a data configuration) are never read by the embedder:
+    the line says what was fetched and what was left out, not that the
+    embedder loads every fetched file."""
+    hub = environment.hub
+    hub.cached = False
+    result = by_name(doctor.run_doctor(settings_for(environment), fetch_models=True))[
+        "embedding_model"
+    ]
+    assert result.status is CheckStatus.OK
+    fetched = set(hub.downloaded)
+    unread = fetched - EMBEDDER_FILES
+    assert unread == {
+        ".gitattributes",
+        "README.md",
+        "data_config.json",
+        "train_script.py",
+    }
+    left_out = len(hub.files) - len(fetched)
+    detail = result.detail
+    assert "embedder loads" not in detail
+    assert f"{len(fetched)} files fetched" in detail
+    assert (
+        f"{left_out} files of other runtimes and duplicate weights were left on the hub"
+        in detail
+    )
+    for phrase in (
+        "the weights",
+        "the tokenizer",
+        "the configuration",
+        "the repository's small files",
+    ):
+        assert phrase in detail, phrase
+    assert result.data["fetched_files"] == len(fetched)
+    assert result.data["left_out_files"] == left_out
 
 
 def test_fetch_models_keeps_the_only_weight_format_a_module_has(environment):

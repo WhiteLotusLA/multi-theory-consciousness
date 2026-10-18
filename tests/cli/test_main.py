@@ -38,6 +38,7 @@ DOCUMENTED = {
     "serve": set(),
     "chat": {"--message", "--speaker", "--anonymous", "--show-thinking"},
     "ctm": set(),
+    "safety": set(),
     "privacy-audit": {"--paths", "--staged", "--patch-from", "--runtime"},
 }
 DOCUMENTED_NESTED = {
@@ -46,6 +47,8 @@ DOCUMENTED_NESTED = {
     ("ctm", "start"): {"--state"},
     ("ctm", "stop"): set(),
     ("ctm", "status"): set(),
+    ("safety", "status"): set(),
+    ("safety", "resume"): {"--speaker"},
 }
 
 
@@ -102,7 +105,7 @@ def test_parser_has_exactly_the_documented_subcommands():
         assert _flags(commands[name]) == flags, name
     nested = {
         (name, action): _flags(sub)
-        for name in ("db", "ctm")
+        for name in ("db", "ctm", "safety")
         for action, sub in _subparsers(commands[name]).items()
     }
     assert nested == DOCUMENTED_NESTED
@@ -141,6 +144,28 @@ def test_project_dir_changes_root_before_settings(clean, monkeypatch, tmp_path):
     assert seen["name"] == "Testagent"
 
 
+def test_project_dir_resets_settings_through_the_public_function(
+    clean, monkeypatch, tmp_path
+):
+    project = tmp_path / "elsewhere"
+    project.mkdir()
+    real = config_module.reset_settings
+    seen = []
+
+    def spy():
+        seen.append(Path.cwd().resolve())
+        real()
+
+    monkeypatch.setattr(config_module, "reset_settings", spy)
+    monkeypatch.setitem(cli.HANDLERS, "serve", lambda args, extras: 0)
+    assert cli.main(["--project-dir", str(project), "serve"]) == 0
+    # Reset once, after the working directory changed, by the public function.
+    assert seen == [project.resolve()]
+    assert config_module._settings is None
+    # The module no longer reaches into the singleton itself.
+    assert "._settings" not in Path(cli.__file__).read_text(encoding="utf-8")
+
+
 def test_usage_errors_exit_2(clean, capsys):
     cases = (
         [],
@@ -149,6 +174,9 @@ def test_usage_errors_exit_2(clean, capsys):
         ["db"],
         ["db", "migrate"],
         ["ctm"],
+        ["safety"],
+        ["safety", "restart"],
+        ["safety", "resume", "--anonymous"],
         ["chat", "--anonymous", "--speaker", "Alice", "--message", "hi"],
         ["--project-dir", str(clean / "missing"), "doctor"],
         ["init", "--yes"],
@@ -343,6 +371,95 @@ def test_serve_missing_api_extra_exits_2(clean, monkeypatch, capsys):
     message = capsys.readouterr().err
     assert "api extra" in message
     assert "multi-theory-consciousness[api]" in message
+
+
+def _fep_message() -> str:
+    from mtc.consciousness.active_inference import PYMDP_MISSING_MESSAGE
+
+    return PYMDP_MISSING_MESSAGE
+
+
+def test_serve_without_the_fep_extra_prints_the_fep_hint_not_the_api_hint(
+    clean, monkeypatch, capsys
+):
+    import mtc.api as package
+
+    def refuses(argv=None):
+        raise ImportError(_fep_message())
+
+    _fake_module(monkeypatch, package, "server", main=refuses)
+    monkeypatch.setenv("MTC_API_PORT", str(_unused_port()))
+    assert cli.main(["serve"]) == cli.EXIT_USAGE == 2
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.startswith("MISSING EXTRA:")
+    assert len(err.strip().splitlines()) == 1
+    assert "fep extra" in err
+    assert "multi-theory-consciousness[fep]" in err
+    assert "api extra" not in err and "[api]" not in err
+    assert "Traceback" not in err
+
+
+def test_serve_without_the_api_extra_still_prints_the_api_hint(
+    clean, monkeypatch, capsys
+):
+    import mtc.api as package
+
+    def refuses(argv=None):
+        raise ImportError("No module named 'uvicorn'", name="uvicorn")
+
+    _fake_module(monkeypatch, package, "server", main=refuses)
+    monkeypatch.setenv("MTC_API_PORT", str(_unused_port()))
+    assert cli.main(["serve"]) == 2
+    err = capsys.readouterr().err
+    assert "api extra" in err
+    assert "MISSING EXTRA" not in err
+
+
+def test_serve_checks_the_fep_extra_before_it_starts_the_server(
+    clean, monkeypatch, capsys
+):
+    """The server library logs a failed startup and returns, so a missing
+    extra would otherwise end as an exit 0 behind a logged traceback."""
+    import mtc.api as package
+    from mtc.consciousness import active_inference
+
+    started = []
+    _fake_module(
+        monkeypatch,
+        package,
+        "server",
+        main=lambda argv=None: started.append(list(argv)) or 0,
+    )
+    monkeypatch.setenv("MTC_API_PORT", str(_unused_port()))
+    monkeypatch.setattr(active_inference, "Agent", None)
+    assert cli.main(["serve"]) == 2
+    assert started == []
+    err = capsys.readouterr().err
+    assert err.startswith("MISSING EXTRA:") and len(err.strip().splitlines()) == 1
+
+
+def test_a_missing_extra_ends_any_command_in_one_line_and_exit_2(
+    clean, monkeypatch, capsys
+):
+    def builds_a_workspace(args, extras):
+        raise ImportError(_fep_message())
+
+    for command in ("assess", "doctor", "chat", "ctm"):
+        monkeypatch.setitem(cli.HANDLERS, command, builds_a_workspace)
+        argv = [command, "status"] if command == "ctm" else [command]
+        assert cli.main(argv) == 2, command
+        out, err = capsys.readouterr()
+        assert out == "" and err.startswith("MISSING EXTRA:"), command
+        assert len(err.strip().splitlines()) == 1 and "Traceback" not in err
+
+    # An import error that is not a missing extra is not hidden.
+    def other(args, extras):
+        raise ImportError("No module named 'something'", name="something")
+
+    monkeypatch.setitem(cli.HANDLERS, "assess", other)
+    with pytest.raises(ImportError):
+        cli.main(["assess"])
 
 
 def _checkout(root: Path) -> Path:

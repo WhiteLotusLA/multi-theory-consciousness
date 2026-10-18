@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS episodic_memory (
     last_accessed TIMESTAMPTZ DEFAULT NOW(),
     accessed_count INTEGER DEFAULT 0,
     consolidated BOOLEAN DEFAULT FALSE,
-    consolidation_strength DOUBLE PRECISION DEFAULT 0,
+    consolidation_strength DOUBLE PRECISION,
     replay_count INTEGER DEFAULT 0,
     CHECK (importance >= 0 AND importance <= 10)
 );
@@ -49,8 +49,8 @@ CREATE TABLE IF NOT EXISTS semantic_memory (
     concept TEXT NOT NULL,
     knowledge TEXT DEFAULT '',
     associations JSONB DEFAULT '{}',
-    strength DOUBLE PRECISION DEFAULT 0.5,
-    confidence DOUBLE PRECISION DEFAULT 0.5,
+    strength DOUBLE PRECISION,
+    confidence DOUBLE PRECISION,
     emotional_context JSONB DEFAULT '{}',
     source_memories BIGINT[] DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW(),

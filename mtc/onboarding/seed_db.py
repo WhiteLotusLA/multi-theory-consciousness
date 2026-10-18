@@ -8,9 +8,9 @@ What the bootstrap does after the schema exists.
   the calendar day of the first initialization in ``TIMEZONE``. An existing
   non-empty value (in the file or in the loaded Settings) is kept and never
   overwritten.
-- ``render_seed_blocks`` renders the three core memory blocks with Phase 5's
-  ``render_core_blocks`` unchanged and appends one sentence to the identity
-  block when an install date exists ("This system was first initialized on
+- ``render_seed_blocks`` renders the three core memory blocks with the memory
+  package's ``render_core_blocks`` unchanged and appends one sentence to the
+  identity block when an install date exists ("This system was first initialized on
   YYYY-MM-DD."), which records the install date without claiming a birthday.
   The blocks carry no trust value, bond or other date.
 - ``seed_stores`` seeds core memory through

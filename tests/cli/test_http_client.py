@@ -335,6 +335,253 @@ def test_ctm_commands_round_trip(project, tmp_path, capsys):
     capsys.readouterr()
 
 
+SAFETY_STATUS = {
+    "safety": {
+        "available": True,
+        "last_error": None,
+        "safety_monitor": {
+            "available": True,
+            "safety_mode": "standard",
+            "suspended": False,
+            "audit_failures": 0,
+            "alert_failures": 0,
+            "pending_audit": 0,
+        },
+    }
+}
+
+
+def _suspended(status: Dict[str, Any], value: Any) -> Dict[str, Any]:
+    monitor = dict(status["safety"]["safety_monitor"], suspended=value)
+    return {"safety": dict(status["safety"], safety_monitor=monitor)}
+
+
+def test_safety_status_reads_the_status_route(project, tmp_path, capsys):
+    with fake_api() as server:
+        env = setup_project(project, tmp_path, server.port)
+        base = ["--project-dir", str(project), "safety", "status"]
+        server.reply("GET", "/api/consciousness/status", 200, SAFETY_STATUS)
+        assert cli.main(base) == 0
+        assert server.last["method"] == "GET"
+        assert server.last["path"] == "/api/consciousness/status"
+        assert (server.last["headers"]["x-api-key"] == env["MTC_API_KEY"]) is True
+        assert "x-speaker-token" not in server.last["headers"]
+        out = capsys.readouterr().out
+        assert "safety stack: available" in out
+        assert "safety mode: standard" in out
+        assert "conversations suspended: no" in out
+        assert "mtc safety resume" not in out
+
+        # A suspension is reported with the command that lifts it.
+        server.reply(
+            "GET", "/api/consciousness/status", 200, _suspended(SAFETY_STATUS, True)
+        )
+        assert cli.main(base) == 0
+        out = capsys.readouterr().out
+        assert "conversations suspended: yes" in out and "mtc safety resume" in out
+
+        # A value the server did not report is not guessed.
+        server.reply(
+            "GET", "/api/consciousness/status", 200, _suspended(SAFETY_STATUS, None)
+        )
+        assert cli.main(base) == 0
+        assert "conversations suspended: unknown" in capsys.readouterr().out
+
+        # A stack that reports itself unavailable is not read as healthy.
+        broken = {
+            "safety": dict(
+                SAFETY_STATUS["safety"], available=False, last_error="PlantedFailure"
+            )
+        }
+        server.reply("GET", "/api/consciousness/status", 200, broken)
+        assert cli.main(base) == 0
+        out = capsys.readouterr().out
+        assert "safety stack: not available" in out
+        # The server's error text is not echoed.
+        assert "PlantedFailure" not in out
+
+        # No safety section at all, or a refused key: exit 1, nothing printed
+        # on standard output.
+        server.reply("GET", "/api/consciousness/status", 200, {"safety": None})
+        assert cli.main(base) == 1
+        captured = capsys.readouterr()
+        assert "no safety stack" in captured.err and captured.out == ""
+        server.reply("GET", "/api/consciousness/status", 401, {"detail": "no"})
+        assert cli.main(base) == 1
+        assert "refused the API key" in capsys.readouterr().err
+    assert cli.main(base) == 3
+    assert "mtc serve" in capsys.readouterr().err
+
+
+def test_safety_resume_posts_the_speaker_and_token(project, tmp_path, capsys):
+    with fake_api() as server:
+        env = setup_project(project, tmp_path, server.port)
+        base = ["--project-dir", str(project), "safety", "resume"]
+        server.reply(
+            "POST", "/api/safety/resume", 200, {"resumed": True, "suspended": False}
+        )
+        assert cli.main(base) == 0
+        seen = server.last
+        cfg = Settings(_env_file=str(project / ENV_NAME), PROJECT_ROOT=str(project))
+        expected = token_for("Alice", cfg)
+        assert isinstance(expected, str) and len(expected) == 64
+        # The creator is the default speaker, with the creator's own token,
+        # exactly as mtc chat presents it.
+        assert seen["method"] == "POST" and seen["path"] == "/api/safety/resume"
+        assert seen["body"] == {"speaker": "Alice"}
+        assert (seen["headers"]["x-speaker-token"] == expected) is True
+        assert (seen["headers"]["x-api-key"] == env["MTC_API_KEY"]) is True
+        out = capsys.readouterr()
+        assert "conversations resumed" in out.out
+        for secret_value in (expected, env["MTC_API_KEY"]):
+            assert (secret_value in out.out + out.err) is False
+
+        # Nothing was suspended: said plainly, and not a failure.
+        server.reply(
+            "POST", "/api/safety/resume", 200, {"resumed": False, "suspended": False}
+        )
+        assert cli.main(base) == 0
+        assert "were not suspended" in capsys.readouterr().out
+        # Still suspended after the call: a failure, never a success.
+        server.reply(
+            "POST", "/api/safety/resume", 200, {"resumed": False, "suspended": True}
+        )
+        assert cli.main(base) == 1
+        captured = capsys.readouterr()
+        assert "was not lifted" in captured.err and "resumed" not in captured.out
+
+        # Another name presents no token; the server decides, and says no.
+        server.reply("POST", "/api/safety/resume", 403, {"detail": "not trusted"})
+        assert cli.main(base + ["--speaker", "Guest"]) == 1
+        assert server.last["body"] == {"speaker": "Guest"}
+        assert "x-speaker-token" not in server.last["headers"]
+        captured = capsys.readouterr()
+        assert "unverified" in captured.err
+        assert "needs a trusted speaker" in captured.err
+        assert captured.out == ""
+        server.reply("POST", "/api/safety/resume", 401, {"detail": "no"})
+        assert cli.main(base) == 1
+        assert "refused the API key" in capsys.readouterr().err
+        server.reply(
+            "POST", "/api/safety/resume", 503, {"detail": "safety stack not built"}
+        )
+        assert cli.main(base) == 1
+        assert "safety stack not built" in capsys.readouterr().err
+        server.reply("POST", "/api/safety/resume", 422, {"detail": "bad"})
+        assert cli.main(base) == 1
+        assert "rejected the request" in capsys.readouterr().err
+    assert cli.main(base) == 3
+    assert "mtc serve" in capsys.readouterr().err
+
+
+def test_chat_names_the_resume_command_when_the_conversations_are_suspended(
+    project, tmp_path, capsys
+):
+    with fake_api() as server:
+        setup_project(project, tmp_path, server.port)
+        base = [
+            "--project-dir",
+            str(project),
+            "chat",
+            "--speaker",
+            "Guest",
+            "--message",
+            "hi",
+        ]
+        blocked = {
+            "success": False,
+            "response": None,
+            "blocked": True,
+            "error_code": "blocked",
+            "safety_decision": "emergency_shutdown",
+        }
+        server.reply("POST", "/api/chat", 403, blocked)
+        assert cli.main(base) == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        lines = [
+            line for line in captured.err.splitlines() if "mtc safety resume" in line
+        ]
+        assert len(lines) == 1
+        assert "suspended" in lines[0]
+        assert "safety gate blocked" in captured.err
+        # An ordinary block, and a block with no decision, name no command.
+        for decision in ("deny", None):
+            server.reply(
+                "POST", "/api/chat", 403, dict(blocked, safety_decision=decision)
+            )
+            assert cli.main(base) == 1
+            captured = capsys.readouterr()
+            assert "safety gate blocked" in captured.err
+            assert "mtc safety resume" not in captured.err
+        # The decision belongs to a blocked turn: it is read from a 403 only.
+        server.reply("POST", "/api/chat", 502, dict(blocked, error_code="no_answer"))
+        assert cli.main(base) == 1
+        assert "mtc safety resume" not in capsys.readouterr().err
+
+
+def test_a_503_message_follows_the_error_code_in_the_body(project, tmp_path, capsys):
+    with fake_api() as server:
+        setup_project(project, tmp_path, server.port)
+        base = ["--project-dir", str(project), "chat", "--message", "hello"]
+        for code, words in (
+            ("safety_unavailable", "safety check could not run"),
+            ("brain_unavailable", "brain is unavailable"),
+        ):
+            body = {"success": False, "response": None, "error_code": code}
+            server.reply("POST", "/api/chat", 503, body)
+            assert cli.main(base) == 1, code
+            captured = capsys.readouterr()
+            assert words in captured.err, code
+            assert captured.out == "", code
+        safety = {"success": False, "error_code": "safety_unavailable"}
+        server.reply("POST", "/api/chat", 503, safety)
+        assert cli.main(base) == 1
+        said = capsys.readouterr().err
+        assert "nothing was stored" in said.lower()
+        assert "brain is unavailable" not in said
+        # The brain line does not claim the safety check failed either.
+        brain = {"success": False, "error_code": "brain_unavailable"}
+        server.reply("POST", "/api/chat", 503, brain)
+        assert cli.main(base) == 1
+        assert "safety check" not in capsys.readouterr().err
+        # No code in the body: the status decides, as before.
+        server.reply("POST", "/api/chat", 503, {"detail": "unavailable"})
+        assert cli.main(base) == 1
+        assert "brain is unavailable" in capsys.readouterr().err
+        # A code the table does not know falls back to the status as well.
+        server.reply("POST", "/api/chat", 502, {"error_code": "unheard_of"})
+        assert cli.main(base) == 1
+        assert "gave no answer" in capsys.readouterr().err
+
+
+def test_every_code_the_chat_command_words_is_a_code_the_server_sends():
+    schemas = pytest.importorskip(
+        "mtc.api.schemas", reason="the api extra (fastapi) is not installed"
+    )
+    server = pytest.importorskip(
+        "mtc.api.server", reason="the api extra (fastapi) is not installed"
+    )
+    assert set(cli.CHAT_CODE_MESSAGES) <= set(schemas.ERROR_CODES)
+    assert "safety_unavailable" in cli.CHAT_CODE_MESSAGES
+    # The status the server answers with is one the status table words too.
+    for code in cli.CHAT_CODE_MESSAGES:
+        assert server.ERROR_STATUS[code] in cli.CHAT_STATUS_MESSAGES, code
+    assert server.ERROR_STATUS["safety_unavailable"] == 503
+
+
+def test_safety_paths_and_decision_match_the_server():
+    server = pytest.importorskip(
+        "mtc.api.server", reason="the api extra (fastapi) is not installed"
+    )
+    monitor = pytest.importorskip("mtc.safety.safety_monitor")
+    app = server.create_app(settings=Settings(), runtime=object())
+    paths = {getattr(route, "path", None) for route in app.routes}
+    assert http_module.SAFETY_RESUME_PATH in paths
+    assert http_module.STATUS_PATH in paths
+    assert cli.EMERGENCY_DECISION == monitor.SafetyDecision.EMERGENCY_SHUTDOWN.value
+
+
 def test_headers_never_logged(project, tmp_path, capsys):
     records: List[str] = []
 

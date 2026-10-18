@@ -2,8 +2,8 @@
 Command-Line API Client
 =======================
 
-The small HTTP client behind ``mtc chat`` and ``mtc ctm``: standard-library
-``urllib`` only, JSON bodies, one request per call.
+The small HTTP client behind ``mtc chat``, ``mtc ctm`` and ``mtc safety``:
+standard-library ``urllib`` only, JSON bodies, one request per call.
 
 - The API key travels in the ``X-API-Key`` header and a speaker's token in
   ``X-Speaker-Token``; neither is ever logged, printed or placed in a URL.
@@ -39,6 +39,8 @@ CHAT_PATH = "/api/chat"
 CTM_START_PATH = "/api/ctm/start"
 CTM_STOP_PATH = "/api/ctm/stop"
 CTM_STATUS_PATH = "/api/ctm/status"
+STATUS_PATH = "/api/consciousness/status"
+SAFETY_RESUME_PATH = "/api/safety/resume"
 
 # Seconds added to the server's own generation bounds for a chat turn.
 CHAT_TIMEOUT_MARGIN_S = 30.0
@@ -199,6 +201,26 @@ class ApiClient:
     def ctm_status(self) -> Tuple[int, Dict[str, Any]]:
         """The continuous thought status."""
         return self._request("GET", CTM_STATUS_PATH)
+
+    def status(self) -> Tuple[int, Dict[str, Any]]:
+        """``GET /api/consciousness/status``: every component's status."""
+        return self._request("GET", STATUS_PATH)
+
+    def safety_resume(
+        self, speaker: str, speaker_token: Optional[str] = None
+    ) -> Tuple[int, Dict[str, Any]]:
+        """Asks the server to lift a suspension of the untrusted conversations.
+
+        The speaker name travels in the body and the token, when there is
+        one, in the token header; the server answers 403 unless the speaker
+        verifies as trusted.
+        """
+        headers: Dict[str, str] = {}
+        if speaker_token:
+            headers[SPEAKER_TOKEN_HEADER] = speaker_token
+        return self._request(
+            "POST", SAFETY_RESUME_PATH, {"speaker": speaker}, extra_headers=headers
+        )
 
 
 def _payload(raw: bytes) -> Dict[str, Any]:

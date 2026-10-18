@@ -1,6 +1,6 @@
 """The install date is written once in the configured time zone's calendar,
-the seed blocks keep Phase 5's neutral rules plus one install-date sentence,
-existing core blocks are kept, and only enabled stores are seeded."""
+the seed blocks keep the memory package's neutral rules plus one install-date
+sentence, existing core blocks are kept, and only enabled stores are seeded."""
 
 import asyncio
 import re
@@ -95,7 +95,7 @@ def test_identity_block_gets_install_date_sentence(tmp_path):
         render_seed_blocks(None, "not-a-date", settings=settings)
 
 
-def test_seed_blocks_keep_phase5_neutral_rules(tmp_path):
+def test_seed_blocks_keep_the_neutral_rules(tmp_path):
     settings = make_settings(tmp_path)
     blocks = render_seed_blocks(None, "2000-01-01", settings=settings)
     for name, text in blocks.items():

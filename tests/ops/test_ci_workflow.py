@@ -1,6 +1,7 @@
 """The CI workflows: read as data, never run."""
 
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -18,6 +19,34 @@ REQUIRED_JOBS = (
     "tests",
     "install-smoke",
     "license-audit",
+    "published-numbers",
+)
+ENV_FIXTURE = ROOT / "tests" / "fixtures" / "baseline_v050_env.txt"
+PUBLISHED_JOB = "published-numbers"
+PUBLISHED_RUNNER = "macos-14"
+PINNED_PACKAGES = ("numpy", "scipy", "torch", "snntorch", "reservoirpy")
+# The tests that hold the published numbers: the legacy preset, both v0.5.0
+# fixtures, seeded reproducibility, the exact Phi path and the DCM benchmark.
+PUBLISHED_TEST_FILES = (
+    "tests/test_legacy_preset.py",
+    "tests/test_v050_baseline.py",
+    "tests/test_run_assessment.py",
+    "tests/test_run_experiment.py",
+    "tests/assessment/test_phi_exact_path.py",
+    "tests/assessment/test_dcm_benchmark.py",
+)
+PUBLISHED_COMMAND = (
+    "python -m pytest "
+    + " ".join(PUBLISHED_TEST_FILES)
+    + ' -q -m "not db and not gpu" --timeout=900'
+)
+PUBLISHED_CONDITION = (
+    "github.event_name == 'schedule' || "
+    "github.event_name == 'workflow_dispatch' || "
+    "(github.event_name == 'pull_request' && github.base_ref == 'main')"
+)
+SKIP_ON_SCHEDULE = (
+    "github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'"
 )
 
 
@@ -44,7 +73,12 @@ def test_jobs_present():
     jobs = document["jobs"]
     assert set(jobs) == set(REQUIRED_JOBS)
     assert document["permissions"] == {"contents": "read"}
-    assert set(_triggers(document)) == {"push", "pull_request"}
+    assert set(_triggers(document)) == {
+        "push",
+        "pull_request",
+        "schedule",
+        "workflow_dispatch",
+    }
 
     sync = " ; ".join(_run_lines(jobs["env-sync"]))
     for check in (
@@ -179,3 +213,115 @@ def test_no_password_literals_in_workflows():
     # The detector is not vacuous.
     assert assignment.search("POSTGRES_PASSWORD: hunter2")
     assert assignment.search("api_key=abc")
+
+
+def _recorded_environment() -> Dict[str, str]:
+    """Package name to recorded version, plus the interpreter line."""
+    lines = ENV_FIXTURE.read_text(encoding="utf-8").splitlines()
+    recorded: Dict[str, str] = {"interpreter": lines[0]}
+    for line in lines[1:]:
+        parts = line.split()
+        if len(parts) == 2:
+            recorded[parts[0]] = parts[1]
+    return recorded
+
+
+def _published_job() -> Dict[str, Any]:
+    return _load(CI)["jobs"][PUBLISHED_JOB]
+
+
+def _pin_step() -> str:
+    """The run text of the step that writes the pins file."""
+    texts = [
+        str(step["run"])
+        for step in _published_job()["steps"]
+        if "run" in step
+        and "pins.txt" in step["run"]
+        and "pip install" not in step["run"]
+    ]
+    assert len(texts) == 1
+    return texts[0]
+
+
+def _run_pin_step(directory: Path, runner_temp: Path) -> "subprocess.CompletedProcess":
+    # A shell snippet over a text file: no mtc command, no store, no network.
+    return subprocess.run(
+        ["bash", "-e", "-c", _pin_step()],
+        cwd=directory,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "RUNNER_TEMP": str(runner_temp),
+            "MTC_DEVICE": "cpu",
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+def test_published_numbers_job_runs_where_the_fixtures_were_recorded():
+    job = _published_job()
+    interpreter = _recorded_environment()["interpreter"].split()
+    # The fixtures were recorded with this interpreter on arm64 macOS.
+    assert interpreter[0] == "python" and interpreter[2:] == ["arm64", "Darwin"]
+    assert job["runs-on"] == PUBLISHED_RUNNER
+    setup = [s for s in job["steps"] if "setup-python" in str(s.get("uses"))]
+    major_minor = ".".join(interpreter[1].split(".")[:2])
+    assert [step["with"]["python-version"] for step in setup] == [major_minor]
+    assert job["env"] == {"MTC_DEVICE": "cpu", "PYPHI_WELCOME_OFF": "yes"}
+
+
+def test_published_numbers_job_runs_the_slow_and_gated_tests():
+    job = _published_job()
+    lines = _run_lines(job)
+    joined = " ; ".join(lines)
+    # Exactly the command the job is for: slow tests included, the stores and
+    # the accelerator excluded, never the opt-in store switch.
+    assert PUBLISHED_COMMAND in lines
+    assert "not slow" not in PUBLISHED_COMMAND
+    assert "MTC_TEST_STORES" not in joined and "mtc serve" not in joined
+    for name in PUBLISHED_TEST_FILES:
+        assert (ROOT / name).is_file(), name
+    installs = [line for line in lines if "pip install" in line]
+    assert len(installs) == 1
+    assert '".[neural,fep,research,iit,dev]"' in installs[0]
+    assert '-c "$RUNNER_TEMP/pins.txt"' in installs[0]
+    # Only pull requests to main and the nightly run: not every push.
+    assert job["if"] == PUBLISHED_CONDITION
+
+
+def test_published_numbers_pins_are_read_from_the_recorded_environment(tmp_path):
+    assert "tests/fixtures/baseline_v050_env.txt" in _pin_step()
+    recorded = _recorded_environment()
+    done = _run_pin_step(ROOT, tmp_path)
+    assert done.returncode == 0, done.stderr
+    pins = (tmp_path / "pins.txt").read_text(encoding="utf-8").splitlines()
+    assert pins == [f"{name}=={recorded[name]}" for name in PINNED_PACKAGES]
+
+
+def test_the_pin_step_fails_when_the_record_lacks_a_package(tmp_path):
+    project = tmp_path / "project"
+    (project / "tests" / "fixtures").mkdir(parents=True)
+    kept = [
+        line
+        for line in ENV_FIXTURE.read_text(encoding="utf-8").splitlines()
+        if not line.startswith("torch ")
+    ]
+    (project / "tests" / "fixtures" / "baseline_v050_env.txt").write_text(
+        "\n".join(kept) + "\n", encoding="utf-8"
+    )
+    assert _run_pin_step(project, tmp_path).returncode != 0
+
+
+def test_only_the_published_numbers_job_runs_on_the_schedule_or_by_hand():
+    document = _load(CI)
+    (schedule,) = _triggers(document)["schedule"]
+    minute, hour, day, month, weekday = schedule["cron"].split()
+    # Nightly: every day of every month.
+    assert minute.isdigit() and hour.isdigit()
+    assert (day, month, weekday) == ("*", "*", "*")
+    for name, job in document["jobs"].items():
+        if name == PUBLISHED_JOB:
+            continue
+        assert job.get("if") == SKIP_ON_SCHEDULE, name

@@ -13,12 +13,15 @@ One entry point for setup, checks and day-to-day use::
     serve          start the API server (mtc.api.server)
     chat           talk through a running server
     ctm            start, stop or inspect continuous thought on a server
+    safety         show the safety stack's state or lift a suspension
     privacy-audit  audit a checkout or runtime directories for private data
 
 Exit codes, shared by every subcommand: 0 success; 1 a required check or the
 command's own work failed; 2 a usage or configuration error (a missing extra
 and a refused overwrite included); 3 a required service is unreachable; 130
-interrupted.
+interrupted. A command that builds a workspace on an install without the
+``fep`` extra prints the one ``MISSING EXTRA`` line of
+``mtc.cli.missing_extra`` to standard error, with no traceback, and exits 2.
 
 ``--project-dir`` changes the working directory before any Settings load, so
 ``PROJECT_ROOT`` and the environment file follow it. Every handler imports
@@ -43,6 +46,8 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from mtc.cli.missing_extra import explain_missing_extra, workspace_extra_line
+
 logger = logging.getLogger(__name__)
 
 EXIT_OK = 0
@@ -60,6 +65,7 @@ SUBCOMMANDS = (
     "serve",
     "chat",
     "ctm",
+    "safety",
     "privacy-audit",
 )
 CTM_STATES = ("awake", "drowsy", "dreaming", "deep_sleep")
@@ -77,6 +83,28 @@ CHAT_STATUS_MESSAGES: Dict[int, str] = {
     503: "The brain is unavailable: the model server is down or still loading.",
     504: "The model took too long and the turn was cancelled. Nothing was stored.",
 }
+# What a turn's error code means. The code is read before the status, because
+# one status (503) is shared by an unavailable brain and a safety check that
+# could not run; a code this table does not hold falls back to the status.
+CHAT_CODE_MESSAGES: Dict[str, str] = {
+    "blocked": CHAT_STATUS_MESSAGES[403],
+    "no_answer": CHAT_STATUS_MESSAGES[502],
+    "brain_unavailable": CHAT_STATUS_MESSAGES[503],
+    "safety_unavailable": (
+        "The safety check could not run, so the message was not processed and "
+        "nothing was stored. Try again later; mtc safety status shows the "
+        "safety stack's state."
+    ),
+    "generation_timeout": CHAT_STATUS_MESSAGES[504],
+}
+# The safety monitor's decision when it suspended the untrusted conversations
+# (a blocked turn's payload carries it as safety_decision).
+EMERGENCY_DECISION = "emergency_shutdown"
+RESUME_HINT = (
+    "Conversations from untrusted speakers are suspended after an "
+    "emergency-level safety score. A trusted speaker lifts that with: "
+    "mtc safety resume"
+)
 
 
 class UsageError(Exception):
@@ -89,6 +117,13 @@ def _say(text: str) -> None:
 
 def _complain(text: str) -> None:
     print(f"{PROG}: {text}", file=sys.stderr)
+
+
+def _report_missing_extra(line: str) -> int:
+    """Prints the one missing-extra line (it carries its own prefix) and returns
+    the usage exit code: a missing extra is a configuration error."""
+    print(line, file=sys.stderr)
+    return EXIT_USAGE
 
 
 def _version() -> str:
@@ -218,6 +253,18 @@ def build_parser() -> argparse.ArgumentParser:
     ctm_commands.add_parser("stop", help="stop the thought stream")
     ctm_commands.add_parser("status", help="show the thought stream's status")
 
+    safety = commands.add_parser(
+        "safety", help="the safety stack's state, or lift a suspension"
+    )
+    safety_commands = safety.add_subparsers(dest="safety_command", metavar="ACTION")
+    safety_commands.add_parser("status", help="show the safety stack's state")
+    safety_resume = safety_commands.add_parser(
+        "resume", help="lift a suspension of the untrusted conversations"
+    )
+    safety_resume.add_argument(
+        "--speaker", metavar="NAME", help="speak as NAME (default: the creator)"
+    )
+
     audit = commands.add_parser(
         "privacy-audit", help="audit a checkout or runtime directories"
     )
@@ -328,11 +375,19 @@ def _cmd_serve(args: argparse.Namespace, extras: List[str]) -> int:
         # exactly this import, inside this function.
         import mtc.api.server as server
     except ImportError as exc:
+        line = explain_missing_extra(exc)
+        if line is not None:
+            return _report_missing_extra(line)
         _complain(
             "mtc serve needs the api extra (pip install "
             f"'multi-theory-consciousness[api]'); missing module: {exc.name}"
         )
         return EXIT_USAGE
+    # The server library logs a failed startup and returns, so a missing
+    # extra would not reach this handler: ask before anything starts.
+    line = workspace_extra_line()
+    if line is not None:
+        return _report_missing_extra(line)
     host, port = str(cfg.API_HOST), int(cfg.API_PORT)
     if _port_in_use(host, port):
         _complain(
@@ -343,6 +398,10 @@ def _cmd_serve(args: argparse.Namespace, extras: List[str]) -> int:
     try:
         return int(server.main([]))
     except ImportError as exc:
+        # A missing pymdp is not a missing api extra.
+        line = explain_missing_extra(exc)
+        if line is not None:
+            return _report_missing_extra(line)
         _complain(f"mtc serve needs the api extra: {exc}")
         return EXIT_USAGE
     except OSError as exc:
@@ -358,20 +417,26 @@ def _cmd_serve(args: argparse.Namespace, extras: List[str]) -> int:
         return EXIT_FAILED if exc.code else EXIT_OK
 
 
+def _speaker_identity(name: Optional[str], cfg: Any) -> tuple:
+    """The speaker name (the creator by default) and the token configured for
+    it, or None for a name with no token."""
+    from mtc.pipeline import speaker_trust
+
+    speaker = name or cfg.CREATOR_NAME
+    try:
+        token = speaker_trust.token_for(speaker, cfg)
+    except ValueError as exc:
+        raise UsageError(str(exc)) from None
+    return speaker, token
+
+
 def _chat_identity(args: argparse.Namespace, cfg: Any) -> tuple:
     """The speaker name and token a chat turn presents, or ``(None, None)``."""
     if args.anonymous:
         if args.speaker:
             raise UsageError("--anonymous and --speaker cannot be combined")
         return None, None
-    from mtc.pipeline import speaker_trust
-
-    speaker = args.speaker or cfg.CREATOR_NAME
-    try:
-        token = speaker_trust.token_for(speaker, cfg)
-    except ValueError as exc:
-        raise UsageError(str(exc)) from None
-    return speaker, token
+    return _speaker_identity(args.speaker, cfg)
 
 
 def _chat_turn(client: Any, message: str, speaker: Any, token: Any, show: bool) -> int:
@@ -390,8 +455,15 @@ def _chat_turn(client: Any, message: str, speaker: Any, token: Any, show: bool) 
             _say(f"[thinking] {payload['thinking']}")
         _say(str(payload.get("response") or ""))
         return EXIT_OK
-    message_text = CHAT_STATUS_MESSAGES.get(status)
-    if status == 503 and "authentication" in str(payload.get("detail", "")):
+    code = payload.get("error_code")
+    message_text = CHAT_CODE_MESSAGES.get(code) if isinstance(code, str) else None
+    if message_text is None:
+        message_text = CHAT_STATUS_MESSAGES.get(status)
+    if (
+        status == 503
+        and message_text == CHAT_STATUS_MESSAGES[503]
+        and "authentication" in str(payload.get("detail", ""))
+    ):
         message_text = (
             "The server has authentication on but no API key configured. Set "
             "API_KEY (mtc init generates one) and restart it."
@@ -399,6 +471,8 @@ def _chat_turn(client: Any, message: str, speaker: Any, token: Any, show: bool) 
     if message_text is None:
         message_text = f"The turn failed (HTTP {status})."
     _complain(message_text)
+    if status == 403 and payload.get("safety_decision") == EMERGENCY_DECISION:
+        _complain(RESUME_HINT)
     return EXIT_FAILED
 
 
@@ -468,6 +542,105 @@ def _cmd_ctm(args: argparse.Namespace, extras: List[str]) -> int:
     _say(f"frequency: {frequency if frequency is not None else 'unknown'}")
     _say(f"quiet reason: {payload.get('quiet_reason') or 'none'}")
     return EXIT_OK
+
+
+def _yes_no(value: Any) -> str:
+    """``yes`` or ``no`` for a boolean, ``unknown`` for anything else."""
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return "unknown"
+
+
+def _safety_status(client: Any) -> int:
+    from mtc.cli.http import ApiUnreachable
+
+    try:
+        status, payload = client.status()
+    except ApiUnreachable:
+        _complain(f"no API server answered at {client.where}. Start it with mtc serve.")
+        return EXIT_UNREACHABLE
+    if status == 401:
+        _complain(CHAT_STATUS_MESSAGES[401])
+        return EXIT_FAILED
+    if status != 200:
+        _complain(f"safety status: the server answered HTTP {status}")
+        return EXIT_FAILED
+    section = payload.get("safety")
+    if not isinstance(section, dict):
+        _complain("safety status: the server reports no safety stack")
+        return EXIT_FAILED
+    monitor = section.get("safety_monitor")
+    monitor = monitor if isinstance(monitor, dict) else {}
+    if section.get("available") is True:
+        _say("safety stack: available")
+    elif section.get("available") is False:
+        # The server's error text is not echoed: the log has it.
+        _say("safety stack: not available (the last safety check failed; see the log)")
+    else:
+        _say("safety stack: unknown")
+    _say(f"safety mode: {monitor.get('safety_mode') or 'unknown'}")
+    suspended = monitor.get("suspended")
+    line = f"conversations suspended: {_yes_no(suspended)}"
+    if suspended is True:
+        line += " (a trusted speaker lifts this with: mtc safety resume)"
+    _say(line)
+    return EXIT_OK
+
+
+def _safety_resume(args: argparse.Namespace, client: Any, cfg: Any) -> int:
+    from mtc.cli.http import ApiUnreachable
+
+    speaker, token = _speaker_identity(args.speaker, cfg)
+    if token is None:
+        _complain(
+            "no token is configured for this speaker, so the server will treat "
+            "the name as unverified"
+        )
+    try:
+        status, payload = client.safety_resume(speaker, token)
+    except ApiUnreachable:
+        _complain(f"no API server answered at {client.where}. Start it with mtc serve.")
+        return EXIT_UNREACHABLE
+    if status == 200:
+        if payload.get("resumed") is True:
+            _say("conversations resumed: untrusted speakers can talk again")
+            return EXIT_OK
+        if payload.get("suspended") is True:
+            _complain("the suspension was not lifted; the server log says why")
+            return EXIT_FAILED
+        _say("conversations were not suspended; there was nothing to resume")
+        return EXIT_OK
+    if status == 401:
+        _complain(CHAT_STATUS_MESSAGES[401])
+    elif status == 403:
+        _complain(
+            "resuming needs a trusted speaker and the server did not accept "
+            "this one. Nothing was resumed."
+        )
+    elif status == 422:
+        _complain("The server rejected the request (check --speaker).")
+    elif status == 503:
+        detail = str(payload.get("detail") or "").strip()
+        _complain(
+            f"the server cannot resume conversations: {detail or 'it is not ready'}"
+        )
+    else:
+        _complain(f"resuming failed (HTTP {status}).")
+    return EXIT_FAILED
+
+
+def _cmd_safety(args: argparse.Namespace, extras: List[str]) -> int:
+    from mtc.cli.http import ApiClient
+
+    if args.safety_command not in ("status", "resume"):
+        raise UsageError("mtc safety needs an action: status or resume")
+    cfg = _load_settings()
+    client = ApiClient.from_settings(cfg)
+    if args.safety_command == "status":
+        return _safety_status(client)
+    return _safety_resume(args, client, cfg)
 
 
 def _privacy_lists(root: Path) -> tuple:
@@ -566,6 +739,7 @@ HANDLERS: Dict[str, Callable[[argparse.Namespace, List[str]], int]] = {
     "serve": _cmd_serve,
     "chat": _cmd_chat,
     "ctm": _cmd_ctm,
+    "safety": _cmd_safety,
     "privacy-audit": _cmd_privacy_audit,
 }
 
@@ -583,7 +757,7 @@ def _enter_project(path: str) -> None:
     os.chdir(target)
     from mtc.core import config
 
-    config._settings = None
+    config.reset_settings()
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -615,6 +789,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except UsageError as exc:
         _complain(str(exc))
         return EXIT_USAGE
+    except ImportError as exc:
+        # A command that builds a workspace on an install without the fep
+        # extra ends here with one plain line and no traceback; any other
+        # import error is not hidden.
+        line = explain_missing_extra(exc)
+        if line is None:
+            raise
+        return _report_missing_extra(line)
     except KeyboardInterrupt:
         _complain("interrupted")
         return EXIT_INTERRUPTED

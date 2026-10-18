@@ -40,6 +40,7 @@ MODULES = (
     "mtc.cli.main",
     "mtc.cli.doctor",
     "mtc.cli.http",
+    "mtc.cli.missing_extra",
     "mtc.onboarding",
     "mtc.onboarding.schema",
     "mtc.onboarding.wizard",

@@ -55,9 +55,12 @@ neural = [
 # fep: active inference through pymdp (its NumPy agent: pymdp.legacy from 1.0,
 # pymdp.agent before). The workspace builds active inference unconditionally,
 # so mtc assess, mtc serve and the demos need this extra (mtc doctor reports
-# its absence as a required failure). It stays an extra rather than a core
-# dependency because pymdp 0.0.7 pulls in matplotlib, pandas, seaborn, pytest
-# and a documentation theme; the release gate may revisit this.
+# its absence as a required failure, and a command that builds a workspace
+# without it stops with one MISSING EXTRA line and exit code 2). It stays an
+# extra rather than a core dependency because pymdp 0.0.7 pulls in
+# matplotlib, pandas, seaborn, pytest and a documentation theme; the release
+# gate revisited the question and kept the extra, because promoting an extra
+# to a core dependency later is not a breaking change and the reverse is.
 fep = [
     "inferactively-pymdp>=0.0.7",
 ]

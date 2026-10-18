@@ -35,11 +35,12 @@ Checks, in order, with whether each is required (a required ``failed`` exits
 - ``embedding_model`` (advisory): ``EMBEDDING_MODEL`` in the local model
   cache, looked up without network: a snapshot with its configuration and
   weights the embedder loads, which is what a fetch and the embedder's own
-  first use both leave. ``fetch_models`` downloads it: the files
-  the sentence embedder loads (one set of weights, the tokenizer and the
-  configuration, about 90 MB for the default model), never the exports of
-  the same weights for other runtimes that the model's repository also
-  holds.
+  first use both leave. ``fetch_models`` downloads it: one set of
+  weights, the tokenizer, the configuration and the repository's small
+  files (about 90 MB for the default model), never the exports of the same
+  weights for other runtimes that the model's repository also holds. The
+  result counts the files fetched and the files left on the hub, and does
+  not claim that the embedder reads every fetched file.
 - ``pyphi`` (advisory): PyPhi through the bridge's lazy loader, with its home
   under the checked Settings' ``DATA_DIRECTORY``
   (``pyphi_bridge.configure_pyphi_home``; the first import in a process
@@ -49,11 +50,15 @@ Checks, in order, with whether each is required (a required ``failed`` exits
   installs are left out and the rest runs. A missing ``fep`` extra is a
   required ``failed``: the workspace builds the active inference module
   unconditionally and that module raises without pymdp, so ``mtc assess``,
-  ``mtc serve`` and the demo cannot start and no indicator is measured. The
-  Needs column of ``docs/BUTLIN_2025_MAPPING.md`` says what each indicator
-  reads: it names the ``fep`` extra in a row and the ``neural`` extra in
-  none, so the ``neural`` detail points at that column and names no
-  indicator, and a test compares both statements with the document.
+  ``mtc serve`` and the demo stop at start (each with the one
+  ``MISSING EXTRA`` line of ``mtc.cli.missing_extra`` and exit code 2) and
+  no indicator is measured. The Needs column of
+  ``docs/BUTLIN_2025_MAPPING.md`` says what each indicator reads: it names
+  the ``fep`` extra in a row and active inference in others, and the
+  ``neural`` extra in none. The ``fep`` detail therefore names the
+  indicators that read active inference (``FEP_INDICATORS``), the ``neural``
+  detail points at that column and names no indicator, and a test compares
+  both statements with the document.
 - ``ctm`` (advisory): continuous thought's config, seed and persona sources
   and the quiet reason they predict.
 - ``service_manager`` and ``llm_backend`` (advisory): reported as set.
@@ -128,6 +133,20 @@ _STORE_ENABLE_FIELDS = {
 # (its Needs column); it names the neural extra in no row, so the neural
 # effect names no indicator.
 MAPPING_DOCUMENT = "docs/BUTLIN_2025_MAPPING.md"
+# The indicators whose Needs cell in MAPPING_DOCUMENT names the fep extra or
+# active inference, in document order; a test compares this list with the
+# document.
+FEP_INDICATORS: Sequence[str] = (
+    "sparse_smooth_coding",
+    "online_reportable_learning",
+    "prediction_error_minimization",
+    "hierarchical_prediction",
+    "temporal_prediction_depth",
+    "agent_environment_coupling",
+    "complex_agency",
+    "agency",
+    "fixed_repertoire",
+)
 EXTRA_MODULES: Dict[str, Sequence[str]] = {
     "neural": ("torch", "snntorch", "reservoirpy"),
     "fep": ("pymdp",),
@@ -140,8 +159,10 @@ EXTRA_EFFECTS: Dict[str, str] = {
     "each indicator's status",
     "fep": "active inference (pymdp) cannot be built and the workspace "
     "builds it unconditionally, so mtc assess, mtc serve and the full "
-    "pipeline demo fail at start and none of the indicators is measured "
-    "until the fep extra is installed",
+    "pipeline demo stop at start with one MISSING EXTRA line and none of the "
+    "indicators is measured until the fep extra is installed; the Needs "
+    f"column of {MAPPING_DOCUMENT} names this extra or active inference for "
+    "the indicators that read it: " + ", ".join(FEP_INDICATORS),
 }
 # Extras nothing runs without: missing, the check is a required failure.
 BLOCKING_EXTRAS: Sequence[str] = ("fep",)
@@ -634,14 +655,18 @@ def _named(path: str, patterns: Sequence[str]) -> bool:
 
 
 def _embedding_files(paths: Sequence[str]) -> List[str]:
-    """Return the files of a model repository that the sentence embedder loads.
+    """Return the files of a model repository worth fetching for the embedder.
 
     Left out: every file under an export directory or with an export suffix
     (the same weights for other runtimes), and a module directory's pickled
     weights when that directory also holds safetensors weights, which the
     loader prefers. A directory whose only weights are pickled keeps them.
     Everything else stays: the tokenizer and configuration files are small
-    and their names vary by model.
+    and their names vary by model. The result is therefore a superset of
+    what the embedder loads: it also holds the repository's small files that
+    the embedder never reads (the readme, the attributes file, training
+    scripts and data configurations), so the filter can only fetch too much,
+    never too little.
     """
 
     with_safetensors = {
@@ -744,10 +769,10 @@ def _check_embedding_model(
             required=False,
             data=data,
         )
-    # The repository is listed first, so that only the files the embedder
-    # loads are requested: a download without a file filter takes every
-    # export in the repository, about ten times the size for the default
-    # model.
+    # The repository is listed first, so that the exports for other runtimes
+    # and the duplicate weights are not requested: a download without a file
+    # filter takes every export in the repository, about ten times the size
+    # for the default model.
     try:
         listed = [str(path) for path in huggingface_hub.list_repo_files(repo)]
         wanted = _embedding_files(listed)
@@ -780,8 +805,9 @@ def _check_embedding_model(
         return CheckResult(
             name,
             OK,
-            f"{repo} was downloaded to the cache ({len(wanted)} files the "
-            f"sentence embedder loads; {left_out} files of other runtimes "
+            f"{repo} was downloaded to the cache ({len(wanted)} files "
+            "fetched: the weights, the tokenizer, the configuration and the "
+            f"repository's small files; {left_out} files of other runtimes "
             "and duplicate weights were left on the hub)",
             required=False,
             data=data,
@@ -846,16 +872,19 @@ def _check_extras() -> CheckResult:
     blocking = sorted(extra for extra in missing if extra in BLOCKING_EXTRAS)
     ordered = blocking + [extra for extra in missing if extra not in blocking]
     parts = [f"{extra} extra missing: {EXTRA_EFFECTS[extra]}" for extra in ordered]
+    data: Dict[str, Any] = {
+        "missing_extras": sorted(missing),
+        "missing_modules": missing,
+        "blocking_extras": blocking,
+    }
+    if "fep" in missing:
+        data["fep_indicators"] = list(FEP_INDICATORS)
     return CheckResult(
         "extras",
         FAILED if blocking else INSUFFICIENT,
         "; ".join(parts),
         required=bool(blocking),
-        data={
-            "missing_extras": sorted(missing),
-            "missing_modules": missing,
-            "blocking_extras": blocking,
-        },
+        data=data,
     )
 
 

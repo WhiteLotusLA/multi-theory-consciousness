@@ -87,6 +87,35 @@ def test_extras_reconciled():
             assert not any(vendor in item.lower() for item in items), vendor
 
 
+def _comment_above(text: str, line_start: str) -> str:
+    """The run of comment lines directly above the line starting ``line_start``."""
+    lines = text.splitlines()
+    index = next(i for i, line in enumerate(lines) if line.startswith(line_start))
+    block = []
+    for line in reversed(lines[:index]):
+        if not line.startswith("#"):
+            break
+        block.append(line.lstrip("# ").rstrip())
+    return " ".join(reversed(block))
+
+
+def test_fep_stays_an_extra_and_the_comment_records_the_decision():
+    project = _load()["project"]
+    core = {
+        re.split(r"[<>=!~ \[;@]", item, maxsplit=1)[0]
+        for item in project["dependencies"]
+    }
+    assert "inferactively-pymdp" not in core and "pymdp" not in core
+    assert [
+        re.split(r"[<>=!~ \[;@]", item, maxsplit=1)[0]
+        for item in project["optional-dependencies"]["fep"]
+    ] == ["inferactively-pymdp"]
+    comment = _comment_above(PYPROJECT.read_text(encoding="utf-8"), "fep = [")
+    assert "mtc assess, mtc serve and the demos need this extra" in comment
+    assert "the release gate revisited the question and kept the extra" in comment
+    assert "may revisit" not in comment
+
+
 def test_all_excludes_iit():
     extras = _load()["project"]["optional-dependencies"]
     included = _self_extras(extras["all"])

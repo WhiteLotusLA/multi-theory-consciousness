@@ -41,7 +41,7 @@ def test_baselines_from_package(empty_project):
     runner = BenchmarkRunner()
     baselines = runner.spec_manager.shipped_path("baselines")
     assert baselines == packaged_path("data/dcm/baselines")
-    comparison = runner._load_comparisons(0.5)
+    comparison = runner._load_comparisons(0.5, include_approximate=True)
     names = {p.stem for p in baselines.glob("*.json")}
     assert set(comparison) == names and names
     expected = json.loads((baselines / "human.json").read_text())

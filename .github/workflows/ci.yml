@@ -4,12 +4,17 @@ on:
   push:
     branches: [main, "feature/**"]
   pull_request:
+  # Nightly or by hand: only the published-numbers job runs on these.
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   privacy-audit:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       # Secrets cannot be tested in an `if:` directly, so expose the private
@@ -46,6 +51,7 @@ jobs:
         run: python scripts/privacy_audit.py --patch-from "origin/$BASE_REF"
 
   env-sync:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,6 +67,7 @@ jobs:
       - run: python scripts/sync_resources.py --check
 
   lint:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,6 +83,7 @@ jobs:
           shellcheck $(git ls-files 'scripts/*.sh')
 
   tests:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -94,6 +102,7 @@ jobs:
   # up from the example answers, the examples and the quick assessment with
   # the mock provider and in-memory stores, then an audit of what was written.
   install-smoke:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       MTC_DEVICE: cpu
@@ -138,6 +147,7 @@ jobs:
   # Every installed distribution has a licence the table allows. The iit
   # extra (PyPhi, GPL version 3 or later) is installed and audited on its own.
   license-audit:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -148,3 +158,34 @@ jobs:
       - run: python scripts/license_audit.py --extras all
       - run: pip install ".[iit]"
       - run: python scripts/license_audit.py --extras iit
+
+  # The published numbers. The tests that hold them (the legacy preset, both
+  # v0.5.0 fixtures, seeded reproducibility, the exact Phi path and the DCM
+  # benchmark) are slow or need extras the tests job does not install, so the
+  # tests job never runs them. This job does, on the platform and with the
+  # versions recorded in tests/fixtures/baseline_v050_env.txt (arm64 macOS, the
+  # recorded interpreter, numpy, scipy, torch and the two substrate packages
+  # pinned to the recorded versions, PyPhi through the iit extra's commit pin).
+  # It runs on pull requests to main, nightly and by hand (the maintainer can
+  # start it on the release candidate), not on every push.
+  published-numbers:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'main')
+    runs-on: macos-14
+    timeout-minutes: 120
+    env:
+      MTC_DEVICE: cpu
+      PYPHI_WELCOME_OFF: "yes"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Pin the versions recorded with the fixtures
+        run: |
+          for package in numpy scipy torch snntorch reservoirpy; do
+            awk -v name="$package" '$1 == name { print name "==" $2 }' tests/fixtures/baseline_v050_env.txt
+          done > "$RUNNER_TEMP/pins.txt"
+          cat "$RUNNER_TEMP/pins.txt"
+          test "$(wc -l < "$RUNNER_TEMP/pins.txt")" -eq 5
+      - run: pip install -c "$RUNNER_TEMP/pins.txt" -e ".[neural,fep,research,iit,dev]"
+      - run: python -m pytest tests/test_legacy_preset.py tests/test_v050_baseline.py tests/test_run_assessment.py tests/test_run_experiment.py tests/assessment/test_phi_exact_path.py tests/assessment/test_dcm_benchmark.py -q -m "not db and not gpu" --timeout=900
