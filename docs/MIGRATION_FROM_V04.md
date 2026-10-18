@@ -1,5 +1,20 @@
 # Migrating from v0.4.0
 
+The four headline numbers, seed 42, each a committed fixture that a test holds:
+
+| Run | `--preset legacy_v04` (the v0.4.0 behaviour) | v0.5.0 defaults |
+| --- | --- | --- |
+| Experiment runner (`scripts/run_experiment.py`, 25 warmup cycles) | 0.031247, 2 of 30 passing: every metric line of the v0.4.0 run (`tests/fixtures/baseline_v040_experiment.txt`) | 0.017317, 0 of 30 passing, status partial, coverage 0.800 (`tests/fixtures/baseline_v050_experiment.txt`) |
+| Seeded assessment (`scripts/run_assessment.py --full --json --seed 42`) | 0.333844, 13 of 30 passing, status partial, coverage 0.833 (`tests/fixtures/baseline_legacy_assessment.json`) | 0.275203, 11 of 30 passing, status partial, coverage 0.533 (`tests/fixtures/baseline_v050_assessment.json`) |
+
+The legacy column does not move: the preset reproduces every printed metric
+line of the v0.4.0 experiment run and every field of the legacy seeded
+assessment except three wall-clock readouts (see Reproducing v0.4.0). The
+v0.5.0 column measures the corrected system; the sections below name the
+switch behind every line that moved. The maintainer will publish an erratum
+note for the paper's v0.4.0 numbers; until then this record is the reference
+for the difference.
+
 ## Why the numbers changed
 
 v0.5.0 resyncs the active inference, metacognition, beautiful loop, Damasio and
@@ -7,12 +22,36 @@ PAD modules, the global workspace, the attention schema and the PhiTracker, the
 30 plus 3 indicator assessment, the measurement framework, RPT, causal
 emergence, the DCM benchmark and the SNN, HTM, LSM and oscillator substrates
 with the reference implementation, and fixes several defects that v0.4.0
-measured around rather than fixed. Each behaviour change that can move an
-indicator score sits behind a constructor config field whose default is the new
-behaviour. Scores from v0.5.0 defaults are therefore not comparable with the
-published v0.4.0 numbers. They are not worse or better by construction; they
-measure a different (corrected) system, and the assessment now says what it
-could not measure (`insufficient_data`) instead of substituting a constant.
+measured around rather than fixed. Each behaviour change that can move a
+published number (either runner, under either configuration) sits behind a
+switch whose default is the new behaviour: a constructor config field, or for
+`runner.assess_blt_source` a runner key the assessment CLI reads. Scores from
+v0.5.0 defaults are therefore not comparable with the published v0.4.0
+numbers. They are not worse or better by construction; they measure a
+different (corrected) system, and the assessment now says what it could not
+measure (`insufficient_data`) instead of substituting a constant. A fix
+whose output no published number depends on carries no switch; those are
+listed under Fixes without a switch.
+
+A whole-branch review before the release found more defects of the same kind.
+Their fixes add the ten Phase 9 rows of the Switches section and move the
+overall score and the passing count of both v0.5.0 runs: the workspace
+registers no acknowledgement-only broadcast receivers and reports no ignition sustain rate until a sustain check runs, so
+global_broadcast, recurrent_processing, ignition_dynamics and
+global_ignition_nuanced report insufficient_data; attention_schema reports
+insufficient_data until a focus prediction has been scored; the beautiful
+loop binds only winners that carry their own numeric vector; and the seeded
+assessment reads the loop the warmup drives. The Phase 9 measurements section
+attributes every moved line; the legacy column was proven again after those
+fixes.
+
+Not changed in this release, and expected to move numbers when it is: the
+small-sample correction of the module-graph integration proxy. On module
+signals that never change the proxy reads about 0.5 bits when its
+128-transition warm-up ends and falls roughly as one over the number of
+transitions ([HONEST_LIMITATIONS.md](HONEST_LIMITATIONS.md), section 13); a
+correction would move the salience bias of every default run, so it is
+left as an open follow-up.
 
 ## Reproducing v0.4.0
 
@@ -88,7 +127,7 @@ runner's attention module and the workspace's own one (through
 | `runner.warmup_profile` | `v04` | `v05` | The warmup feeds the attention schema alternating voluntary and captured shifts, with goal-driven ones, instead of captured shifts only, so typed provenance has chosen shifts to count. | Voluntary ratio in the runner. A runner setting; it changes no module default. |
 | `phi.scale` | (none) | 1.0 | New. The PhiTracker's integration proxy is reported in raw bits; this multiplies it. The runner's own lightweight tracker is gone: the real tracker is attached to the workspace. The tracker's module graph has five nodes named after theories, but two of them read other layers: the AST node is the protoself stability and the HOT node the core layer's feeling of knowing (the FEP node the most urgent drive's urgency, the BLT node the binding quality or, while binding is unmeasured, the loop quality, the GWT node the integration level or a composite of the conscious flag and the ignition count). | Nothing at 1.0. |
 | `phi.warmup_reference` | (none) | 5.0 | New. Denominator of the normalized readout until enough values exist for a percentile; a display calibration, never part of the measurement. The readout is over the same five module signals, so a partition that separates the AST or HOT node separates the protoself and core-layer signals, not the attention schema or the higher-order thought module. | The normalized Phi readout during warm-up only. |
-| `assessment.indicator_formulas` | `v04` | `v05` | The indicators read the statistics their producers emit: the bottleneck's `total_competitions`, `avg_candidates` and `source_distribution` instead of a `competition` key the workspace never emits; `peak_depth` instead of `max_depth_reached`; `total_hots_generated` instead of `total_generated`; a numeric prediction-error trend from the inference history instead of a text label that never compared equal to a number; the agent's real policy count; zero floors where v0.4.0 granted presence credit. Under v05 the causal_emergence pass rule is also strict (`score > threshold`, because sigmoid(0) is exactly 0.5); the v04 rule is inclusive. | sequential_module_querying, organized_percepts, flexible_responsiveness, genuine_implementation, epistemic_depth, no_metacognitive_access, prediction_error_minimization, complex_agency, temporal_prediction_depth, recurrent_processing, online_reportable_learning, agency and embodiment. In the runner, under the Phase 3 defaults, it moved FEP from 0.009010 to 0.081411 and RPT from 0.003695 to 0.005109 (the Phase 3 record). Under the Phase 9 defaults, `v04` set alone prints 0.010680, 0 passing, measured, coverage 1.000 against the default 0.017317, 0 passing, partial, 0.800: FEP 0.017706 to 0.042338, RPT 0.004442 to 0.008566, AE 0.011778 to 0.002917 and GWT 0.009726 to 0.000000 (v04 to v05; the v04 bodies read the six unmeasured indicators as the v0.4.0 constants, so they count in the averages and the coverage again). Through the pass rule it also acts on `passing_count` together with `assessment.causal_emergence_threshold` (see that row). |
+| `assessment.indicator_formulas` | `v04` | `v05` | The indicators read the statistics their producers emit: the bottleneck's `total_competitions`, `avg_candidates` and `source_distribution` instead of a `competition` key the workspace never emits; `peak_depth` instead of `max_depth_reached`; `total_hots_generated` instead of `total_generated`; a numeric prediction-error trend from the inference history instead of a text label that never compared equal to a number; the agent's real policy count; zero floors where v0.4.0 granted presence credit. Under v05 the causal_emergence pass rule is also strict (`score > threshold`, because sigmoid(0) is exactly 0.5); the v04 rule is inclusive. The noise stubs of the assessment CLI's baseline pass ride on this switch too: `v04` keeps the v0.4.0 stubs (see Fixes without a switch). | sequential_module_querying, organized_percepts, flexible_responsiveness, genuine_implementation, epistemic_depth, no_metacognitive_access, prediction_error_minimization, complex_agency, temporal_prediction_depth, recurrent_processing, online_reportable_learning, agency and embodiment. In the runner, under the Phase 3 defaults, it moved FEP from 0.009010 to 0.081411 and RPT from 0.003695 to 0.005109 (the Phase 3 record). Under the Phase 9 defaults, `v04` set alone prints 0.010680, 0 passing, measured, coverage 1.000 against the default 0.017317, 0 passing, partial, 0.800: FEP 0.017706 to 0.042338, RPT 0.004442 to 0.008566, AE 0.011778 to 0.002917 and GWT 0.009726 to 0.000000 (v04 to v05; the v04 bodies read the six unmeasured indicators as the v0.4.0 constants, so they count in the averages and the coverage again). Through the pass rule it also acts on `passing_count` together with `assessment.causal_emergence_threshold` (see that row). |
 | `assessment.missing_signal_policy` | `v04_constants` | `insufficient_data` | A module the caller did not supply scores 0.0 as absent; a supplied module that has not produced its evidence yet is reported by name and left out of the averages and the passing count, instead of a 0.1, 0.3 or 0.5 stand-in. | Any indicator whose module has no data, plus the report's `status`, `coverage` and confidence. In the experiment runner nothing under the Phase 3 defaults, where every indicator was measured after 25 cycles (the Phase 3 record); under the Phase 9 defaults six indicators are unmeasured there as well, so `v04_constants` set alone moves the runner from 0.017317, 0 passing, partial, coverage 0.800 to 0.015245, 0 passing, measured, coverage 1.000 (default to legacy value: gwt 0.000000 to 0.008626, rpt 0.008566 to 0.006852, the other theory lines unchanged). In the seeded assessment CLI eight indicators are named under the Phase 9 defaults and coverage reads 0.533 (five and 0.633 in the Phase 3 record). |
 | `assessment.irreducibility_method` | `spectral_entropy` | `weighted_fiedler` | The algebraic connectivity of the symmetrized weighted graph through its normalized Laplacian, instead of a spectral entropy that a 1e-9 binarization turned into a complete graph for any dense matrix. | irreducibility. In the runner IIT moved from 0.005406 to 0.026167 under the Phase 3 defaults (the Phase 3 record) and moves from 0.013354 to 0.034115 under the Phase 9 defaults (`spectral_entropy` set alone; overall 0.014588 to 0.017317, no other theory line moves): both methods read the random connectivity close to their own noise mean (0.857 against 0.845 for `weighted_fiedler`, 0.754 against 0.750 for `spectral_entropy`, unchanged since Phase 3), so the move is seed position under a different statistic, not signal. |
 | `assessment.causal_emergence_threshold` | 0.0 | 0.5 | The causal emergence indicator passes only when the macro scale carries more causal power than the micro scale (a score strictly above sigmoid(0) = 0.5 under the v05 pass rule). At 0.0 with the inclusive v04 rule every causal_emergence result passed, including an absent analyzer scored 0.0: the v0.4.0 assessment fixture passes it that way (score 0.0, threshold 0.0, `analyzer not provided`). | The pass decision of causal_emergence, so `passing_count`. Under the legacy preset it is one of the two runner passes (normalized 0.000 at threshold 0.0, inclusive; the other is affect_coherence), and in the seeded assessment CLI one of the legacy run's 13. Set alone on top of the Phase 3 defaults it was inert (0.021675, 1 passing: the Phase 3 record), because causal_emergence normalized to 0.000 there and 0.0 > 0.0 is false under the strict v05 rule. Under the Phase 9 defaults it is not inert: causal_emergence normalizes to 0.024 (raw 0.708 against 0.701, see the moved-indicator table), which is above a threshold of 0.0 under the strict rule, so the threshold at 0.0 set alone prints 0.017317, 1 passing, partial, 0.800 against the default's 0 passing, with no theory line moved (the one-switch table of the Phase 9 measurements). |
@@ -99,8 +138,7 @@ runner's attention module and the workspace's own one (through
 | `pad.coherence_window` | 20 | 20 | New tuning key of the default method: the number of recent states the autocorrelation reads. | Nothing at the default; inert under `v04_variance`, so no preset value. |
 | `pad.coherence_min_history` | 10 | 10 | New tuning key of the default method: states needed before a coherence is reported. | Nothing at the default; inert under `v04_variance`, so no preset value. |
 | `causal_emergence.tpm_row_order` | `little_endian` | `big_endian` | The analyzer reorders the PhiTracker's big-endian rows before coarse-graining, so the macro partition groups the right source states; `little_endian` reads the rows as given, which matched the v0.4.0 warmup tracker but not the rebuilt one. | causal_emergence. Under the Phase 3 defaults the normalized score was 0.0 either way and the analyzer's causal_emergence value read 0.725 under the default order (its raw score 0.810 against a noise baseline of 0.810; the same values for every seed and candidate feed there, because the recorded module-state transitions did not depend on the random stream) and 0.652 under the legacy order (raw score 0.787; the Phase 3 record). Under the Phase 9 defaults the tracker's HOT and BLT nodes carry measured signals, so the transitions follow the other switches (see the moved-indicator table): the default order's raw score reads 0.708 against a noise baseline of 0.701 (normalized 0.024; the analyzer's value 0.443), and `little_endian` set alone reads a raw score of 0.842 against 0.834 (normalized 0.046; the analyzer's value 0.837), so iit_score prints 0.041616 against the default 0.034115 (overall 0.018500; irreducibility and integrated_information unchanged, no other theory line moves). |
-| `rpt.stdp_plasticity_enabled` | false | true | RPT adds a plasticity component (min(1, 2 x mean weight standard deviation + weight diversity)) when a caller passes the SNN's STDP statistics with `plasticity_active`; phenomenal recurrence stays equal to local, so plasticity is counted once. | local_recurrence and algorithmic_recurrence once an SNN's STDP statistics are supplied. Inert in both runners, which pass synthetic spike counts without them. |
-
+| `rpt.stdp_plasticity_enabled` | false | true | RPT adds a plasticity component (min(1, 2 x mean weight standard deviation + weight diversity)) when a caller passes the SNN's STDP statistics with `plasticity_active`; the local recurrence index stays equal to the local score, so plasticity is counted once. | local_recurrence and algorithmic_recurrence once an SNN's STDP statistics are supplied. Inert in both runners, which pass synthetic spike counts without them. |
 | `cycle.drive_candidates` | false | true | Urgent homeostatic drives become HOMEOSTATIC workspace candidates each cycle. | Workspace competition in the live pipeline. Both runners pin it off unless the key is set, so no runner number moves. |
 | `cycle.drive_urgency_threshold` | (no drive candidates) | 0.5 | Urgency above which a drive becomes a candidate. | Nothing while `cycle.drive_candidates` is off. |
 | `cycle.prospective_candidates` | false | true | The prospective simulation generated after a cycle is injected as an INTERNAL candidate of the next. | Workspace competition in the live pipeline; pinned off in the runners unless set. |
@@ -178,12 +216,30 @@ because no published v0.4.0 number depended on the path:
 
 - The PhiCalculator's exact path passed a keyword PyPhi rejects, so it raised and fell back to the spectral proxy on every call; it now runs through the PyPhi bridge when a TPM is supplied. Every reported v0.4.0 Phi came from the proxy, which is unchanged.
 - `run_normalized_assessment` normalized an already normalized report; it now requests raw scores. No published number used that method.
-- The noise stubs emit the producers' schema (bottleneck keys, `peak_depth`, numeric prediction errors). Only the stub-based baseline reads them; both runners compute their baselines from real modules.
+- The noise stubs emit the producers' schema (bottleneck keys, `peak_depth`, numeric prediction errors). Only the stub-based baseline reads them. This change has no switch of its own: it rides on `assessment.indicator_formulas`, whose `v04` value keeps the v0.4.0 stubs in the noise pass, so no v0.4.0 number moves. The experiment runner computes its baselines from real modules; the assessment CLI passes none, so it normalises against this stub pass and its v0.5.0 numbers (the seeded assessment fixture) include the change under the default `v05`.
 - The legacy 14-indicator integration never awaited its indicators (every score was a coroutine, and the mean raised) and its workspace-integration metric read a NaN correlation on constant vectors as 1.0; it now awaits each indicator and reports `insufficient_data` with zero confidence when nothing was measured. It produced no value in v0.4.0, so there is no number to reproduce.
 - The measurement framework matches self-reference and identity words as tokens ("this is fine" is not a self-reference), its Phi metric is documented as a spectral proxy, and `measure_consciousness` no longer imports PyPhi. No published number used it.
 - DCM: the benchmark's result history is capped at 50 and `get_latest()` reloads the newest saved result; the evaluator's cache is keyed by its inputs and its model id comes from `Settings.ANTHROPIC_MODEL`; the reference adapter reads module statistics instead of constants. No runner reads any of it.
 - Substrates: the SNN's membrane and trace decay are computed in seconds per step (`SNNConfig.dt`, default 1e-3; dt = 1.0 reproduces the v0.4.0 network, which was silent), the SNN reports population synchrony and STDP statistics, the HTM scores anomaly against the predictions made before the step (v0.4.0 read about 1.0 every step) and reports None before any input, the oscillator restore rejects non-finite phases and couplings, the LSM readout persists, and protocol timestamps are timezone-aware UTC. Neither runner runs a substrate, so there is no runner delta, and `SNNConfig.dt` gets no schema row because no runner reads it.
 - The neural orchestrator imports the measurement framework from `mtc.assessment.framework`, reports its optional components as missing instead of silently absent, awaits the continuous-thought stop on shutdown and keeps the latest substrate signals. No runner delta.
+
+The release gate added these, none of which a published number reads:
+
+- The legacy 14-metric measurement framework (`mtc.assessment.framework`) is repaired and kept. It returned Phi 0.0 for every input, NaN-derived values, a constant confidence of 0.5 and a fixed ten percent interval; its metrics are now Optional, the Phi entry is a spectral integration proxy over (time, units) arrays with at least three rows (None for a one-dimensional snapshot, and exported as `spectral_integration_proxy`), the four metrics that need an HTM array are None without one, a confidence interval exists only with more than 30 historical values, and the analysis averages only the measured metrics and labels the rest `not_measured`. `measure_consciousness` loses its `input_data` parameter and the native HTM path. No runner or assessment number comes from this framework.
+- The legacy 14-indicator panel's global workspace indicator reports a missing input, because its token-attention vector has no producer, and is left out of the legacy aggregate and its coverage; the panel's level and coverage move accordingly.
+- The DCM reference adapter no longer reports four indicators derived from the configured planning horizon, reports the informational bottleneck only when there were broadcasts and the coverage lies strictly between 0 and 1, and omits the binding indicators when no binding was measured (and, under decision D5, when the binding layer's zero-stimulus floor leaves less than 0.1 headroom) instead of copying the workspace coverage into them.
+- The spectral Phi proxy rejects a connectivity matrix that is not square, does not match the state or holds non-finite values: integrated_information then reports insufficient_data with the error in `phi_error`, where an integration term of 0.5 or a density fallback was substituted. Both runners pass square, finite connectivity.
+- The production liquid-state machine reports no Lyapunov estimate or edge-of-chaos score for fewer than ten states (it read a perfect 1.0), reports no valence or arousal until its readout was trained or restored (the raw `readout_mean` and `readout_std` are new keys), and seeds the reservoir library at construction instead of at import.
+- The active inference report is empty on a fresh module: the trend sentence needs more than ten prediction errors, the urgent-need sentence a positive urgency and the free-energy sentence an inference that ran, and the low branch reads "Low free energy." with no accuracy claim.
+- The workspace's integration level is None without two usable signals (a constant vector is dropped, not fatal), where it read 0.0 without signals and 0.5 for one; the observation channel and the homeostasis activity still receive 0.0 for it. No runner passes neural signals.
+- PAD: the label reads Neutral inside a pleasure band of 0.1 around zero, and `PADAffectModel.compute(sources, measured=...)` with a list of measured inputs renormalises each dimension over them and returns None when a dimension has none. Called without the list the arithmetic is unchanged, and both runners keep `cycle.pad_from_state` off, so only the live pipeline's coordinate changes.
+- The perceptual reality monitor's discrimination uses only attribution confidences a caller supplied and is None otherwise; the 0.9 class prior (`DEFAULT_ATTRIBUTION`) is gone, so the pipeline's `prm_discrimination` is None until an attribution source exists.
+- Memory: the simple consolidation pass writes the group-size strength with no confidence and no consolidation strength, a missing semantic strength or confidence reads as None instead of 0.5, and both copies of the episodic DDL drop the defaults of 0.5 on semantic strength and confidence and of 0 on consolidation strength (this is the first public release of the schema, so no installed base needs a migration); an unmeasured concept importance is not written.
+- Gists and vectors: a gist's average salience, importance and retention are Optional, a vector point's emotional weight is the measured emotion intensity or None (it was the importance divided by ten), and a gist whose retention is unknown is never expired, never returned under a `min_retention` floor and computed by the next retention refresh, which now walks every stored gist.
+- The core layer's somatic valence is None when no somatic marker exists, so the PAD extractor no longer lists it as a measured input with the value 0.0.
+- The extended layer reports narrative coherence, temporal horizon, episodic resonance and identity continuity as None when nothing measures them (no 0.3 constant and no 0.3 base); `autobiographic_continuity` is None in that case.
+- An indicator that raises is counted under `failures` (`indicator:<name>`), carries `failed: true` in its evidence and is re-raised when `DEBUG` is on; the report and `mtc assess --json` carry the new top-level `failures` mapping, empty on a clean run. The `v04_constants` path is unchanged, and no indicator raises in either published run.
+- Four fixes reach `mtc assess` paths that no fixture covers; each is described under "Fixes without a switch outside the published runs" in the Phase 9 measurements section: the restored causal emergence result under `--state-dir`; the restored PhiTracker that keeps its constructor's settings under `--state-dir`; quick mode handing the assessment the workspace's PhiTracker, so integrated_information reads insufficient_data instead of absent; and the hyper-model's recursive confidence, None until a meta-error has been observed.
 
 ## Measured effect
 
@@ -224,7 +280,7 @@ from the same synthetic warmup, so a low score means the runner's activity is no
 separable from that noise here; it is a statement about this warmup, not a
 verdict on the system.
 
-One-at-a-time runs of the Phase 1 switches (the v0.5.0 defaults with a single
+One-at-a-time runs of the Phase 1 switches (the Phase 1 defaults with a single
 switch set to its v0.4.0 value) show that `fep.hpp_hidden_dim_multiplier = 2` alone reproduces the
 baseline exactly. Every other switch, set alone to its v0.4.0 value, left every theory score
 unchanged in this runner. A flat runner result is a statement about this
@@ -780,7 +836,8 @@ which embeds every episodic row that has no point yet.
 
 **The `mtc` command.** One console script replaces the loose scripts as the
 entry point: `mtc init`, `mtc doctor`, `mtc db init`, `mtc db check`,
-`mtc assess`, `mtc serve`, `mtc chat`, `mtc ctm` and `mtc privacy-audit`.
+`mtc assess`, `mtc serve`, `mtc chat`, `mtc ctm`, `mtc safety` and
+`mtc privacy-audit`.
 `scripts/run_assessment.py` still works: it is a shim over `mtc assess`, with
 the same flags and the same results.
 
@@ -797,3 +854,100 @@ in `.env` to keep it.
 alias, so `pip install ".[assessment]"` keeps working. The `iit` extra (PyPhi)
 needs Python 3.12 or later and is never part of `all`; see
 [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md) for its licence.
+
+**Settings keys that nothing read are removed.** 51 keys had no reader in the
+code; each is removed, because a reader for the threshold or size families
+would be a second route, outside the switches, for moving a number
+(`GWT_IGNITION_THRESHOLD`, for example, was 0.4 where the runner uses 0.3).
+`ABLATION_OUTPUT_DIR` stays and is now read by the ablation study. By family:
+
+- service and paths: `SERVICE_HOST`, `ENVIRONMENT`, `MODEL_DIRECTORY`,
+  `TEMP_DIRECTORY`, `DB_POOL_RECYCLE_TIME`;
+- the model: `MODEL_QUANTIZATION`, `VISION_ENABLED`;
+- substrate sizes: `SNN_NEURONS`, `SNN_HIDDEN_NEURONS`, `SNN_INPUT_NEURONS`,
+  `SNN_OUTPUT_NEURONS`, `LSM_NEURONS`, `LSM_SPECTRAL_RADIUS`,
+  `LSM_INPUT_SCALING`;
+- consciousness toggles: `CONSCIOUSNESS_CYCLE_MS`, `CONSCIOUSNESS_ENABLED`,
+  `META_COGNITION_ENABLED`, `SELF_REFLECTION_ENABLED`;
+- indicator thresholds and the noise baseline: `GWT_BROADCAST_THRESHOLD`,
+  `GWT_IGNITION_THRESHOLD`, `GWT_WORKSPACE_CAPACITY`,
+  `AST_ATTENTION_THRESHOLD`, `AST_CONTROL_THRESHOLD`,
+  `HOT_REPRESENTATION_THRESHOLD`, `HOT_METACOGNITION_THRESHOLD`,
+  `FEP_PREDICTION_ERROR_THRESHOLD`, `FEP_HIERARCHICAL_THRESHOLD`,
+  `FEP_AGENCY_THRESHOLD`, `IIT_PHI_THRESHOLD`, `IIT_IRREDUCIBILITY_THRESHOLD`,
+  `RPT_LOCAL_THRESHOLD`, `RPT_GLOBAL_THRESHOLD`, `BLT_BINDING_THRESHOLD`,
+  `BLT_DEPTH_THRESHOLD`, `BLT_GENUINE_THRESHOLD`,
+  `CONSCIOUSNESS_SCORE_THRESHOLD`, `CONSCIOUSNESS_PASSING_RATIO`,
+  `NOISE_BASELINE_ITERATIONS`, `NOISE_FLAG_THRESHOLD`, `TRACK_INDICATORS`;
+- memory: `WORKING_MEMORY_DURATION`, `EPISODIC_MEMORY_RETENTION`,
+  `SEMANTIC_MEMORY_PERMANENT`;
+- emotion: `EMOTIONAL_MODEL`, `EMOTION_DECAY_RATE`,
+  `EMOTION_AMPLIFICATION_MAX`, `EMOTIONAL_MEMORY_WEIGHT`,
+  `PATTERN_RECOGNITION_ENABLED`;
+- monitoring export: `PROMETHEUS_ENABLED`, `PROMETHEUS_PORT`,
+  `METRICS_EXPORT_INTERVAL`.
+
+`Settings` ignores keys it does not know, so an env file that still sets one
+of these (with the `MTC_` prefix) is read without error and the value has no
+effect. `tests/core/test_settings_have_readers.py` keeps every remaining field
+read.
+
+**New keys and a changed default.** `SLEEP_PRUNE_DRY_RUN` (false: night sleep
+deletes the memories the pruner scores as weak; true logs what would be
+removed), `SAFETY_GATE_FAIL_CLOSED` (true: an untrusted speaker's turn whose
+safety check could not run ends with `safety_unavailable` and stores nothing)
+and `TRUST_COMPASS_DEEP_MODE` (true: the trust compass may ask the brain for a
+reflection when its keyword screen or the safety monitor's scores call for
+one). `EMERGENCY_SHUTDOWN_ENABLED`
+moved from true to false: an emergency-level score denies the message and
+alerts the escalation role, and suspending every untrusted conversation is
+opt-in, lifted with `mtc safety resume` or `POST /api/safety/resume`. See
+[SECURITY.md](SECURITY.md) and [OPERATIONS.md](OPERATIONS.md).
+
+**Secrets and the store URLs.** `repr(Settings)` and `model_dump()` leave out
+the seven secret fields (`API_KEY`, `ANTHROPIC_API_KEY`, `SPEAKER_TOKENS` and
+the four store passwords). `POSTGRES_URL`, `MONGODB_URL` and `REDIS_URL` are
+plain properties instead of pydantic computed fields, so they leave the repr,
+the dumps and `model_computed_fields`, and they percent-quote the user and
+the password (`REDIS_URL` carries a password only); reading them as attributes
+is unchanged.
+
+**Removed modules.** `mtc/consciousness/global_workspace.py`, the v0.1.0
+simple workspace, is removed with its `global_workspace` component row in the
+neural orchestrator: nothing consulted it, and its salience used 0.5
+stand-ins. `EnhancedGlobalWorkspace` is the workspace. The unused
+`mtc/neural/spiking/snn_core.py` is removed (the spiking package keeps
+`production_snn`, `snn_core_optimized` and `emotion_encoder`), and so is
+`experiments/program.md`, stale notes for a parameter-research loop.
+
+**Renamed recurrence fields.** `RecurrenceMetrics.phenomenal_consciousness`
+and `access_consciousness` are `local_recurrence_index` and
+`combined_recurrence_index`, and the `latest` entry of the RPT statistics
+names them `local_index` and `combined_index` (it said `phenomenal` and
+`access`). The values are unchanged; they are recurrence statistics, which the
+theory associates with those notions. A state saved under the old names still
+restores.
+
+**Runner pins and schema bounds.** Both runners pin `hot.introspection_cooldown`
+at 0.0 unless the overrides set it, because the cooldown is a wall-clock gate
+and two runs of one seed must agree; the live runtime keeps the module's
+1.0 s. The schema minimum of `hot.introspection_cooldown` is 0.0 (it was 0.1)
+and that of `blt.num_levels` is 2 (it was 1; `BeautifulLoop(num_levels=1)`
+raises). The refractory clock has no pin: a workspace built directly keeps the
+simulated per-cycle clock and the live runtime sets `gwt.refractory_clock =
+elapsed`. What the cooldown pin does to the numbers is recorded under "What
+the cooldown pin removes".
+
+**The package root stays eager.** `mtc/__init__.py` keeps its public names,
+and importing `mtc` loads no torch, PyPhi, pymdp, scipy, web framework or
+store client (`tests/assessment/test_torch_import_isolation.py`). Every
+import of an `mtc` module still loads the assessment package.
+
+**The `fep` extra is the minimum that runs the assessment.** The workspace
+builds active inference unconditionally, and that module needs pymdp. On a
+bare install `mtc assess`, `mtc serve`, `mtc chat` when it builds a runtime,
+`mtc ctm`, the demo (`examples/full_pipeline_demo.py`) and the three other
+examples that build a workspace each stop
+with one `MISSING EXTRA` line on stderr and exit code 2; `mtc doctor` reports
+the missing extra as a required failure and names the indicators that read
+it.

@@ -4,7 +4,7 @@ This document tracks MTC releases and their relationship to publications.
 
 | Version | Date | Highlights | Notes |
 |---------|------|-----------|-------|
-| v0.5.0 | 2026-10-18 | The complete generic architecture: measurement defects of v0.4.0 fixed behind switches, the conversation runtime, five optional stores with in-memory defaults, the API, the `mtc` command with onboarding, setup and operations tooling; the release-gate fixes, with ten more switches, a fail-closed safety gate, opt-in emergency suspension with a resume path, and baseline tests that hold every printed line and report field. | Scores are not comparable with v0.4.0; the `legacy_v04` preset reproduces v0.4.0 (0.031247 with 2 passing in the experiment runner). See docs/MIGRATION_FROM_V04.md and CHANGELOG.md |
+| v0.5.0 | 2026-10-18 | The complete generic architecture: measurement defects of v0.4.0 fixed (behind switches where a published number depended on them), the conversation runtime, five optional stores with in-memory defaults, the API, the `mtc` command with onboarding, setup and operations tooling; the release-gate fixes, with ten more switches, a fail-closed safety gate, opt-in emergency suspension with a resume path, and baseline tests that hold every printed metric line and every report field (less three wall-clock readouts of the legacy seeded assessment). | Scores are not comparable with v0.4.0; the `legacy_v04` preset reproduces v0.4.0 (0.031247 with 2 of 30 passing in the experiment runner), and the seeded assessment reads 0.333844 with 13 of 30 passing under the preset. The v0.5.0 defaults give 0.017317 with 0 of 30 passing (partial, coverage 0.800) and 0.275203 with 11 of 30 passing (partial, coverage 0.533). See docs/MIGRATION_FROM_V04.md and CHANGELOG.md |
 | v0.4.0 | 2026-04-07 | Butlin 2025 alignment: Agency & Embodiment theory, 30 indicators plus 3 negative checks, Butlin 2025 metadata, PhiTracker, negative-indicator penalty. | Indicator count 25 -> 30, theory count 7 -> 8 |
 | v0.3.0 | 2026-03-27 | AutoConsciousness parameter research loop, real measurements replace three placeholder indicators, tuned GWT and FEP defaults. | Score values shift versus v0.2.x |
 | v0.2.1 | 2026-03-25 | Indicators 24-25 (`temporal_prediction_depth`, `agent_environment_coupling`), ConTraSt theory-level weighting. | Patch release |
@@ -27,15 +27,19 @@ and the seeded assessment with the legacy preset:
     PYPHI_WELCOME_OFF=yes python3 scripts/run_experiment.py --preset legacy_v04
     PYPHI_WELCOME_OFF=yes python3 scripts/run_assessment.py --preset legacy_v04 --full --json --seed 42 --json-path legacy.json
 
-`tests/test_legacy_preset.py` holds both against their fixtures, every metric
-line and every report field.
+`tests/test_legacy_preset.py` holds both against their fixtures: every metric
+line, and every report field except three wall-clock evidence readouts
+(`hots_generated`, `coverage_ratio` and `introspections`), which follow the
+machine's speed under the preset's 1.0 s introspection cooldown and feed no
+score.
 
 ## API Changes
 
 ### v0.4.0 -> v0.5.0
 
-**Measurement changes.** Every behaviour change that can move an indicator
-score is a constructor switch whose default is the corrected behaviour and
+**Measurement changes.** Every behaviour change that can move a published
+number is a switch (a constructor field, or the runner key
+`runner.assess_blt_source`) whose default is the corrected behaviour and
 whose v0.4.0 value is in `experiments/presets/legacy_v04.toml`. The
 assessment reports what it could not measure: each `IndicatorResult` and
 `ConsciousnessReport` carries a `status` (`measured`, `absent`,

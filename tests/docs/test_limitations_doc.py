@@ -48,7 +48,7 @@ def _bullet(section: int, lead: str) -> str:
 
 
 # (sentence id, section, key phrases). Every phrase must appear in that
-# section; the ids follow the release plan's list of limitation sentences.
+# section; the ids are stable labels, one per limitation sentence.
 SENTENCES = (
     (
         "L1",
@@ -74,8 +74,12 @@ SENTENCES = (
         "L3",
         6,
         (
-            "indicators score 0.0 as noise-saturated",
-            "cannot register there until the runner is fed structured content",
+            "In the experiment runner five indicators score 0.0 as "
+            "noise-saturated (higher_order_representations, "
+            "hierarchical_prediction, temporal_prediction_depth, "
+            "agent_environment_coupling and genuine_implementation): the "
+            "runner's synthetic warmup fills them on any seed, so they cannot "
+            "register there until the runner is fed structured content.",
         ),
     ),
     (
@@ -421,3 +425,48 @@ def test_operations_states_the_pass_level_delete_confirmation():
         "points and graph nodes of all its rows; once at least one row is "
         "confirmed, the index entries of every row of the pass are deleted" in text
     )
+
+
+NOISE_SATURATED = re.compile(
+    r"In the experiment runner (\w+) indicators score 0\.0 as noise-saturated "
+    r"\(([^)]*)\)"
+)
+
+
+def _listed_names(listing: str) -> list:
+    """The names of a prose list such as ``a, b and c``."""
+    return [n.strip() for n in re.split(r",\s*|\s+and\s+", listing) if n.strip()]
+
+
+def _migration_noise_table() -> list:
+    """The indicators the migration record's noise-saturation table flags as
+    noise-saturated (the floor-saturated row excluded)."""
+    text = (DOCS / "MIGRATION_FROM_V04.md").read_text(encoding="utf-8")
+    match = re.search(
+        r"^### Noise saturation under the defaults[^\n]*\n(.*?)(?=^#{2,3} )",
+        text,
+        re.M | re.S,
+    )
+    assert match, "MIGRATION_FROM_V04.md has no noise-saturation section"
+    names = []
+    for line in match.group(1).splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if not line.startswith("| ") or not re.fullmatch(r"[a-z_]+", cells[0]):
+            continue
+        names.append(cells[0])
+    return names
+
+
+def test_noise_saturated_list_matches_its_count_and_the_migration_record():
+    from mtc.assessment.assessment import ConsciousnessAssessment
+
+    match = NOISE_SATURATED.search(_section(6))
+    assert match, "section 6 does not list the noise-saturated indicators"
+    count_word, listing = match.groups()
+    names = _listed_names(listing)
+    words = ("one", "two", "three", "four", "five", "six", "seven", "eight")
+    assert count_word in words, count_word
+    assert words.index(count_word) + 1 == len(names), (count_word, names)
+    known = set(ConsciousnessAssessment().indicator_configs)
+    assert [n for n in names if n not in known] == []
+    assert sorted(names) == sorted(_migration_noise_table())

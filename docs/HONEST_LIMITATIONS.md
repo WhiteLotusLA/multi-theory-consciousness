@@ -8,7 +8,7 @@
 
 The assessment defines 30 positive indicators and 3 negative indicators. It measures whether architectural functions associated with consciousness theories are operating as designed. A system that passes every indicator has all the structural features that certain theories associate with consciousness. Whether those features are *sufficient* for phenomenal consciousness is an open question that this framework does not and cannot answer.
 
-When the assessment reports "architecture functional," it means: at least half of the indicators pass and the overall score is at least 0.5, so the modules are working as the theories describe. It does not mean the system has subjective experience.
+When the assessment reports "architecture functional," it means: at least half of the indicators pass, the overall score is at least 0.5, the GWT theory score is at least 0.4 and the HOT theory score at least 0.3, so the modules are working as the theories describe. It does not mean the system has subjective experience.
 
 ## 2. The Scale Gap
 
@@ -51,6 +51,7 @@ The thresholds (for example 0.4 for `ignition_dynamics` and 0.5 for `global_broa
 - The three negative indicators are two-level rules, not graded measurements: each reads one or two counters (ignitions, model updates, higher-order thoughts) and returns a fixed level, and a missing module is given a fixed level of 0.8, 0.7 or 0.9. Their penalty can lower the overall score by at most about 0.1.
 - global_broadcast and recurrent_processing report insufficient_data unless a caller registers broadcast receivers: the workspace hands its winners to its own modules by direct call, which cannot fail and is therefore not counted as measured coverage.
 - The ignition detector has no sustain measurement: ignition_dynamics and global_ignition_nuanced report insufficient_data until a caller runs check_sustain.
+- In the experiment runner five indicators score 0.0 as noise-saturated (higher_order_representations, hierarchical_prediction, temporal_prediction_depth, agent_environment_coupling and genuine_implementation): the runner's synthetic warmup fills them on any seed, so they cannot register there until the runner is fed structured content. oscillatory_binding_coherence also reads 0.0 there, as floor-saturated (section 14). [MIGRATION_FROM_V04.md](MIGRATION_FROM_V04.md) lists the noise floor of each.
 
 ## 7. Consumer Hardware Constraints
 
@@ -62,13 +63,13 @@ Consciousness in biological systems develops over months and years through susta
 
 ## 9. Reproducibility Caveats
 
-Neural substrate initialization involves randomness (random synaptic weights, reservoir topology). Assessment results vary between runs unless a seed is set (`mtc assess --seed`). Body metrics read the machine's own load and timing, so the runners keep them off unless they are set explicitly.
+Neural substrate initialization involves randomness (random synaptic weights, reservoir topology). `mtc assess` seeds random, numpy and torch before it builds any module (`--seed`, default 42), so under the defaults two runs of one seed agree in every score and results vary between seeds. The clock reads that remain are listed in the Phase 9 measurements of [MIGRATION_FROM_V04.md](MIGRATION_FROM_V04.md), among them: under the legacy preset three evidence readouts follow the machine's speed; `blt.binding_evidence = "v04_salience_posterior"` set alone moves three seeded scores by up to about 2e-7 between runs (the overall by 8.3e-9); and under the defaults one evidence value, `genuine_implementation.evidence.avg_loop_quality`, moves 1.2e-9 at a clock 25 times slower, with no score moving. Body metrics read the machine's own load and timing, so the runners keep them off unless they are set explicitly.
 
 ---
 
 ## 10. Known measurement defects in v0.4.0
 
-Seven defects affect v0.4.0 measurements. All are fixed in v0.5.0, published v0.4.0 numbers are reproduced by the `legacy_v04` preset, and [MIGRATION_FROM_V04.md](MIGRATION_FROM_V04.md) records the before and after numbers for each.
+Seven defects affect v0.4.0 measurements. All are fixed in v0.5.0, and published v0.4.0 numbers are reproduced by the `legacy_v04` preset. [MIGRATION_FROM_V04.md](MIGRATION_FROM_V04.md) records each fix: the switch and the measured before and after numbers where a published number depended on the defect, and a fix without a switch where none did.
 
 1. **Exact Phi never ran.** The exact IIT path in the assessment calls PyPhi with a keyword argument the library does not accept, so every exact Phi attempt in v0.4.0 failed and fell back to the approximation. Reported v0.4.0 Phi values therefore came from the approximation.
 2. **Permuted network.** Both the PhiTracker and the exact path index states big-endian and pass a target-by-source connectivity matrix, where PyPhi expects little-endian rows and a source-by-target matrix. Any exact Phi computed this way was computed for a permuted network, not the network being measured.

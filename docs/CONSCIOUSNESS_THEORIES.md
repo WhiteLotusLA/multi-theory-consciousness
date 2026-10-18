@@ -355,8 +355,9 @@ caller supplies.
    score is None, never 0.0.
 5. **Negative indicators.** Each negative indicator above its threshold
    subtracts its score times its weight times 0.05 from the overall score.
-6. **Architecture functional** means at least half of the indicators pass and
-   the overall score is at least 0.5. It is a statement about module
+6. **Architecture functional** means at least half of the indicators pass,
+   the overall score is at least 0.5, the GWT theory score is at least 0.4
+   and the HOT theory score at least 0.3. It is a statement about module
    function, not about experience.
 
 **Warmup.** Several inputs need history before they read anything:

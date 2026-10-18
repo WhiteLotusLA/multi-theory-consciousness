@@ -82,7 +82,7 @@ llm:
   temperature: 0.8
   placeholder_prefixes: []
 
-# Thought generation pauses while the CPU sample is above the limit; the sample
+# The cadence is halved while the CPU sample is above the limit; the sample
 # is taken every check_every thoughts and never blocks the loop.
 resource:
   cpu_percent_limit: 5.0

@@ -76,11 +76,22 @@ the API reports such a record as `overall_score` null with
 `overall_withheld` true, never as a measured zero.
 
 `mtc assess --full` runs `--warmup-cycles` cycles (default 5) first. With the
-default seed of 42 and five cycles, [MIGRATION_FROM_V04.md](MIGRATION_FROM_V04.md)
-records the result: 14 of 30 passing, status `partial`, coverage 0.633, and
-five indicators still `insufficient_data` (the error trend needs 10 prediction
-errors, the PhiTracker needs 128 transitions, and the beautiful loop has run
-no conscious moment in the standalone runner). A run with a restored state
+default seed of 42 and five cycles the result is the committed fixture
+`tests/fixtures/baseline_v050_assessment.json`, recorded in
+[MIGRATION_FROM_V04.md](MIGRATION_FROM_V04.md): overall 0.275203, 11 of 30
+passing, status `partial`, coverage 0.533, with 16 indicators measured, 8
+`insufficient_data` and 6 `absent`. The eight without data are
+`global_broadcast` and `recurrent_processing` (no broadcast receiver is
+registered, so nothing measures the broadcast coverage), `ignition_dynamics`
+and `global_ignition_nuanced` (no sustain check runs), `attention_schema` (no
+focus prediction has been scored), `prediction_error_minimization` (the error
+trend needs 10 prediction errors), `integrated_information` (the PhiTracker
+needs 128 transitions) and `bayesian_binding_quality` (the warmup's winners
+carry no numeric vector of their own, so nothing is bound). The six `absent`
+are the inputs this path does not build, as in quick mode. The assessment
+reads the workspace's own beautiful loop, which the warmup drives
+(`runner.assess_blt_source`, default `workspace`), and IIT has no theory score
+because none of its indicators is measured. A run with a restored state
 directory (`--state-dir`) is the path for a long-lived system.
 
 ## A fresh `mtc doctor`
@@ -159,7 +170,9 @@ check list is in the module's docstring.
 With the sleep scheduler on, each night sleep deletes memories the pruner
 scores as weak; set SLEEP_PRUNE_DRY_RUN=true to log what would be removed
 without deleting it. The setting is read when the runtime is built
-(`SLEEP_PRUNE_DRY_RUN`, false by default); see [OPERATIONS.md](OPERATIONS.md).
+(`SLEEP_PRUNE_DRY_RUN`, false by default); in the env file the entry is
+`MTC_SLEEP_PRUNE_DRY_RUN=true`, as [CONFIGURATION.md](CONFIGURATION.md) names
+it. See [OPERATIONS.md](OPERATIONS.md).
 
 ## The continuous thought machine
 

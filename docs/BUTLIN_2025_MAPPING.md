@@ -55,7 +55,7 @@ thresholds with their source constants.
 | `oscillatory_binding_coherence` | RPT | extension | positive | Kuramoto phase synchronization across substrates | RPT measurements and oscillatory binding statistics |
 | `agency` | AE | AE-1 | positive | Inference activity, model updates and free energy, with no presence floor | active inference with inferences |
 | `embodiment` | AE | AE-2 | positive | Output-input contingencies from the attention schema's perspective statistics | schema updates |
-| `bayesian_binding_quality` | BLT | extension | positive | Binding quality of inferences into a unified percept | a beautiful loop that has run a conscious moment |
+| `bayesian_binding_quality` | BLT | extension | positive | Binding quality of inferences into a unified percept | a conscious moment with at least two winners that carry their own numeric vector (under the default `blt.binding_evidence`) |
 | `epistemic_depth` | BLT | extension | positive | Recursive self-reference depth (keyword-circular; see the limitations) | a beautiful loop that has run a conscious moment |
 | `genuine_implementation` | BLT | extension | positive | Anti-mimicry check (addresses the paper's gaming problem) | a beautiful loop that has run a conscious moment |
 

@@ -162,7 +162,7 @@ Every store is optional and off by default; each has an in-memory implementation
 
 ## What's New in v0.5.0
 
-- **Honest measurement.** Seven v0.4.0 measurement defects are fixed behind switches; every indicator reports `measured`, `absent` or `insufficient_data`, and the `legacy_v04` preset reproduces the v0.4.0 numbers ([docs/MIGRATION_FROM_V04.md](docs/MIGRATION_FROM_V04.md)).
+- **Honest measurement.** Seven v0.4.0 measurement defects are fixed, behind switches wherever a published number depended on them; every indicator reports `measured`, `absent` or `insufficient_data`, and the `legacy_v04` preset reproduces the v0.4.0 numbers ([docs/MIGRATION_FROM_V04.md](docs/MIGRATION_FROM_V04.md)).
 - **The runtime.** A conversation pipeline with one consciousness cycle per turn, four modulation layers, a provenance snapshot per reply and honest failures (no reply is stored when the model gives none); speaker trust by token, never by name.
 - **The brain.** A local chat-completions provider with three template families, an optional Anthropic provider and a labelled mock ([docs/LLM_SETUP.md](docs/LLM_SETUP.md)).
 - **Continuous thought, memory and knowledge.** A novelty-gated thought machine, memory consolidation and pruning, a knowledge graph ([docs/KNOWLEDGE_GRAPH.md](docs/KNOWLEDGE_GRAPH.md)).

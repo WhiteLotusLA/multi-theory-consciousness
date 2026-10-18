@@ -119,7 +119,8 @@ The tests:
   plus the three lines added since v0.4.0 and no other line; the seeded
   assessment under the preset reproduces every field of the legacy
   assessment fixture (`tests/fixtures/baseline_legacy_assessment.json`, the
-  report of the published legacy run); every row of the parameter schema has
+  report of the published legacy run) except the three wall-clock readouts
+  named below; every row of the parameter schema has
   a legacy value, a v0.4.0 default or a recorded reason.
 - `tests/test_v050_baseline.py`: the v0.5.0 defaults reproduce
   `tests/fixtures/baseline_v050_experiment.txt` line for line and
@@ -131,11 +132,21 @@ The tests:
 Three evidence values of the seeded assessment, `hots_generated` and
 `coverage_ratio` of `higher_order_representations` and `introspections` of
 `metacognition`, follow the machine's speed while the introspection cooldown
-is a wall-clock gate, and no score, status, confidence, count or printed
-line depends on them; the comparison of a run that keeps the wall-clock
-cooldown (the legacy preset) leaves exactly these three keys out
-(`WALL_CLOCK_EVIDENCE_KEYS`), and every other comparison holds them too,
-because both runners pin the cooldown at 0.0.
+is a wall-clock gate, and under the legacy preset no score, status,
+confidence, count or printed line depends on them; the comparison of a run
+that keeps the wall-clock cooldown (the legacy preset) leaves exactly these
+three keys out (`WALL_CLOCK_EVIDENCE_KEYS`). What makes the v0.5.0 fixtures
+comparable in full is the runner pin, not that allowance: both runners pin
+`hot.introspection_cooldown` at 0.0 unless the overrides set it, so the
+default seeded assessment reads 14, 2.8 and 3 for those three values on
+every machine (under the defaults the 1.0 s gate would also move the
+metacognition score). The pin removes the gate, not every clock read: one
+evidence value of the default seeded assessment,
+`genuine_implementation.evidence.avg_loop_quality`, moved by 1.2e-9 when every
+clock ran 25 times faster, while no score, status or count moved; it is
+recorded under "What the cooldown pin removes" in
+[MIGRATION_FROM_V04.md](MIGRATION_FROM_V04.md), and the 1e-9 bound was not
+widened for it.
 
 The baseline tests start the runners as subprocesses and are marked `slow`
 (one runner run takes one to two minutes on the development machine). Three noise tests in `tests/assessment/test_recalibration.py`
