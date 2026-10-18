@@ -16,6 +16,7 @@ tests/consciousness/test_beautiful_loop.py coords ^0\.001, 0\.001$
 # the auditor's own home-path pattern source
 mtc/devtools/privacy_audit.py token ^(/Users/|~/Library|/Volumes)$
 mtc/devtools/privacy_audit.py homepath ^~/Library$
+mtc/devtools/privacy_audit.py homepath ^/Volumes/$
 # the auditor's self-test plants one synthetic example of each pattern
 tests/core/test_privacy_audit.py token ^/Users/$
 tests/core/test_privacy_audit.py email ^someone@example\.com$
@@ -29,3 +30,13 @@ README.md token ^Calvin$
 README.md token ^Devereaux$
 paper/zenodo-metadata.md token ^Calvin$
 paper/zenodo-metadata.md token ^Devereaux$
+# the tracked arXiv archive holds the submitted paper as it was sent: the
+# author line of main.tex and the typographic dashes of the figures and the
+# bibliography (a member is named as <archive>!<member>)
+paper/mtc-arxiv-submission.tar.gz!main.tex token ^Calvin$
+paper/mtc-arxiv-submission.tar.gz!main.tex token ^Devereaux$
+paper/mtc-arxiv-submission.tar.gz!main.tex email ^calvin\.devereaux\+mtc@gmail\.com$
+paper/mtc-arxiv-submission.tar.gz!references.bib dash ^.$
+paper/mtc-arxiv-submission.tar.gz!figures/fig1_architecture.tex dash ^.$
+paper/mtc-arxiv-submission.tar.gz!figures/fig2_cycle_dataflow.tex dash ^.$
+paper/mtc-arxiv-submission.tar.gz!figures/fig3_cross_theory.tex dash ^.$
