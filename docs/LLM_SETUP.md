@@ -10,9 +10,18 @@ chosen by `LLM_PROVIDER`:
 | Mock | `mock` | none | no |
 
 The brain runs the provider's health check at start. An unhealthy provider
-leaves the brain degraded: every call raises `BrainUnavailableError`, the API
-answers 503 for a turn, and no other provider is tried in its place. The
-active choice is recorded in the provider state file (`PROVIDER_STATE_PATH`,
+leaves the brain degraded: a call raises `BrainUnavailableError`, the API
+answers 503 for a turn (`brain_unavailable`), and no other provider is tried
+in its place. A degraded brain re-checks the provider on the call path when a
+call arrives, at most once every 5 seconds (`HEALTH_RECHECK_S` in
+`mtc/brain/brain.py`, measured on the brain's own monotonic clock), so turns
+succeed again once the provider recovers, without a restart; a healthy
+brain is never re-probed. The brain's `status()` also records the outcome
+of the last real provider call (`last_call_ok`: None before one, true when
+a completion came back, false on a provider error or timeout; and
+`last_call_at`) and `health_recheck_s`; these are reported, never used to
+refuse a call. `/health` reads them (see [API.md](API.md)). The active
+choice is recorded in the provider state file (`PROVIDER_STATE_PATH`,
 default `./data/provider_state.json`) for status pages and the CLI; it never
 changes which provider runs.
 
@@ -151,9 +160,13 @@ the `anthropic` extra, `ANTHROPIC_API_KEY` (read from `ANTHROPIC_API_KEY` or
 sends the system prompt, which carries the persona and recalled memories, and
 the conversation to an external API.
 
+- `ANTHROPIC_MAX_TOKENS` (8192) is the completion budget of a direct
+  provider call that sets none; conversation turns use `LLM_MAX_TOKENS`, as
+  every provider's turns do.
 - `ANTHROPIC_THINKING_BUDGET` 0 asks for adaptive thinking when a caller wants
   reasoning (0 is not off); a positive value sends a fixed budget of at least
-  1024 tokens, for models that still accept one.
+  1024 tokens and below `ANTHROPIC_MAX_TOKENS`, for models that still accept
+  one.
 - `ANTHROPIC_SAMPLING_ENABLED` (false) gates the sampling parameters: current
   models reject `temperature`, `top_p` and `top_k`, so none is sent unless it
   is true.

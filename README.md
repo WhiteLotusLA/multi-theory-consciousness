@@ -31,7 +31,9 @@ See [docs/HONEST_LIMITATIONS.md](docs/HONEST_LIMITATIONS.md) before anything els
 
 ### Path 1: in memory, with the mock provider
 
-No database, no model server, no network after the install. This is the path run on the development machine.
+No database, no model server, no network after the install for the commands below. This is the path run on the development machine. Running `mtc serve` with `mtc chat` on an install with the `all` extra also loads the sentence embedder, and the model hub library makes a request on that first load even with the model cached (and downloads the model when it is not): set `HF_HUB_OFFLINE=1` once the model is cached to keep that path off the network as well.
+
+The minimum install that can run the assessment is the `fep` extra (`pip install -e ".[fep]"`): the workspace builds active inference unconditionally, and on a bare install `mtc assess`, `mtc serve`, the demo and the examples that build a workspace stop with one `MISSING EXTRA` line on stderr and exit code 2.
 
 ```bash
 git clone https://github.com/WhiteLotusLA/multi-theory-consciousness.git
@@ -85,6 +87,8 @@ One console script, `mtc` (`mtc.cli.main:main`). Global options: `--version`, `-
 | `mtc ctm start` | `--state STATE` | starts the continuous thought machine on a running server |
 | `mtc ctm stop` | none | stops it |
 | `mtc ctm status` | none | shows its state and quiet reason ([docs/CONTINUOUS_THOUGHT.md](docs/CONTINUOUS_THOUGHT.md)) |
+| `mtc safety status` | none | shows the safety stack's state and whether the untrusted conversations are suspended, read from a running server |
+| `mtc safety resume` | `--speaker NAME` | lifts an emergency suspension of the untrusted conversations as a trusted speaker (the creator by default) ([docs/SECURITY.md](docs/SECURITY.md)) |
 | `mtc privacy-audit` | `--paths PATH`, `--staged`, `--patch-from REF`, `--runtime DIR` | the privacy audit with the repository's lists ([docs/PRIVACY_AUDIT.md](docs/PRIVACY_AUDIT.md)) |
 
 `scripts/run_assessment.py` still works: it is a shim over `mtc assess`.

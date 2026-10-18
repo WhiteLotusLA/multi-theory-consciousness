@@ -28,6 +28,19 @@ See `mtc/api/auth.py` and [API.md](API.md).
   the token configured for their entry. A name on its own grants nothing: an
   unknown or unauthenticated speaker gets the default trust, no safety bypass
   and is labelled as a bracketed claim, whatever they are called.
+- A claimed name is reduced to one safe line before it is used: every
+  character that is not a letter or a digit and not a space, period,
+  apostrophe, hyphen or underscore becomes a space, runs of whitespace
+  collapse to one space, and the result is cut to 64 characters
+  (`MAX_CLAIMED_NAME_CHARS`). A claim with nothing usable left is the
+  anonymous default speaker. The prompt renders the speaker name on one line
+  and quotes it under the unverified template, so a claimed name cannot add
+  a section to the prompt. The entry lookup and the token comparison use the
+  presented name as given (stripped), and an authenticated speaker keeps the
+  configured entry name. The API refuses a speaker name that holds a control
+  character, a line separator or a paragraph separator (422 on a route,
+  `invalid_message` on the websocket) with a fixed message that does not
+  echo it.
 - The speaker token has its own carriers, separate from the API key: the
   `X-Speaker-Token` header on `POST /api/chat` and the `speaker_token` field of
   a websocket `message` frame. A connection's API key never makes its speaker
@@ -50,6 +63,60 @@ allowed only on a loopback address: the server refuses to start with
 every store port to `127.0.0.1` on the host (the file was reviewed against
 official documentation and not run on the development machine; the path run
 on the development machine is the in-memory install with the mock provider).
+
+With API_AUTH_ENABLED=false every process on the machine that can reach the
+port can use every route (chat, state, memory search). Only the
+spontaneous-thought websocket frames are withheld, because no connection
+counts as a keyed client. A state frame can quote the text of the workspace
+winner, which may be a thought or a recalled memory.
+
+With API_AUTH_ENABLED=false the HTTP routes do not validate the Host header,
+so a web page that rebinds its domain to the loopback address can call them
+from a browser on the same machine; keep authentication on whenever a
+browser is used on that machine.
+
+With authentication off the websocket checks the handshake's `Origin`
+header instead of a key, because a browser page from any origin can open a
+websocket (CORS does not apply to it). A handshake without an `Origin`
+header (a client that is not a browser) is served, and so is one whose
+`Origin` equals an entry of `API_CORS_ORIGINS` after lower-casing and
+stripping a trailing slash; any other origin, the literal `null` included,
+is closed with 1008 and the neutral reason. With `API_CORS_ORIGINS` set to
+`*` the check refuses every browser origin, because `*` is not read as
+allow-all for the websocket; a handshake without an `Origin` header is
+still served. With authentication on, the key decides and the `Origin` is
+not read.
+
+## The safety gate and emergency suspension
+
+- Every message of an untrusted speaker passes the safety gate before the
+  cycle runs; a trusted speaker (authenticated by token and allowlisted)
+  bypasses it. The gate's state is on every turn record and payload as
+  `safety_gate`: `absent` (no safety stack), `bypassed`, `applied` or
+  `unchecked` (the check did not run). The safety scoring is a keyword
+  heuristic ([HONEST_LIMITATIONS.md](HONEST_LIMITATIONS.md), section 12).
+- The gate fails closed. With `SAFETY_GATE_FAIL_CLOSED` true (the default),
+  an untrusted speaker's turn whose check could not run ends with the error
+  code `safety_unavailable` (HTTP 503) and nothing of it is stored; with it
+  false the message is processed. The record says `unchecked` either way.
+- An emergency-level score (manipulation or deception at or above 0.8) is
+  handled by `EMERGENCY_SHUTDOWN_ENABLED`. With it false (the default) the
+  message is denied, an audit row records the proposed emergency shutdown as
+  not enacted, and one `URGENT` alert titled "Emergency shutdown not
+  enacted" goes to the escalation role (`SAFETY_ESCALATION_ROLE`); nothing
+  is suspended.
+- With `EMERGENCY_SHUTDOWN_ENABLED` true the same score suspends every
+  untrusted conversation: from then on every untrusted speaker's message is
+  refused with the decision `emergency_shutdown` (the blocked payload's
+  `safety_decision`, and `mtc chat` names the resume command) until the
+  suspension is lifted. Trusted speakers keep bypassing the gate.
+- Only a trusted speaker may lift a suspension: `POST /api/safety/resume`
+  (or `mtc safety resume`, as the creator by default or `--speaker NAME`)
+  answers 403 unless the speaker trust source verifies the speaker as
+  trusted, and then resumes with the configured escalation role; the safety
+  monitor's role check refuses, and audits, any other role. `mtc safety
+  status` shows whether the untrusted conversations are suspended. See
+  [API.md](API.md) and [OPERATIONS.md](OPERATIONS.md).
 
 ## No secrets in a client bundle
 

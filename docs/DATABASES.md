@@ -111,6 +111,18 @@ Tables and the indexes the queries need:
 | `consciousness_events` | events derived from snapshots, linked to their snapshot | `consciousness_events_timestamp_idx`, `consciousness_events_type_timestamp_idx` (events by type, newest first) |
 | `safety_audit` | every safety decision with its checks and reasoning | `safety_audit_timestamp_idx` (newest first, with a sequence tie-break), `safety_audit_review_idx` (partial, decisions that need review) |
 
+Three columns hold a measurement and have no default, so a row that was not
+measured reads NULL rather than a plausible constant: `semantic_memory`
+`strength` and `confidence`, and `episodic_memory`
+`consolidation_strength`. The readers return None for NULL, and the simple
+consolidation pass writes the group-size strength, no confidence and no
+consolidation strength. The DDL in
+`EPISODIC_SCHEMA_SQL` and the generated `001_core_schema.sql` carry the same
+column text, and a test compares the committed migrations with the registry.
+This is the first public release of the schema, so no deployed database
+carries the earlier defaults; a database made from a pre-release checkout
+keeps them until its columns are altered by hand.
+
 **The role script.** `scripts/db/init_postgres.sh` creates the application
 role and database for a Homebrew or apt install (the Compose image creates
 both from its environment). It reads only `MTC_DB_PREFIX` and the
@@ -271,7 +283,14 @@ scheduler, decays episodic retention with true half-lives, archives or deletes
 weak episodic rows (never `core` rows or the core memory blocks) together with
 their vector point and memory node, removes old neural telemetry, old
 low-coherence childless thoughts and expired unprotected gists. MongoDB
-collections have no TTL index; this pass is their retention.
+collections have no TTL index; this pass is their retention. On a real pass
+the episodic counts it reports are the ones the store confirmed, and the
+vector points and memory nodes of the pass's deleted rows are deleted only
+after the store confirmed at least one row of the pass deleted; a delete
+that confirms none keeps them and is counted as an error. A gist whose
+retention was never computed is never expired and is not listed under a retention floor; the consolidation
+pipeline's retention refresh walks every stored gist (`iter_gists`) and
+computes it.
 
 ## Backup and restore
 

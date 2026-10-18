@@ -3,7 +3,7 @@
 MTC is a public repository ported from a private reference implementation.
 The privacy audit keeps identity residue, personal data and build artifacts
 out of the tree and out of the history. It fails closed: one hit is a non-zero
-exit, and a non-zero exit blocks the commit, the CI run and the phase exit.
+exit, and a non-zero exit blocks the commit, the CI run and the release.
 
 ## What it checks
 
@@ -14,26 +14,63 @@ exit, and a non-zero exit blocks the commit, the CI run and the phase exit.
   private extra list holds names of real people and animals and never enters
   the repository: it is read from the file named by `$PRIVACY_DENYLIST_EXTRA`
   (the audit stops if that file is missing), or from the gitignored
-  `config/privacy/denylist.local.txt`. Alphabetic tokens match whole words,
-  case-insensitive; other tokens match as substrings. Private hits print as
+  `config/privacy/denylist.local.txt`. A purely alphabetic token matches,
+  case-insensitively, where it starts after anything that is not a letter
+  (the start of a line, a space, punctuation, an underscore or a digit), or
+  at a camelCase boundary: a lower-case letter, then the token with its first
+  letter capitalised and not followed by another lower-case letter. Inside a
+  longer word after a letter it is not a hit; a suffixed form after a
+  boundary is. Any other token matches as a substring. Private hits print as
   `private#N` so the output never repeats a name.
+- **Hidden forms** (kind `assembled-token`). In Python files the audit
+  assembles expressions built only from literals: every string and bytes
+  constant (so adjacent literals and escapes inside one literal), `+` chains
+  of strings or bytes, `"<sep>".join([...])`, `chr(<int>)`, f-strings whose
+  formatted values are literals, `%` and `.format` with literal operands, and
+  a slice of a literal with constant bounds. An assembled value is matched as
+  it is and in its decoded and folded views; assembled bytes are read as
+  latin-1 and, when they are valid UTF-8 and read differently, as UTF-8 too.
+  A literal-only format the audit refuses to evaluate (a width or precision
+  of 10000 or more inside a conversion specifier, written or taken from an
+  operand, or an operand-supplied one that is not a number) is an `encoding`
+  hit, never dropped; digits, stars and braces outside a conversion
+  specifier are plain text. In every text file each line is also matched in
+  a decoded view (backslash-x, backslash-u and backslash-U escapes resolved)
+  and a folded view: compatibility decomposition, combining marks and format
+  characters such as zero-width spaces dropped, and a small table of Cyrillic
+  and Greek letters that look like Latin ones. The folded view is not the
+  full Unicode confusables set. The check is static: only literal-built
+  expressions are assembled, and a name computed at run time from
+  non-literal data cannot be seen.
 - **Patterns.** Email addresses, phone numbers, decimal coordinate pairs,
   absolute home paths, non-loopback IPv4 addresses, key-like strings (hyphenated
-  `sk-` provider keys too), em and en dashes, and emoji in `.py` files.
+  `sk-` provider keys too), em and en dashes, and emoji in `.py` files. Every
+  distinct match of a pattern on a line is reported, so an allowlisted first
+  match hides nothing. Python source is ASCII only: any other non-ASCII
+  character in a `.py` file is reported by code point (kind `nonascii`).
 - **Artifacts.** Paths with a `__pycache__`, `CMakeFiles`, `build`,
   `node_modules`, `.DS_Store` or `.egg-info` part; `.pyc`, `.pyo`, `.so`,
   `.dylib`, `.dump` and `.jsonl` files; anything under `agent_space/`,
   `results/` or `logs/`; anything under `data/` except `data/dcm/`.
 
-Only files with an unlisted suffix are skipped. A file that is unreadable, not
-UTF-8 or holds a NUL byte is still scanned and also gets an `encoding` hit.
+A file with a text suffix is always scanned: one that is unreadable, not
+UTF-8 or holds a NUL byte is decoded best effort, scanned, and also gets an
+`encoding` hit. A file of unknown suffix is scanned as text when its bytes
+start with a UTF-16 or UTF-32 mark, or hold no NUL and decode as UTF-8. A
+gzip, tar or zip archive is opened and each member is scanned as
+`<archive>!<member>`, two levels of nesting at most, with AppleDouble `._*`
+members reported as artifacts. Any other binary file is skipped and counted:
+tree mode prints `privacy audit: scanned N file(s); skipped K file(s) not
+read as text` with the skipped files by suffix before the verdict, because a
+skipped file was not audited.
 
 ## The allowlist
 
 `config/privacy/allowlist.txt` holds `glob kind regex` lines. The glob matches
-the repository-relative path (`dir/**` covers every file below `dir`), the
-kind is one audit kind or `*`, and the regex is searched in the reported
-match. A rule is justified only when the hit is legitimate and cannot be
+the repository-relative path (`dir/**` covers every file below `dir`; an
+archive member is matched as `<archive>!<member>`), the kind is one audit
+kind (`nonascii` and `assembled-token` included) or `*`, and the regex is
+searched in the reported match. A rule is justified only when the hit is legitimate and cannot be
 rewritten away: license and package attribution, text in a published paper,
 the auditor's own patterns and self-test fixtures, a numeric argument that
 looks like a coordinate. Keep rules narrow (one file, anchored regex) and give
@@ -57,6 +94,18 @@ audit.
   fails when the secret is missing, except on fork pull requests, which get no
   secrets and run the public checks with a warning.
 
+In `--patch-from` mode the path allowlist rules apply to each file; token and
+pattern hits count added lines within that file, and a hit in the decoded or
+folded view of a line counts added lines within that file and carries no
+commit. Only literal-built expressions in a Python file are assembled in
+each commit's own version of the file on the lines that commit added, so
+such a hit carries the file's line number in that version and the commit
+(`@<12-hex hash>`). A merge commit counts the lines its
+resolution adds (its diff against the automatic re-merge of its parents), so
+an edit made while merging is audited too. A path that holds a space is read
+like any other, and a diff header the audit cannot parse is an `encoding` hit, never
+silence.
+
 ## Runtime mode
 
 `python3 scripts/privacy_audit.py --runtime DIR [DIR ...]` audits
@@ -70,7 +119,8 @@ Every token, pattern and encoding check still applies. Paths print as
 path that is not a directory is an error (never a clean result), and the
 audit prints how many files it scanned and how many it skipped (files it
 does not read as text, such as `.npz`, `.pkl` or `.db`, counted by suffix)
-before its verdict: a skipped file was not audited. The mode cannot
+before its verdict: a skipped file was not audited. Runtime mode reads files
+by suffix only: it neither sniffs unknown suffixes nor opens archives. The mode cannot
 be combined with `--paths`, `--staged` or `--patch-from`
 (`run_runtime_audit` in `mtc/devtools/privacy_audit.py`).
 
@@ -98,8 +148,10 @@ Each hit prints as `path:line:kind:match`:
 docs/plan.md:7:token:private#2
 pkg/__pycache__/m.cpython-311.pyc:0:artifact:m.cpython-311.pyc
 ```
-Line `0` marks a path-level artifact hit; in `--patch-from` mode lines count
-added lines per file.
+Line `0` marks a path-level artifact hit; in `--patch-from` mode token and
+pattern hits count added lines per file, as do decoded-view and folded-view
+hits, which carry no commit; a Python literal-built hit carries the file's
+line in that commit's version and `@<12-hex hash>`.
 
 ## What to do on a hit
 

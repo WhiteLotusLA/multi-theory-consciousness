@@ -70,7 +70,20 @@ as `examples/continuous_thought.py`.
    `emotion`, `association`, `question` or `spontaneous` while awake;
    `consolidation`, `creative`, `emotion` or `spontaneous` while dreaming),
    weighted by `strategy_weights` and `dream_strategy_weights`. With no seed
-   text it misses (`no_seeds`).
+   text it misses (`no_seeds`). The `emotion` strategy needs a measured
+   affect reading: the PAD source gives a reading only when the PAD state's
+   pleasure and arousal were both computed from measured inputs, and a
+   reading whose absolute valence is below the neutral band of 0.1
+   (`NEUTRAL_PLEASURE_BAND`, the band inside which the PAD label reads
+   Neutral) names no emotion; the strategy is then skipped and counted in the
+   generator's `status()["skipped"]["emotion"]`. Every thought records what
+   its salience rests on in `processing_context["salience_basis"]` (`affect`,
+   `memory_importance`, or `strategy_default` for a per-strategy design
+   constant; `llm_design_constant` for a model-written line;
+   `injected_default` for an injected thought) and its form in
+   `processing_context["form"]`: `template` (the words come from a seed
+   template), `model` (the enhancer wrote them) or `injected`
+   (`inject_thought`).
 5. **Novelty.** `NoveltyFilter` (`novelty.py`) compares the thought's
    embedding with the last 50 thoughts. At a cosine similarity of 0.85 or more
    it is a near-duplicate; a unique thought may surface only when its novelty
@@ -89,7 +102,9 @@ as `examples/continuous_thought.py`.
    its parent's child link is recorded by `thought_id`.
 8. Only a stored thought joins the buffer; an expressed one is broadcast as a
    `spontaneous_thought` websocket frame to clients that presented the API
-   key.
+   key. The broadcast thought carries its `salience_basis` and `form`, and so
+   do the surfaced thoughts the pipeline reads into the prompt
+   (`thought_items`).
 9. **Gists** (below).
 10. **The CPU guard** (above).
 
@@ -138,7 +153,11 @@ default. The demo profile sets the window to 0.
 context value, a `NoAnswerError`, any other brain failure, an empty or
 reasoning-only reply and a reply that starts with one of
 `llm.placeholder_prefixes` are misses. Misses store nothing in the model's
-place; `misses`, `miss_reasons` and `last_miss_reason` count and name them.
+place; `misses`, `miss_reasons` and `last_miss_reason` count and name them,
+and the machine's `get_status()["enhancer_status"]` reports them
+(`successes`, `misses`, `miss_reasons`, `last_miss_reason`, `has_clock`)
+beside the boolean `enhancer`. Under `MTC_DEBUG=true` an unexpected brain
+error is counted and then raised; a `NoAnswerError` is always a plain miss.
 The emotional state reaches the enhancer's prompt only when
 `NARRATE_THOUGHT_MOOD` is on.
 
@@ -150,8 +169,12 @@ machine composes a gist from the window's own thought texts (no model call).
 The gist carries `source_count` (the thoughts it summarizes), the starting
 retention 0.8, and a `dominant_emotion`: the emotion that most often scored
 above 0.3 in the window, or None when no thought carried a measured emotion.
-Gists surface into the prompt by retention, most important first; the memory
-pruner decays their retention.
+Its `avg_salience` and `importance_score` are measured or None: the mean
+salience of the window's thoughts whose salience was measured
+(`salience_basis` `affect` or `memory_importance`), and None for a window of
+design-constant saliences, which most template thoughts carry. Gists surface
+into the prompt by retention, most important first, with an unknown
+importance ordered last; the memory pruner decays their retention.
 
 ## Stores
 
@@ -185,14 +208,20 @@ The onboarding wizard writes one pack for the chosen companion type as
 Keys: the templates `memory_templates`, `emotion_templates`,
 `association_templates`, `questions`, `spontaneous_lines` and the four dream
 families; plain entries `concept_pairs`, `creative_concepts` and
-`memory_query_terms`; the slot word lists `reflection`, `feeling`, `emotion`,
-`descriptor`, `assessment` and `observation`; and `description`.
+`memory_query_terms`; the slot word lists `reflection`, `descriptor`,
+`assessment` and `observation`; and `description`.
 
 A template names a slot as `{name}`. A slot word list fills it with a random
 entry; a context slot (`{memory}`, `{current_emotion}`, `{first}`,
 `{second}`, `{concept}`) is filled by the generator with real material. A
 template naming any other slot is refused when the pack loads, naming the
 file, the key and the slot, so a template no caller could fill never ships.
+The two affect slots `{feeling}` and `{emotion}` are refused in every
+template family, and so is a pack that carries a `feeling` or `emotion` word
+list: the `SeedError` names the file, the key and the slot and says that a
+thought names an emotion only through `{current_emotion}`, the emotion the
+affect reading measured. A pack written for an earlier release that used
+either slot stops loading until it is edited.
 
 ## Authoring the thought persona
 

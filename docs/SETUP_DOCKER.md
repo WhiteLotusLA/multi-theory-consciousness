@@ -16,8 +16,12 @@ run one on the host ([LLM_SETUP.md](LLM_SETUP.md)) or keep the mock provider.
 ## Prerequisites
 
 - Docker with Compose v2 (`docker compose`, not the old `docker-compose`).
-- Python 3.11 or later and MTC installed with the store clients:
-  `pip install -e ".[databases]"` (or `.[all]`).
+- Python 3.11 or later and MTC installed with the store clients and the
+  `fep` extra, the minimum install that can run the assessment:
+  `pip install -e ".[fep,databases]"`, or `.[all]`, which adds the API
+  server, the model clients and the embedder. Without the `fep` extra
+  `mtc assess`, `mtc serve`, the demo and the examples that build a
+  workspace stop with one `MISSING EXTRA` line on stderr and exit code 2.
 - A project configured by `mtc init` with the `docker` service manager and
   the stores you want enabled. The wizard writes explicit store names, ports
   and passwords into `.env`, so Compose and MTC read the same values.

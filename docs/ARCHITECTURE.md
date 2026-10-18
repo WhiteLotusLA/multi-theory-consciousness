@@ -49,7 +49,7 @@ mtc/
 |-- assessment/              30 + 3 indicator assessment, RPT, causal emergence, DCM
 |-- brain/                   brain protocol, LLM brain, prompt assembler, families
 |   `-- providers/           local chat-completions, Anthropic, mock, registry
-|-- cli/                     the mtc console script: init, doctor, db, assess, serve, chat, ctm, privacy-audit
+|-- cli/                     the mtc console script: init, doctor, db, assess, serve, chat, ctm, safety, privacy-audit
 |-- consciousness/           theory modules, PhiTracker, PAD, interactions, persistence hub
 |   |-- beautiful_loop/      BLT: hyper-model, Bayesian binding, epistemic depth
 |   |-- continuous/          continuous thought machine, seeds, novelty, stores
@@ -180,8 +180,9 @@ monitor (`monitoring/`) report with console and file notifiers only. See
 The API (`api/`) serves one runtime in one process on loopback with
 fail-closed key authentication ([API.md](API.md)). The `mtc` console script
 (`cli/`) runs the onboarding wizard (`onboarding/`), the doctor, the store
-bootstrap and verification (`db/`), the assessment, the server, a chat client
-and the continuous thought controls ([ONBOARDING.md](ONBOARDING.md)).
+bootstrap and verification (`db/`), the assessment, the server, a chat client,
+the continuous thought controls and the safety status and resume commands
+([ONBOARDING.md](ONBOARDING.md)).
 
 ## Assessment and research tools
 
@@ -189,9 +190,25 @@ and the continuous thought controls ([ONBOARDING.md](ONBOARDING.md)).
 assessment runner) and `scripts/run_experiment.py` (the experiment runner,
 used for the parameter research loop and the v0.4.0 legacy preset) drive it
 with synthetic warmups. `assessment/dcm_benchmark.py` runs the Digital
-Consciousness Model benchmark (Bayesian inference over 13 stances, the
-`research` extra). `research/` holds a statistics helper, a behavioral battery
-and a longitudinal study manager; `validation/` holds acceptance gates and the
+Consciousness Model benchmark as an evidence report: by default it collects
+the indicator evidence of its three tiers and computes no posterior
+(`posterior_status` `not_computed`). `--experimental-posterior` also runs the
+PyMC engine over the 13 stances (the `research` extra); that number does not
+respond to the evidence, is labelled `experimental`, and is compared with no
+published value ([HONEST_LIMITATIONS.md](HONEST_LIMITATIONS.md), section 14).
+Results are saved under `results/` in the DCM cache directory: an
+evidence-only run as `system_<date>_<daily|full>_evidence.json` and a run
+with the experimental posterior as `system_<date>_<daily|full>.json`, so a
+default run never overwrites a same-day experimental result; a stance that
+fails is named in `failed_stances` and counted in `failures`. The legacy
+14-metric measurement framework (`assessment/framework.py`) is repaired and
+kept: its metrics are None when their substrate is missing, its publication
+export names the integration value `spectral_integration_proxy` (not IIT
+Phi) and keeps the keys `system_integration` and
+`information_differentiation`. `research/` holds a statistics helper, a
+behavioral battery (the default battery runs the mirror and false-belief
+experiments; the temporal binding experiment is available by name) and a
+longitudinal study manager; `validation/` holds acceptance gates and the
 shadow signal log.
 
 ## Where state persists

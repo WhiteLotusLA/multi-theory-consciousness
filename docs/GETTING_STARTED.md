@@ -2,8 +2,13 @@
 
 MTC installs as a Python package with one command, `mtc`. The setup wizard
 (`mtc init`) writes the configuration; everything else reads it. Start with
-the first path below: it needs no database, no model server and no network
-after the install, and it shows the whole pipeline running.
+the first path below: its commands need no database, no model server and no
+network after the install, and they show the whole pipeline running. One
+qualifier: `mtc serve` with `mtc chat` on an install with the `all` extra
+loads the sentence embedder, and the model hub library makes a request on
+that first load even with the model cached (and downloads the model when it
+is not); set `HF_HUB_OFFLINE=1` once the model is cached (`mtc doctor
+--fetch-models` fetches it) to keep that path off the network too.
 
 Read [HONEST_LIMITATIONS.md](HONEST_LIMITATIONS.md) first: MTC is a research
 architecture, not a consciousness detector.
@@ -39,9 +44,13 @@ python examples/full_pipeline_demo.py
   the neural substrates, active inference, the store clients, the model
   clients, the API server, the embedder and the research tools. A bare
   `pip install -e .` installs the core alone, which imports and configures
-  but cannot build the active inference module: `mtc assess` and the demo
-  need at least the `fep` extra (pymdp), and `mtc doctor` names the extras
-  that are missing.
+  but cannot build the active inference module. The minimum install that can
+  run the assessment is the `fep` extra (pymdp): on a bare install
+  `mtc assess`, `mtc serve`, the demo and the examples that build a
+  workspace each stop with one line on stderr that names the extra
+  (`MISSING EXTRA: the fep extra is not installed. ...`), with no traceback,
+  and exit with code 2. `mtc doctor` names the extras that are missing and
+  the indicators that read active inference.
 - `mtc init --print-example-answers` prints a synthetic answers file (the
   companion `Tessera`, the creator `Alice`, the `friend` type, every store
   disabled, the `mock` provider). Edit it, or run `mtc init` without flags

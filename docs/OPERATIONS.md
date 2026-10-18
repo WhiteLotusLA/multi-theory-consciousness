@@ -67,6 +67,44 @@ not signalled.
 
 A restart is a stop followed by a start.
 
+When the runtime stops, each shutdown step (the background tasks, the open
+conversations, the hub save, the neural orchestrator, the memory stack, each
+store client, the brain) runs on its own: a step that fails is logged at
+WARNING with its name and the error type and recorded in the stop report's
+`errors`, the later steps still run, and the runtime always ends stopped.
+With PostgreSQL enabled, the PostgreSQL store report's `in_memory_parts` is
+empty when the conversation repository, the snapshot store and the safety
+audit store were built on the pool; when building them failed, all three run
+in memory, the list names them (`conversations`, `snapshots`,
+`safety_audit`) and the failure is logged at ERROR by type.
+
+## Safety suspension and resume
+
+An emergency-level safety score (manipulation or deception at or above 0.8)
+in an untrusted speaker's message is handled by
+`EMERGENCY_SHUTDOWN_ENABLED`:
+
+- With it false (the default) the message is denied, an audit row records
+  `action_proposed` `emergency_shutdown` with `enacted` false, and one
+  `URGENT` alert titled "Emergency shutdown not enacted" goes to the
+  escalation role (`SAFETY_ESCALATION_ROLE`). Nothing is suspended.
+- With it true the same score suspends every untrusted conversation: each
+  later message of an untrusted speaker is refused with the decision
+  `emergency_shutdown`, and `mtc chat` prints a second line naming
+  `mtc safety resume`. Trusted speakers are not affected.
+
+```bash
+mtc safety status            # safety stack, safety mode, conversations suspended
+mtc safety resume            # as the creator; --speaker NAME for another trusted speaker
+```
+
+`mtc safety status` reads `GET /api/consciousness/status` from the running
+server and prints three lines (`safety stack: available`, `not available`
+or `unknown`; `safety mode: ...`; `conversations suspended: yes`, `no` or
+`unknown`). `mtc safety resume` calls `POST /api/safety/resume` with the
+speaker's token, as `mtc chat` does; the server answers 403 unless the
+speaker is verified as trusted. See [SECURITY.md](SECURITY.md).
+
 ## Listeners and file modes
 
 ```bash
@@ -258,3 +296,10 @@ machine.
   over time. The memory pruner removes weak memories, old telemetry and
   expired gists during sleep, and the backup retention removes old backups;
   watch the rest with the disk's own tools.
+- **Night pruning deletes.** With the sleep scheduler on, each night sleep
+  deletes memories the pruner scores as weak; set SLEEP_PRUNE_DRY_RUN=true to
+  log what would be removed without deleting it. On a real pass the pruner
+  reports the archive and delete counts the store confirmed; a pass whose
+  delete the store confirmed for no row keeps the vector points and graph
+  nodes of all its rows; once at least one row is confirmed, the index
+  entries of every row of the pass are deleted.

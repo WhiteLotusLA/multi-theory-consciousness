@@ -93,14 +93,69 @@ ephemeral port. No test calls a real model.
 
 ## Baseline tests
 
-- `tests/test_legacy_preset.py`: the `legacy_v04` preset reproduces the
-  recorded v0.4.0 experiment-runner output
-  (`tests/fixtures/baseline_v040_experiment.txt`) to 0.01 on the overall score
-  with an equal passing count.
+The baseline tests compare every metric line and every report field, through
+the pure comparators of `tests/baseline_compare.py`:
+
+- An experiment-runner run is compared as the block the runner prints after
+  its `---` line: every metric line, as the printed string, so the
+  comparison holds at the runner's print resolution. Only the two timing
+  lines (`processing_ms`, `total_seconds`) are left out.
+- A seeded assessment report (the JSON `mtc assess --json` writes) is
+  compared field by field: statuses, counts, keys, strings and booleans
+  exactly, floats within 1e-9. Only the session id, the timestamp and the
+  timing fields are left out. A top-level mapping the report gained after a
+  fixture was captured (`failures`) reads as empty when the fixture lacks
+  it.
+- When a comparison fails, the message lists every differing line or field
+  and then how the running environment differs from the one recorded in
+  `tests/fixtures/baseline_v050_env.txt`, so an environment change is told
+  apart from a code change.
+
+The tests:
+
+- `tests/test_legacy_preset.py`: the `legacy_v04` preset prints every metric
+  line of the recorded v0.4.0 experiment-runner output
+  (`tests/fixtures/baseline_v040_experiment.txt`) again as the same string,
+  plus the three lines added since v0.4.0 and no other line; the seeded
+  assessment under the preset reproduces every field of the legacy
+  assessment fixture (`tests/fixtures/baseline_legacy_assessment.json`, the
+  report of the published legacy run); every row of the parameter schema has
+  a legacy value, a v0.4.0 default or a recorded reason.
 - `tests/test_v050_baseline.py`: the v0.5.0 defaults reproduce
-  `tests/fixtures/baseline_v050_experiment.txt` and
-  `tests/fixtures/baseline_v050_assessment.json` at the same tolerance.
-- `tests/test_run_assessment.py`: the assessment runner and its flags.
+  `tests/fixtures/baseline_v050_experiment.txt` line for line and
+  `tests/fixtures/baseline_v050_assessment.json` field for field.
+- `tests/test_run_experiment.py` and `tests/test_run_assessment.py`: two runs
+  of one seed agree over every line and every field, and the runners' flags,
+  ablation printing and state-directory restore work.
+
+Three evidence values of the seeded assessment, `hots_generated` and
+`coverage_ratio` of `higher_order_representations` and `introspections` of
+`metacognition`, follow the machine's speed while the introspection cooldown
+is a wall-clock gate, and no score, status, confidence, count or printed
+line depends on them; the comparison of a run that keeps the wall-clock
+cooldown (the legacy preset) leaves exactly these three keys out
+(`WALL_CLOCK_EVIDENCE_KEYS`), and every other comparison holds them too,
+because both runners pin the cooldown at 0.0.
+
+The baseline tests start the runners as subprocesses and are marked `slow`
+(one runner run takes one to two minutes on the development machine). Three noise tests in `tests/assessment/test_recalibration.py`
+(`test_noise_normalized_below_thresholds`,
+`test_no_perfect_scores_after_normalization`,
+`test_overall_score_near_zero_on_noise`) drive the experiment runner's
+modules in process and are not marked `slow`: they take about a minute
+each, so they run in every default run of the suite.
+
+The per-push CI deselects the `slow` tests, so the CI job `published-numbers`
+(`.github/workflows/ci.yml`) runs the tests that hold the published numbers:
+the four baseline and runner files above, `tests/assessment/test_phi_exact_path.py`
+and `tests/assessment/test_dcm_benchmark.py`, with `-m "not db and not gpu"`,
+on pull requests to main, nightly and by hand. It runs on the platform the
+fixtures were recorded on (`macos-14`, Python 3.14, a test pins the version
+against the environment file) with numpy, scipy, torch, snntorch and
+reservoirpy pinned to the versions `tests/fixtures/baseline_v050_env.txt`
+records, read from that file at run time, and installs the `neural`, `fep`,
+`research`, `iit` and `dev` extras. Regenerating the fixtures and that file
+moves the job with them.
 
 A change that moves one of these numbers is a measurement change; record it in
 [MIGRATION_FROM_V04.md](MIGRATION_FROM_V04.md) with the switch that moves it.

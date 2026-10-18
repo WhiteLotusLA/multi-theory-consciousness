@@ -4,7 +4,7 @@ This document tracks MTC releases and their relationship to publications.
 
 | Version | Date | Highlights | Notes |
 |---------|------|-----------|-------|
-| v0.5.0 | tagged at the release gate | The complete generic architecture: measurement defects of v0.4.0 fixed behind switches, the conversation runtime, five optional stores with in-memory defaults, the API, the `mtc` command with onboarding, setup and operations tooling. | Scores are not comparable with v0.4.0; the `legacy_v04` preset reproduces v0.4.0. See docs/MIGRATION_FROM_V04.md |
+| v0.5.0 | 2026-10-18 | The complete generic architecture: measurement defects of v0.4.0 fixed behind switches, the conversation runtime, five optional stores with in-memory defaults, the API, the `mtc` command with onboarding, setup and operations tooling; the release-gate fixes, with ten more switches, a fail-closed safety gate, opt-in emergency suspension with a resume path, and baseline tests that hold every printed line and report field. | Scores are not comparable with v0.4.0; the `legacy_v04` preset reproduces v0.4.0 (0.031247 with 2 passing in the experiment runner). See docs/MIGRATION_FROM_V04.md and CHANGELOG.md |
 | v0.4.0 | 2026-04-07 | Butlin 2025 alignment: Agency & Embodiment theory, 30 indicators plus 3 negative checks, Butlin 2025 metadata, PhiTracker, negative-indicator penalty. | Indicator count 25 -> 30, theory count 7 -> 8 |
 | v0.3.0 | 2026-03-27 | AutoConsciousness parameter research loop, real measurements replace three placeholder indicators, tuned GWT and FEP defaults. | Score values shift versus v0.2.x |
 | v0.2.1 | 2026-03-25 | Indicators 24-25 (`temporal_prediction_depth`, `agent_environment_coupling`), ConTraSt theory-level weighting. | Patch release |
@@ -22,9 +22,13 @@ To reproduce the paper's assessment results exactly:
     python scripts/run_assessment.py --full --report
 
 To reproduce the published v0.4.0 numbers on v0.5.0, run the experiment runner
-with the legacy preset:
+and the seeded assessment with the legacy preset:
 
     PYPHI_WELCOME_OFF=yes python3 scripts/run_experiment.py --preset legacy_v04
+    PYPHI_WELCOME_OFF=yes python3 scripts/run_assessment.py --preset legacy_v04 --full --json --seed 42 --json-path legacy.json
+
+`tests/test_legacy_preset.py` holds both against their fixtures, every metric
+line and every report field.
 
 ## API Changes
 
@@ -37,8 +41,9 @@ assessment reports what it could not measure: each `IndicatorResult` and
 `ConsciousnessReport` carries a `status` (`measured`, `absent`,
 `insufficient_data`), the report carries `coverage` and
 `insufficient_indicators`, an `insufficient_data` indicator is left out of the
-averages, and the overall score is None when nothing was included. The full
-switch list and the measured differences are in
+averages, the overall score is None when no included indicator was measured,
+and a theory with no measured indicator is left out of `theory_scores`. The
+full switch list and the measured differences are in
 [docs/MIGRATION_FROM_V04.md](docs/MIGRATION_FROM_V04.md).
 
 **Configuration.** Environment keys are the `Settings` field names with the
@@ -50,9 +55,11 @@ authentication is on by default. `.env.example` and `docs/CONFIGURATION.md`
 are generated from `Settings`.
 
 **Entry points.** The `mtc` console script (`mtc.cli.main:main`) with `init`,
-`doctor`, `db`, `assess`, `serve`, `chat`, `ctm` and `privacy-audit`.
-`scripts/run_assessment.py` is a shim over `mtc assess` with unchanged flags.
-`python -m mtc.api.server` serves the API.
+`doctor`, `db`, `assess`, `serve`, `chat`, `ctm`, `safety` and
+`privacy-audit`. `scripts/run_assessment.py` is a shim over `mtc assess` with
+unchanged flags. `python -m mtc.api.server` serves the API. Every entry point
+that builds a workspace needs the `fep` extra and, without it, stops with one
+`MISSING EXTRA` line and exit code 2.
 
 **Extras.** `research` replaces `assessment` (kept as an alias); the store
 extras `postgres`, `mongo`, `redis`, `neo4j` and `qdrant` with `databases` as
@@ -73,6 +80,11 @@ their union; `llm`, `anthropic`, `api` and `embeddings`; `iit` (PyPhi, Python
 - `SNNConfig.dt` (default 1e-3) sets the SNN's time step in seconds; 1.0
   reproduces the v0.4.0 network.
 - The device is chosen by `MTC_DEVICE` (`auto`, `cpu`, `mps`, `cuda`) only.
+- Several fields and return values that read a constant before are Optional
+  and None until measured, a few names were removed or renamed, and some
+  defaults changed; [CHANGELOG.md](CHANGELOG.md) lists them under "Breaking
+  for code built on mtc", "New fields and public names" and "Changed
+  defaults".
 
 ### v0.2.x -> v0.4.0
 

@@ -49,7 +49,10 @@ pip install -e ".[all]"
 
 `all` installs every extra except `iit`. For exact IIT 4.0 Phi on Python 3.12
 or later, add `pip install -e ".[iit]"` (PyPhi is GPLv3 or later; see
-[THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md)).
+[THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md)). The minimum install
+that can run the assessment is the `fep` extra: on a bare install
+`mtc assess`, `mtc serve`, the demo and the examples that build a workspace
+stop with one `MISSING EXTRA` line on stderr and exit code 2.
 
 ## 2. Configure with the wizard
 

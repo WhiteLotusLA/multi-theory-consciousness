@@ -17,7 +17,9 @@ install's extras and model cache stood in.
 One cycle is one consciousness cycle of the workspace. In the live pipeline
 each conversation turn runs one cycle; with `PHI_IDLE_SAMPLE_S` above 0 the
 runtime also records the last cycle's module states into the PhiTracker
-between turns (off by default).
+between turns (off by default); idle samples repeat the last state, so they
+add transitions that carry no module dynamics and pull the proxy toward its
+floor (see [HONEST_LIMITATIONS.md](HONEST_LIMITATIONS.md), section 13).
 
 | Threshold | Value | Reads before it | Source |
 |---|---|---|---|
@@ -51,24 +53,27 @@ emergence run, and the baseline's age and due reason). It is served under
 ## A fresh `mtc assess`
 
 `mtc assess` with no flags is the quick mode: it builds fresh modules and
-assesses them without a warmup. A run of the assessment runner in this mode on
-the development machine printed:
+assesses them without a warmup. A run of `mtc assess` in this mode from a
+scratch project directory on the development machine printed:
 
-- `Status: insufficient_data`, `Coverage: 0.000`, `Passing indicators: 0/30`;
-- 23 indicators `insufficient_data` (shown as `[NODATA]`): the workspace,
-  attention schema, metacognition, active inference and beautiful loop are
-  supplied but have not run a cycle, so every indicator that reads them has no
-  evidence yet;
-- 7 indicators `absent`, scored 0.0 and shown as `[FAIL]`:
-  `affect_coherence`, `integrated_information`, `irreducibility`,
-  `causal_emergence`, `algorithmic_recurrence`, `local_recurrence` and
+- `Overall score: insufficient_data`, `Status: insufficient_data`,
+  `Coverage: 0.000`, `Passing indicators: 0/30`, and no theory score line;
+- 24 indicators `insufficient_data` (shown as `[NODATA]`): the workspace,
+  attention schema, metacognition, active inference, beautiful loop and the
+  workspace's PhiTracker are supplied but have not run a cycle, so every
+  indicator that reads them has no evidence yet;
+- 6 indicators `absent`, scored 0.0 and shown as `[FAIL]`:
+  `affect_coherence`, `irreducibility`, `causal_emergence`,
+  `algorithmic_recurrence`, `local_recurrence` and
   `oscillatory_binding_coherence`. Quick mode builds no PAD model, no RPT
   measurement, no causal emergence analyzer and no neural states, so those
-  inputs are not supplied;
-- `Overall score: 0.000`. Absent indicators are included in the average at
-  0.0, so the command prints 0.000; the report's status is
-  `insufficient_data`, and the API reports such a record as `overall_score`
-  null with `overall_withheld` true, never as a measured zero.
+  inputs are not supplied.
+
+With nothing measured the overall score is not a number: the report's
+`overall_score` is null and `theory_scores` is empty (absent indicators alone
+give no number, and a theory without a measured indicator is left out), and
+the API reports such a record as `overall_score` null with
+`overall_withheld` true, never as a measured zero.
 
 `mtc assess --full` runs `--warmup-cycles` cycles (default 5) first. With the
 default seed of 42 and five cycles, [MIGRATION_FROM_V04.md](MIGRATION_FROM_V04.md)
@@ -148,6 +153,13 @@ extra is advisory (`insufficient_data`). The `all` extra installs both, so
 `--strict`, where the fresh `[all]` install exits 1 on the warning and the
 two `insufficient_data` lines. The count of 22 is for this configuration; the
 check list is in the module's docstring.
+
+## Night sleep deletes weak memories
+
+With the sleep scheduler on, each night sleep deletes memories the pruner
+scores as weak; set SLEEP_PRUNE_DRY_RUN=true to log what would be removed
+without deleting it. The setting is read when the runtime is built
+(`SLEEP_PRUNE_DRY_RUN`, false by default); see [OPERATIONS.md](OPERATIONS.md).
 
 ## The continuous thought machine
 

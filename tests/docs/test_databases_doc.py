@@ -98,3 +98,31 @@ def test_databases_doc_names_every_artifact():
                 assert not re.match(r"^\d", row[2]), family.pattern
             else:
                 assert row[2].startswith(f"{family.ttl_seconds} seconds"), family
+
+
+def _flat() -> str:
+    return re.sub(r"\s+", " ", _text().replace("**", "")).strip()
+
+
+def test_databases_doc_states_what_the_simple_consolidation_pass_writes():
+    """The simple pass writes the group-size strength of each semantic row,
+    and leaves only the confidence and the consolidation strength unwritten."""
+    text = _flat()
+    assert "writes no strength and no confidence" not in text
+    assert (
+        "the simple consolidation pass writes the group-size strength, no "
+        "confidence and no consolidation strength" in text
+    )
+
+
+def test_databases_doc_states_the_pass_level_delete_confirmation():
+    """The pruner's index deletes wait for at least one confirmed row of the
+    pass, not for a confirmation of each row."""
+    text = _flat()
+    assert "confirmed the row's delete" not in text
+    assert (
+        "the vector points and memory nodes of the pass's deleted rows are "
+        "deleted only after the store confirmed at least one row of the pass "
+        "deleted; a delete that confirms none keeps them and is counted as an "
+        "error" in text
+    )

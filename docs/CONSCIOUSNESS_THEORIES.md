@@ -41,7 +41,11 @@ are its parts.
 `flexible_responsiveness`, read from the workspace's statistics: cycle count,
 broadcast coverage, the ignition sustain rate and the bottleneck's competition
 counts and source distribution. The negative check `purely_reactive` also
-belongs to GWT.
+belongs to GWT. By default the workspace registers no broadcast receiver and
+runs no sustain check, so `global_broadcast`, `ignition_dynamics` and
+`global_ignition_nuanced` read `insufficient_data` until a caller registers
+receivers and runs `check_sustain` (see
+[HONEST_LIMITATIONS.md](HONEST_LIMITATIONS.md), section 6).
 
 **What it does not measure.** Whether broadcast content is experienced. The
 workspace is a data structure that ranks candidates by salience; a broadcast
@@ -71,7 +75,11 @@ perspective statistics.
 
 **What it does not measure.** Whether the schema's report of focus corresponds
 to anything felt. Habitual shifts are counted as uncertain and excluded from
-the voluntary ratio.
+the voluntary ratio, which is None until a shift is classifiable. A focus
+prediction is scored only in the cycle after a hyperfocus, so the prediction
+accuracy is None and `attention_schema` reads `insufficient_data` until such
+a cycle has been scored (see [HONEST_LIMITATIONS.md](HONEST_LIMITATIONS.md),
+section 11).
 
 ---
 
@@ -194,6 +202,11 @@ after AKOrN; Miyato et al., ICLR 2025) for phase synchronization.
 **What it measures.** `recurrent_processing` (broadcast coverage blended with
 RPT global recurrence when measurements exist), `algorithmic_recurrence`,
 `local_recurrence`, `oscillatory_binding_coherence` and `organized_percepts`.
+Local recurrence is measured only from a spiking or liquid-state substrate
+state, and the binding layer's coupling synchronizes its oscillators with no
+input at all, so `oscillatory_binding_coherence` scores 0.0 as
+floor-saturated (see [HONEST_LIMITATIONS.md](HONEST_LIMITATIONS.md), section
+14).
 
 **What it does not measure.** Whether recurrence is sufficient for
 experience. The recurrence is algorithmic feedback in small simulated
@@ -238,8 +251,10 @@ Beautiful Loop." *Neuroscience and Biobehavioral Reviews*.
 
 **Module.** `mtc/consciousness/beautiful_loop/`: `BeautifulLoop` (produces a
 `ConsciousMoment` with a loop quality), `HyperModel` (precision controller),
-`BayesianBinding` (binds inferences by mutual information) and
-`EpistemicDepthTracker` (recursive self-reference depth).
+`BayesianBinding` (binds inferences by a correlation proxy for mutual
+information; by default only winners that carry their own numeric vector are
+bound, and with fewer than two such winners the binding quality is not
+measured) and `EpistemicDepthTracker` (recursive self-reference depth).
 
 **What it measures.** `bayesian_binding_quality`, `epistemic_depth` and
 `genuine_implementation`. All three need the loop to have processed at least
@@ -266,6 +281,17 @@ homeostatic drives and, when body metrics are enabled, machine metrics and the
 previous cycle's duration; its day cycle is a sinusoid, or a wall-clock model
 in `TIMEZONE` in the live pipeline. Damasio has no indicator of its own; its
 somatic signal feeds the theory interactions below.
+
+**What is unmeasured.** The first update has no previous body state, so by
+default (`damasio.first_delta` unmeasured) the protoself reports no body
+delta, stability or arousal on it, the core layer's feeling of knowing, its
+somatic markers' intensity and its here-now salience are None on that
+cycle (the report prints `insufficient_data`), and the emotion extractor's
+somatic intensity is None. Under `v04_zero` the first update records 0.0,
+1.0 and 0.0 as v0.4.0 did. The extended layer reports narrative coherence,
+temporal horizon, episodic resonance and identity continuity as None when
+their inputs are missing, and the core layer's somatic valence is None with
+no somatic marker.
 
 ---
 
