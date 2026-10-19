@@ -1,6 +1,7 @@
-"""The Phase 7 Settings keys: operations, the LLM launcher backend, the MongoDB
-authentication database, the changed defaults and a generated example that
-parses with no key left under Other."""
+"""The operations Settings keys: the service manager, backups, the LLM launcher
+backend, the MongoDB authentication database, the changed defaults, the safety
+gate, emergency shutdown, trust compass and sleep dry-run keys and a generated
+example that parses with no key left under Other."""
 
 import os
 import subprocess
@@ -90,7 +91,7 @@ def test_changed_defaults(clean_env):
         Settings(THREADS=-1)
 
 
-def test_release_gate_safety_and_sleep_keys(clean_env, monkeypatch):
+def test_safety_shutdown_compass_and_sleep_dry_run_keys(clean_env, monkeypatch):
     settings = Settings()
     assert settings.SLEEP_PRUNE_DRY_RUN is False
     assert settings.SAFETY_GATE_FAIL_CLOSED is True
@@ -131,7 +132,7 @@ def test_release_gate_safety_and_sleep_keys(clean_env, monkeypatch):
     assert Settings().TRUST_COMPASS_DEEP_MODE is False
 
 
-def test_release_gate_descriptions():
+def test_phi_idle_token_budget_and_safety_gate_descriptions():
     fields = Settings.model_fields
     phi = fields["PHI_IDLE_SAMPLE_S"].description
     assert "idle samples repeat the last state" in phi

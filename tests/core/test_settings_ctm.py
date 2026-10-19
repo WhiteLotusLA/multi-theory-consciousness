@@ -1,4 +1,4 @@
-"""Phase 6 Settings keys for the continuous thought machine."""
+"""Settings keys for the continuous thought machine."""
 
 import os
 from pathlib import Path

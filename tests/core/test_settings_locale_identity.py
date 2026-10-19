@@ -1,4 +1,4 @@
-"""Phase 4 Settings keys: locale, identity paths, development, results."""
+"""Settings keys for the locale, the identity paths, development and results."""
 
 import os
 from pathlib import Path

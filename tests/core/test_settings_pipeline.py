@@ -1,4 +1,4 @@
-"""Phase 6 pipeline Settings keys: speakers and trust, retrieval, the night seam."""
+"""Pipeline Settings keys: speakers and trust, retrieval, the night seam."""
 
 import os
 from pathlib import Path

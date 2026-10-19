@@ -137,7 +137,7 @@ def test_persona_keys_cover_the_documented_schema():
     assert PERSONA_KEYS["core_memory"] == ("identity", "persona", "human")
 
 
-def test_phase6_persona_keys_known(tmp_path, caplog):
+def test_prompt_assembler_persona_keys_known(tmp_path, caplog):
     """The prompt assembler's keys load without an unknown-key warning."""
     assert PERSONA_KEYS["style_rules"] is None
     assert PERSONA_KEYS["speaker_templates"] == ("creator", "known", "unverified")

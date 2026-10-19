@@ -1,4 +1,5 @@
-"""Phase 5 Settings keys: device, embedding model, store, identity and safety keys."""
+"""Settings keys for the device, the embedding model, the stores, identity and
+safety."""
 
 import os
 from pathlib import Path

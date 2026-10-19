@@ -4,8 +4,12 @@ Three properties over the Python sources:
 
 - no line of a Python file under mtc, tests, scripts or examples starts with a
   creation, author or authors header;
-- no docstring or log string under mtc, scripts or examples names a port
-  phase (the word Phase followed by a number);
+- no docstring or log string under mtc, scripts, examples or tests names a
+  port phase (the word Phase followed by a number), and no Python file under
+  mtc, tests, scripts or examples carries one in its name;
+- no docstring or log string under mtc, scripts, examples or tests names the
+  final review stage of the port by its stage name (the word release joined
+  to the word gate);
 - no docstring under mtc/pipeline uses a gendered pronoun (the pipeline's
   docstrings speak of a speaker, never of a he or a she).
 
@@ -31,6 +35,8 @@ HEADER = re.compile(
     r")"
 )
 PORT_PHASE = re.compile(r"\bPhase\s+\d")
+PORT_PHASE_NAME = re.compile(r"phase[_-]?\d", re.I)
+STAGE_LABEL = re.compile(r"\brelease[\s-]+gates?\b", re.I)
 GENDERED = re.compile(r"\b(?:he|she|him|her|hers|his|himself|herself)\b", re.I)
 LOG_METHODS = {
     "debug",
@@ -96,16 +102,34 @@ def header_lines(paths: Iterable[Path], base: Path = ROOT) -> List[str]:
     return found
 
 
-def phase_mentions(paths: Iterable[Path], base: Path = ROOT) -> List[str]:
+def _string_mentions(
+    paths: Iterable[Path], pattern: "re.Pattern[str]", base: Path
+) -> List[str]:
     found = set()
     for path in paths:
         tree = _parse(path)
         if tree is None:
             continue
         for lineno, text in list(_docstrings(tree)) + list(_log_strings(tree)):
-            if PORT_PHASE.search(text):
+            if pattern.search(text):
                 found.add(f"{path.relative_to(base).as_posix()}:{lineno}")
     return sorted(found)
+
+
+def phase_mentions(paths: Iterable[Path], base: Path = ROOT) -> List[str]:
+    return _string_mentions(paths, PORT_PHASE, base)
+
+
+def stage_label_mentions(paths: Iterable[Path], base: Path = ROOT) -> List[str]:
+    return _string_mentions(paths, STAGE_LABEL, base)
+
+
+def phase_file_names(paths: Iterable[Path], base: Path = ROOT) -> List[str]:
+    return sorted(
+        path.relative_to(base).as_posix()
+        for path in paths
+        if PORT_PHASE_NAME.search(path.stem)
+    )
 
 
 def gendered_docstrings(paths: Iterable[Path], base: Path = ROOT) -> List[str]:
@@ -127,6 +151,21 @@ def test_no_creation_or_author_header():
 
 def test_no_port_phase_in_docstrings_or_log_strings():
     hits = phase_mentions(_python_files("mtc", "scripts", "examples"))
+    assert hits == [], hits
+
+
+def test_no_port_phase_in_test_docstrings_or_log_strings():
+    hits = phase_mentions(_python_files("tests"))
+    assert hits == [], hits
+
+
+def test_no_port_phase_in_python_file_names():
+    hits = phase_file_names(_python_files("mtc", "tests", "scripts", "examples"))
+    assert hits == [], hits
+
+
+def test_no_release_gate_label_in_docstrings_or_log_strings():
+    hits = stage_label_mentions(_python_files("mtc", "tests", "scripts", "examples"))
     assert hits == [], hits
 
 
@@ -168,3 +207,52 @@ def test_the_scans_find_planted_residue(tmp_path):
     assert header_lines([clean], base=tmp_path) == []
     assert phase_mentions([clean], base=tmp_path) == []
     assert gendered_docstrings([clean], base=tmp_path) == []
+
+
+def test_the_file_name_scan_finds_a_planted_phase_label(tmp_path):
+    names = [
+        "test_settings_phase4.py",
+        "test_settings_Phase_6_brain.py",
+        "phase-7.py",
+        "test_settings_brain.py",
+        "phase_offset.py",
+        "two_phase_commit.py",
+    ]
+    for name in names:
+        (tmp_path / name).write_text("", encoding="utf-8")
+    found = phase_file_names([tmp_path / name for name in names], base=tmp_path)
+    assert found == [
+        "phase-7.py",
+        "test_settings_Phase_6_brain.py",
+        "test_settings_phase4.py",
+    ]
+
+
+def test_the_stage_label_scan_finds_a_planted_release_gate(tmp_path):
+    planted = tmp_path / "planted.py"
+    planted.write_text(
+        '"""The keys that joined at the release gate."""\n'
+        "import logging\n"
+        "logger = logging.getLogger(__name__)\n"
+        "\n"
+        "\n"
+        "def f():\n"
+        '    """Read the Release-Gate safety keys."""\n'
+        '    logger.warning("fixed by the release  gates")\n'
+        "    # release gate: a comment, outside the scan.\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    assert stage_label_mentions([planted], base=tmp_path) == [
+        "planted.py:1",
+        "planted.py:7",
+        "planted.py:8",
+    ]
+    clean = tmp_path / "clean.py"
+    clean.write_text(
+        '"""SAFETY_GATE_FAIL_CLOSED: the gate releases a held reply."""\n'
+        "# release gate, a comment.\n"
+        "release_gate_count = 0\n",
+        encoding="utf-8",
+    )
+    assert stage_label_mentions([clean], base=tmp_path) == []

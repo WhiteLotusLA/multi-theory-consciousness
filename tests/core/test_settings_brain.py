@@ -1,4 +1,4 @@
-"""Phase 6 Settings keys: providers, generation bounds, prompt caps, narration."""
+"""Settings keys for the providers, generation bounds, prompt caps and narration."""
 
 import os
 import typing
@@ -224,7 +224,7 @@ def test_generated_env_example_parses(clean_env):
     assert Path(s.PROVIDER_STATE_PATH).name == "provider_state.json"
 
 
-def test_phase6_keys_land_in_their_sections():
+def test_brain_keys_land_in_their_sections():
     rendered = render_env_example(Settings)
     assert "# === Other ===" not in rendered
     sections = {}
