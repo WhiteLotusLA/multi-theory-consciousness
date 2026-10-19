@@ -17,12 +17,15 @@ This tests:
 9. Structured self-prediction checks, narration gate and persistence
 """
 
+import logging
 import re
 from types import SimpleNamespace
 
 import pytest
 import numpy as np
 
+import mtc.consciousness.metacognition as metacognition_module
+from mtc.core.config import Settings
 from mtc.consciousness.metacognition import (
     MetaLevel,
     MetaType,
@@ -1392,6 +1395,165 @@ class TestZeroSizeBuffers:
         assert len(meta.higher_order_thoughts) == 0
         assert meta.first_order_by_id == {}
         assert meta.hots_by_id == {}
+
+
+# ============================================================================
+# TEST: CALLBACK FAILURES
+# ============================================================================
+
+_CALLBACK_SECRET = "callback down: private payload"
+
+
+async def _broken_callback(_payload):
+    raise RuntimeError(_CALLBACK_SECRET)
+
+
+def _perception(meta: MetacognitionModule, index: int) -> FirstOrderState:
+    return meta.register_first_order_state(
+        content=f"percept {index}",
+        content_summary=f"percept {index}",
+        state_type=FirstOrderStateType.PERCEPTION,
+        source_module="test",
+        confidence=0.8,
+        evidence_strength=0.7,
+    )
+
+
+def _failure_warnings(caplog, step: str):
+    return [
+        record
+        for record in caplog.records
+        if record.name == "mtc.consciousness.metacognition"
+        and record.levelno == logging.WARNING
+        and step in record.getMessage()
+    ]
+
+
+class TestCallbackFailures:
+    """A failing callback is counted by step, logged by type, raised in DEBUG."""
+
+    @pytest.mark.asyncio
+    async def test_hot_callback_failure_is_counted_and_logged_by_type(self, caplog):
+        meta = MetacognitionModule(
+            hot_generation_threshold=0.0, settings=Settings(DEBUG=False)
+        )
+        meta.on_hot_generated(_broken_callback)
+        with caplog.at_level(logging.WARNING, logger="mtc.consciousness.metacognition"):
+            first = await meta.generate_hot(_perception(meta, 0))
+            second = await meta.generate_hot(_perception(meta, 1))
+        assert first is not None and second is not None
+        assert set(meta.hots_by_id) == {first.id, second.id}
+        assert meta.get_statistics()["failures"] == {"hot_callback": 2}
+        warnings = _failure_warnings(caplog, "hot_callback")
+        assert len(warnings) == 1
+        assert "RuntimeError" in warnings[0].getMessage()
+        assert "private payload" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_hot_callback_failure_is_raised_under_debug(self):
+        meta = MetacognitionModule(
+            hot_generation_threshold=0.0, settings=Settings(DEBUG=True)
+        )
+        meta.on_hot_generated(_broken_callback)
+        with pytest.raises(RuntimeError, match="callback down"):
+            await meta.generate_hot(_perception(meta, 0))
+        assert meta.total_hots_generated == 1
+        assert meta.get_statistics()["failures"] == {"hot_callback": 1}
+
+    @pytest.mark.asyncio
+    async def test_introspection_callback_failure_is_counted_and_raised_under_debug(
+        self, caplog
+    ):
+        quiet = MetacognitionModule(
+            introspection_cooldown=0.0, settings=Settings(DEBUG=False)
+        )
+        quiet.on_introspection_complete(_broken_callback)
+        _perception(quiet, 0)
+        with caplog.at_level(logging.WARNING, logger="mtc.consciousness.metacognition"):
+            result = await quiet.introspect()
+        assert isinstance(result, IntrospectionResult)
+        assert len(result.hots_generated) == 1
+        assert quiet.state.is_introspecting is False
+        assert quiet.get_statistics()["failures"] == {"introspection_callback": 1}
+        warnings = _failure_warnings(caplog, "introspection_callback")
+        assert len(warnings) == 1
+        assert "RuntimeError" in warnings[0].getMessage()
+        assert "private payload" not in caplog.text
+
+        loud = MetacognitionModule(
+            introspection_cooldown=0.0, settings=Settings(DEBUG=True)
+        )
+        loud.on_introspection_complete(_broken_callback)
+        _perception(loud, 0)
+        with pytest.raises(RuntimeError, match="callback down"):
+            await loud.introspect()
+        assert loud.introspection_count == 1
+        assert loud.get_statistics()["failures"] == {"introspection_callback": 1}
+
+    @pytest.mark.asyncio
+    async def test_hot_callback_raise_under_debug_mid_episode_strands_nothing(self):
+        meta = MetacognitionModule(
+            hot_generation_threshold=0.0,
+            introspection_cooldown=0.0,
+            settings=Settings(DEBUG=True),
+        )
+        payloads = []
+
+        async def raise_on_first_call(payload):
+            payloads.append(payload)
+            if len(payloads) == 1:
+                raise RuntimeError(_CALLBACK_SECRET)
+
+        meta.on_hot_generated(raise_on_first_call)
+        _perception(meta, 0)
+        with pytest.raises(RuntimeError, match="callback down"):
+            await meta.introspect()
+        # The episode ended early: the flag is down and it is not counted.
+        assert meta.state.is_introspecting is False
+        assert meta.introspection_count == 0
+        assert meta.total_hots_generated == 1
+        assert meta.get_statistics()["failures"] == {"hot_callback": 1}
+
+        later = [_perception(meta, index) for index in range(1, 4)]
+        for state in later:
+            assert await meta.generate_hot(state) is not None
+        # The HOTs that bring the total to three and to seven each run one
+        # micro-introspection over the three latest states (three HOTs each).
+        assert meta.introspection_count == 2
+        assert meta.total_hots_generated == 10
+        assert meta.state.is_introspecting is False
+        assert meta.get_statistics()["failures"] == {"hot_callback": 1}
+
+    @pytest.mark.asyncio
+    async def test_callback_failure_reads_debug_from_get_settings_by_default(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(
+            metacognition_module, "get_settings", lambda: Settings(DEBUG=True)
+        )
+        meta = MetacognitionModule(hot_generation_threshold=0.0)
+        meta.on_hot_generated(_broken_callback)
+        with pytest.raises(RuntimeError, match="callback down"):
+            await meta.generate_hot(_perception(meta, 0))
+        assert meta.get_statistics()["failures"] == {"hot_callback": 1}
+
+    @pytest.mark.asyncio
+    async def test_plain_function_callbacks_run_and_count_no_failure(self):
+        meta = MetacognitionModule(
+            hot_generation_threshold=0.0,
+            introspection_cooldown=0.0,
+            settings=Settings(DEBUG=True),
+        )
+        seen_hots = []
+        seen_episodes = []
+        meta.on_hot_generated(seen_hots.append)
+        meta.on_introspection_complete(seen_episodes.append)
+        hot = await meta.generate_hot(_perception(meta, 0))
+        result = await meta.introspect()
+        assert seen_hots[0] is hot
+        assert seen_hots[1:] == result.hots_generated
+        assert seen_episodes == [result]
+        assert meta.get_statistics()["failures"] == {}
 
 
 # ============================================================================

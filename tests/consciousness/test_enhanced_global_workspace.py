@@ -13,6 +13,7 @@ import asyncio
 import dataclasses
 import logging
 import numpy as np
+import random
 import time
 import warnings
 from typing import Dict, Any
@@ -1884,6 +1885,256 @@ class TestIntegrationLevel:
         assert two is not None and two > 0.0
         assert three is not None
         assert three == pytest.approx(two)
+
+
+# ============================================================================
+# RECENCY CLOCK (the temporal term of the salience)
+# ============================================================================
+
+
+class _StepClock:
+    """A deterministic stand-in for time.time: every call advances it by
+    ``step`` seconds from the real time at which it was built."""
+
+    def __init__(self, step: float):
+        self.step = step
+        self.now = time.time()
+        self.calls = 0
+
+    def __call__(self) -> float:
+        self.calls += 1
+        self.now += self.step
+        return self.now
+
+
+class _ScaledClock:
+    """time.time running ``speed`` times faster than the real clock."""
+
+    def __init__(self, speed: float):
+        self._real = time.time
+        self._anchor = self._real()
+        self.speed = speed
+
+    def __call__(self) -> float:
+        return self._anchor + (self._real() - self._anchor) * self.speed
+
+
+def _seeded_candidates(count: int = 5):
+    """Candidates shaped like the assessment warmup's, drawn from the seeded
+    numpy stream and stamped by whatever time.time is at the moment."""
+    return [
+        WorkspaceCandidate(
+            content=f"stimulus_{i}",
+            content_type="perception",
+            summary=f"Synthetic stimulus {i}",
+            source=WorkspaceCandidateSource.SENSORY,
+            source_module="sensory",
+            activation_level=float(np.random.uniform(0.3, 0.9)),
+            emotional_salience=float(np.random.uniform(0.0, 0.6)),
+            novelty_score=float(np.random.uniform(0.1, 0.8)),
+            timestamp=time.time(),
+        )
+        for i in range(count)
+    ]
+
+
+async def _seeded_run(monkeypatch, clock, cycles: int = 4, **kwargs):
+    """A seeded workspace run with ``clock`` as time.time (None keeps the
+    real clock): per cycle the competition's average and top salience, the
+    admitted winners' saliences (none in a refractory cycle) and the loop
+    quality, then the loop statistics' average_loop_quality and the HOT
+    mean confidence.
+
+    The introspection cooldown is pinned at 0.0 as both runners pin it: a
+    wall-clock gate would otherwise differ between two clocks on its own.
+    """
+    if clock is not None:
+        monkeypatch.setattr(time, "time", clock)
+    random.seed(7)
+    np.random.seed(7)
+    workspace = _fast_workspace(
+        metacognition_kwargs={"introspection_cooldown": 0.0}, **kwargs
+    )
+    per_cycle = []
+    for _ in range(cycles):
+        state = await workspace.process_consciousness_cycle(_seeded_candidates())
+        competition = workspace.bottleneck.last_competition
+        per_cycle.append(
+            (
+                None if competition is None else competition.avg_salience,
+                None if competition is None else competition.top_salience,
+                [w.salience for w in state.workspace_contents],
+                state.beautiful_loop_quality,
+            )
+        )
+    loop = workspace.beautiful_loop.get_loop_statistics()["average_loop_quality"]
+    confidence = workspace.metacognition.get_statistics()["overall_confidence"]
+    return per_cycle, loop, confidence
+
+
+def _percept(summary: str = "a percept") -> WorkspaceCandidate:
+    return WorkspaceCandidate(
+        content=summary,
+        content_type="perception",
+        summary=summary,
+        source=WorkspaceCandidateSource.SENSORY,
+        source_module="sensory",
+        activation_level=0.6,
+        emotional_salience=0.2,
+    )
+
+
+class TestRecencyClock:
+    """The recency bonus is measured on the workspace's simulated clock by
+    default, so no wall-clock read enters a candidate's salience; the v0.4.0
+    wall-clock arithmetic stays under ``recency_clock="v04_wall"``."""
+
+    def test_default_recency_clock_is_simulated(self):
+        assert AttentionBottleneck().recency_clock == "simulated"
+        workspace = _fast_workspace()
+        assert workspace.recency_clock == "simulated"
+        assert workspace.bottleneck.recency_clock == "simulated"
+        legacy = _fast_workspace(recency_clock="v04_wall")
+        assert legacy.recency_clock == "v04_wall"
+        assert legacy.bottleneck.recency_clock == "v04_wall"
+
+    def test_unknown_recency_clock_rejected(self):
+        with pytest.raises(ValueError):
+            AttentionBottleneck(recency_clock="wall")
+        with pytest.raises(ValueError):
+            _fast_workspace(recency_clock="elapsed")
+
+    @pytest.mark.asyncio
+    async def test_recency_bonus_does_not_read_the_wall_clock(self, monkeypatch):
+        """One candidate's salience is the same an hour of wall-clock time
+        later; under the v0.4.0 arithmetic it is lower by the whole
+        temporal term, 0.1 * (1 - exp(-360))."""
+        reference = await AttentionBottleneck()._calculate_composite_salience(
+            _percept()
+        )
+        later = _percept()
+        monkeypatch.setattr(time, "time", lambda: later.timestamp + 3600.0)
+        moved = await AttentionBottleneck()._calculate_composite_salience(later)
+        assert moved == reference
+        assert later.recency_bonus == 1.0
+
+        legacy_now = _percept()
+        monkeypatch.setattr(time, "time", lambda: legacy_now.timestamp)
+        legacy_reference = await AttentionBottleneck(
+            recency_clock="v04_wall"
+        )._calculate_composite_salience(legacy_now)
+        legacy_later = _percept()
+        monkeypatch.setattr(time, "time", lambda: legacy_later.timestamp + 3600.0)
+        legacy_moved = await AttentionBottleneck(
+            recency_clock="v04_wall"
+        )._calculate_composite_salience(legacy_later)
+        assert legacy_reference == reference
+        assert legacy_reference - legacy_moved == pytest.approx(
+            0.1 * (1.0 - np.exp(-360.0)), abs=1e-12
+        )
+
+    def test_v04_wall_recency_keeps_the_wall_clock_arithmetic(self, monkeypatch):
+        """The legacy value reads time.time once per bonus and computes the
+        v0.4.0 expression bit for bit."""
+        bottleneck = AttentionBottleneck(recency_clock="v04_wall")
+        candidate = _percept()
+        clock = _StepClock(step=0.0)
+        clock.now = candidate.timestamp + 12.5
+        monkeypatch.setattr(time, "time", clock)
+        bonus = bottleneck._calculate_recency_bonus(candidate)
+        assert clock.calls == 1
+        assert bonus == float(np.exp(-0.1 * 12.5))
+
+    @pytest.mark.asyncio
+    async def test_simulated_recency_ages_a_persisting_candidate(self, monkeypatch):
+        """A candidate first seen this cycle has age 0 and the bonus exactly
+        1.0; one that competes again is aged by the simulated clock the
+        bottleneck is handed, never by time.time."""
+        bottleneck = AttentionBottleneck()
+        candidate = _percept()
+        monkeypatch.setattr(time, "time", lambda: candidate.timestamp + 3600.0)
+        await bottleneck.compete_for_access([candidate])
+        assert candidate.submitted_at_s == 0.0
+        assert candidate.recency_bonus == 1.0
+        bottleneck.set_simulated_time(0.25)
+        await bottleneck.compete_for_access([candidate])
+        assert candidate.submitted_at_s == 0.0
+        assert candidate.recency_bonus == float(np.exp(-0.1 * 0.25))
+        # A fresh candidate at the later reading is stamped with it
+        fresh = _percept("another percept")
+        await bottleneck.compete_hierarchical([fresh])
+        assert fresh.submitted_at_s == 0.25
+        assert fresh.recency_bonus == 1.0
+
+    @pytest.mark.asyncio
+    async def test_workspace_hands_the_bottleneck_its_simulated_clock(self):
+        """Under per_cycle a candidate resubmitted in the next cycle has aged
+        by competition_duration_ms; under elapsed also by the real gap read
+        from the workspace's clock."""
+        candidate = _percept()
+        workspace = _fast_workspace(
+            thalamic_gate_enabled=False,
+            temporal_config=TemporalWorkspaceConfig(refractory_period_ms=0.0),
+        )
+        await workspace.process_consciousness_cycle([candidate])
+        assert candidate.submitted_at_s == 0.0
+        assert candidate.recency_bonus == 1.0
+        await workspace.process_consciousness_cycle([candidate])
+        assert candidate.recency_bonus == float(np.exp(-0.1 * 0.25))
+        assert workspace.bottleneck.simulated_time_s == 0.25
+
+        clock = _FakeClock()
+        candidate = _percept()
+        workspace = _fast_workspace(
+            thalamic_gate_enabled=False,
+            temporal_config=TemporalWorkspaceConfig(
+                refractory_period_ms=0.0, refractory_clock="elapsed"
+            ),
+            clock=clock,
+        )
+        await workspace.process_consciousness_cycle([candidate])
+        clock.advance(10.0)
+        await workspace.process_consciousness_cycle([candidate])
+        assert candidate.recency_bonus == float(np.exp(-0.1 * 10.25))
+
+        workspace.reset()
+        assert workspace.bottleneck.simulated_time_s == 0.0
+
+    @pytest.mark.asyncio
+    async def test_salience_does_not_read_the_wall_clock(self, monkeypatch):
+        """The same seeded candidates through the same workspace with
+        time.time advancing 1 ms per call and 25 ms per call give bit
+        identical saliences, loop quality, average_loop_quality and HOT mean
+        confidence: under per_cycle a seeded run depends on no clock."""
+        fast = await _seeded_run(monkeypatch, _StepClock(step=0.001))
+        slow = await _seeded_run(monkeypatch, _StepClock(step=0.025))
+        assert fast[1] is not None and fast[2] is not None
+        assert all(avg is not None for avg, _, _, _ in fast[0])
+        assert any(winners for _, _, winners, _ in fast[0])
+        assert fast == slow
+
+    @pytest.mark.asyncio
+    async def test_two_runs_agree_under_a_scaled_clock(self, monkeypatch):
+        """Two seeded default cycles with time.time running 25 times faster
+        give the same winners' saliences and the same beautiful_loop_quality
+        as two cycles on the real clock."""
+        real = await _seeded_run(monkeypatch, None, cycles=2)
+        scaled = await _seeded_run(monkeypatch, _ScaledClock(25.0), cycles=2)
+        assert any(winners for _, _, winners, _ in real[0])
+        assert [q for *_, q in real[0]] == [q for *_, q in scaled[0]]
+        assert real == scaled
+
+    @pytest.mark.asyncio
+    async def test_v04_wall_salience_follows_the_clock(self, monkeypatch):
+        """The legacy value keeps the machine-speed term: the two step clocks
+        give different saliences (what the default removes)."""
+        fast = await _seeded_run(
+            monkeypatch, _StepClock(step=0.001), cycles=1, recency_clock="v04_wall"
+        )
+        slow = await _seeded_run(
+            monkeypatch, _StepClock(step=0.025), cycles=1, recency_clock="v04_wall"
+        )
+        assert fast[0][0][0] != slow[0][0][0]
 
 
 if __name__ == "__main__":

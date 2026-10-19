@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -274,6 +275,132 @@ def test_default_dir_from_settings(tmp_path, monkeypatch):
     hub.register("m", _ArrayModule())
     hub.save_all()
     assert (target / "manifest.json").exists()
+
+
+def _settings_rooted_at(root: Path, **overrides) -> config.Settings:
+    """Settings whose project root and state directory sit under ``root``."""
+    values = {
+        "PROJECT_ROOT": str(root),
+        "STATE_DIR": str(root / "agent_space" / "consciousness_state"),
+        "LLM_PROVIDER": "mock",
+        "DEVICE": "cpu",
+        "SLEEP_SCHEDULER_ENABLED": False,
+    }
+    values.update(overrides)
+    return config.Settings(_env_file=None, **values)
+
+
+def test_status_never_reports_an_absolute_state_dir(tmp_path, monkeypatch):
+    """The status shows the state directory relative to the project root, or
+    by its name alone when it lies elsewhere; never the absolute path."""
+    project = tmp_path / "project"
+    cfg = _settings_rooted_at(project)
+    monkeypatch.setattr(config, "_settings", cfg)
+
+    inside = ConsciousnessStateManager(state_dir=project / "agent_space" / "state")
+    shown = inside.get_status()["state_dir"]
+    assert not os.path.isabs(shown)
+    assert shown == "agent_space/state"
+
+    outside = ConsciousnessStateManager(state_dir=tmp_path / "elsewhere" / "kept")
+    shown = outside.get_status()["state_dir"]
+    assert not os.path.isabs(shown)
+    assert shown == "kept"
+
+    relative = ConsciousnessStateManager(state_dir=Path("agent_space") / "rel")
+    shown = relative.get_status()["state_dir"]
+    assert not os.path.isabs(shown)
+    assert shown == "agent_space/rel"
+
+    # The status reads the directory without creating it.
+    assert not (project / "agent_space").exists()
+    assert not (tmp_path / "elsewhere").exists()
+
+
+def test_status_reads_only_the_settings_it_was_given(tmp_path, monkeypatch):
+    """Built with a Settings object, the manager takes its default state
+    directory and the project root its status is shown against from that
+    object, and never reads the process Settings."""
+    reads = []
+    original = config.get_settings
+
+    def forbidden():
+        caller = sys._getframe(1)
+        reads.append(f"{Path(caller.f_code.co_filename).name}:{caller.f_lineno}")
+        raise AssertionError("the process Settings were read")
+
+    for name, module in list(sys.modules.items()):
+        if name == "mtc" or name.startswith("mtc."):
+            if getattr(module, "get_settings", None) is original:
+                monkeypatch.setattr(module, "get_settings", forbidden)
+
+    project = tmp_path / "project"
+    cfg = _settings_rooted_at(project)
+
+    default = ConsciousnessStateManager(settings=cfg)
+    assert default.state_dir == project / "agent_space" / "consciousness_state"
+    assert default.get_status()["state_dir"] == "agent_space/consciousness_state"
+
+    inside = ConsciousnessStateManager(
+        state_dir=project / "agent_space" / "state", settings=cfg
+    )
+    assert inside.get_status()["state_dir"] == "agent_space/state"
+
+    outside = ConsciousnessStateManager(
+        state_dir=tmp_path / "elsewhere" / "kept", settings=cfg
+    )
+    assert outside.get_status()["state_dir"] == "kept"
+
+    assert reads == []
+
+
+def test_default_dir_resolves_under_the_given_settings_project_root(tmp_path):
+    """Built with a Settings object and no state directory, the manager takes
+    that object's default STATE_DIR and resolves it under that object's
+    PROJECT_ROOT, like every other path key, never under the working
+    directory."""
+    project = tmp_path / "project"
+    cfg = _settings_rooted_at(project, STATE_DIR="agent_space/consciousness_state")
+    hub = ConsciousnessStateManager(settings=cfg)
+    assert hub.state_dir == project / "agent_space" / "consciousness_state"
+    assert hub.get_status()["state_dir"] == "agent_space/consciousness_state"
+
+
+def test_status_route_serves_a_relative_hub_state_dir(tmp_path, monkeypatch):
+    """The status route copies the hub status into its runtime section; the
+    state directory it serves is relative, built as the runtime builds it."""
+    pytest.importorskip("fastapi", reason="the status route needs the api extra")
+    from fastapi.testclient import TestClient
+
+    from mtc.api.auth import API_KEY_HEADER
+    from mtc.api.server import create_app
+    from mtc.core.paths import resolve_path
+    from mtc.pipeline.runtime import Runtime
+
+    for key in list(os.environ):
+        if key.startswith("MTC_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("MTC_DEVICE", "cpu")
+    monkeypatch.chdir(tmp_path)
+    api_key = os.urandom(24).hex()
+    cfg = _settings_rooted_at(tmp_path, API_KEY=api_key)
+    monkeypatch.setattr(config, "_settings", cfg)
+
+    runtime = Runtime(settings=cfg)
+    runtime.hub = ConsciousnessStateManager(
+        state_dir=resolve_path(cfg.STATE_DIR, settings=cfg)
+    )
+    assert runtime.hub.state_dir.is_absolute()
+
+    client = TestClient(create_app(settings=cfg, runtime=runtime))
+    response = client.get(
+        "/api/consciousness/status", headers={API_KEY_HEADER: api_key}
+    )
+    assert response.status_code == 200
+    served = response.json()["runtime"]["hub"]["state_dir"]
+    assert not os.path.isabs(served)
+    assert served == "agent_space/consciousness_state"
+    assert str(tmp_path) not in response.text
 
 
 @pytest.mark.asyncio

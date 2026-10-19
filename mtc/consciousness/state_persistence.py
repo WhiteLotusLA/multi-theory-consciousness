@@ -42,7 +42,10 @@ non-finite numbers refused, non-finite arrays are named in the log on
 write and on read, and a scalars file that holds NaN is refused on restore.
 
 Privacy note: histories hold workspace content summaries, HOT text and
-message fragments. Treat the state directory as private data.
+message fragments. Treat the state directory as private data. The status
+shows the directory relative to ``PROJECT_ROOT`` (or by its name alone when it
+lies elsewhere), never as an absolute path. A manager built with a Settings
+object reads that object alone, never the process Settings.
 """
 
 import io
@@ -58,7 +61,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 
-from mtc.core.config import get_settings
+from mtc.core.config import Settings
+from mtc.core.paths import display_path, state_dir as default_state_dir
 
 logger = logging.getLogger(__name__)
 
@@ -124,10 +128,14 @@ class ConsciousnessStateManager:
     """Persist registered modules across restarts.
 
     Args:
-        state_dir: Directory for the state files; defaults to
-            ``get_settings().STATE_DIR``. Created on the first save.
+        state_dir: Directory for the state files; defaults to the
+            ``STATE_DIR`` of ``settings``, resolved under its ``PROJECT_ROOT``
+            like every other path key. Created on the first save.
         modules: Optional mapping of name to module to register now.
         arrays_every: Save the arrays tier every N completed cycles.
+        settings: The Settings object that supplies the default state
+            directory and the project root the status shows the directory
+            against; None reads the process Settings when one is needed.
     """
 
     def __init__(
@@ -135,11 +143,13 @@ class ConsciousnessStateManager:
         state_dir: Optional[Union[str, Path]] = None,
         modules: Optional[Dict[str, Any]] = None,
         arrays_every: int = 10,
+        settings: Optional[Settings] = None,
     ):
         if arrays_every < 1:
             raise ValueError(f"arrays_every must be at least 1, got {arrays_every}")
+        self._settings = settings
         if state_dir is None:
-            state_dir = get_settings().STATE_DIR
+            state_dir = default_state_dir(settings)
         self.state_dir = Path(state_dir)
         self.arrays_every = int(arrays_every)
 
@@ -443,7 +453,8 @@ class ConsciousnessStateManager:
     # ------------------------------------------------------------------
 
     def get_status(self) -> Dict[str, Any]:
-        """Current persistence status for monitoring."""
+        """Current persistence status for monitoring; the state directory is
+        shown relative to the project root, never as an absolute path."""
         manifest = self._read_manifest()
         return {
             "registered_modules": sorted(self._modules),
@@ -451,7 +462,7 @@ class ConsciousnessStateManager:
             "total_saves": self._total_saves,
             "last_full_save": self._last_full_save,
             "arrays_every": self.arrays_every,
-            "state_dir": str(self.state_dir),
+            "state_dir": display_path(self.state_dir, settings=self._settings),
             "has_saved_state": manifest is not None,
             "saved_at": manifest.get("timestamp") if manifest else None,
         }

@@ -124,6 +124,11 @@ REFRACTORY_CLOCK_PER_CYCLE = "per_cycle"  # competition_duration_ms per cycle
 REFRACTORY_CLOCK_ELAPSED = "elapsed"  # plus the real time between cycles
 REFRACTORY_CLOCKS = (REFRACTORY_CLOCK_PER_CYCLE, REFRACTORY_CLOCK_ELAPSED)
 
+# Which clock the recency bonus of a candidate's salience measures age on
+RECENCY_CLOCK_SIMULATED = "simulated"  # the workspace's simulated clock
+RECENCY_CLOCK_V04_WALL = "v04_wall"  # time.time() since creation (v0.4.0)
+RECENCY_CLOCKS = (RECENCY_CLOCK_SIMULATED, RECENCY_CLOCK_V04_WALL)
+
 
 @dataclass
 class TemporalWorkspaceConfig:
@@ -140,11 +145,13 @@ class TemporalWorkspaceConfig:
 
     ``refractory_clock`` says how the simulated clock advances between
     cycles: ``per_cycle`` (the default) by ``competition_duration_ms`` per
-    cycle whatever the real time, which keeps a seeded run machine
-    independent; ``elapsed`` also by the real time between cycles read from
-    the workspace's clock, so cycles further apart than the refractory
-    period are never refractory (a caller that drives the workspace in
-    real time, such as the conversation runtime, sets it).
+    cycle whatever the real time, which keeps the cadence machine
+    independent (the bottleneck ages candidates on the same simulated
+    clock under its default recency clock, so no wall-clock read enters a
+    seeded run's salience either); ``elapsed`` also by the real time
+    between cycles read from the workspace's clock, so cycles further apart
+    than the refractory period are never refractory (a caller that drives
+    the workspace in real time, such as the conversation runtime, sets it).
     """
 
     competition_duration_ms: float = 250.0  # 200-300ms biological range
@@ -252,6 +259,10 @@ class WorkspaceCandidate:
     # Metadata
     timestamp: float = field(default_factory=time.time)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Simulated-clock time (s) at which the bottleneck first saw the
+    # candidate; None until then. The default recency clock ages the
+    # candidate against it (see AttentionBottleneck.set_simulated_time).
+    submitted_at_s: Optional[float] = None
 
     def __post_init__(self):
         """Assign the hierarchy level from the source when not set."""
@@ -591,6 +602,7 @@ class AttentionBottleneck:
         ignition_threshold: float = 0.3,  # Minimum to enter consciousness
         lateral_inhibition: float = 0.2,  # How much winners suppress similar content
         thalamic_gate: Optional[ThalamicGate] = None,
+        recency_clock: str = RECENCY_CLOCK_SIMULATED,
     ):
         """
         Initialize the attention bottleneck.
@@ -601,7 +613,23 @@ class AttentionBottleneck:
             lateral_inhibition: Strength of winner-takes-all suppression
             thalamic_gate: Optional pre-competition filter; None lets every
                 candidate compete
+            recency_clock: Which clock the recency bonus measures a
+                candidate's age on: ``simulated`` (the default) is the
+                workspace's simulated clock handed in through
+                set_simulated_time, so no wall-clock read enters the
+                salience; ``v04_wall`` is time.time() since the candidate
+                was created (v0.4.0, which follows the machine's speed)
         """
+        if recency_clock not in RECENCY_CLOCKS:
+            raise ValueError(
+                f"recency_clock must be one of {RECENCY_CLOCKS}, "
+                f"got {recency_clock!r}"
+            )
+        self.recency_clock = recency_clock
+        # The workspace's simulated clock reading (s): candidates are
+        # stamped with it when first seen and, under the simulated recency
+        # clock, aged against it
+        self._simulated_time_s: float = 0.0
         self.capacity = capacity
         self.threshold = ignition_threshold
         self.lateral_inhibition = lateral_inhibition
@@ -693,6 +721,32 @@ class AttentionBottleneck:
         return self.thalamic_gate.gate(candidates, self._arousal, self.current_goals)
 
     # ------------------------------------------------------------------
+    # The recency clock
+    # ------------------------------------------------------------------
+
+    @property
+    def simulated_time_s(self) -> float:
+        """The simulated clock reading (s) the last competition ran at."""
+        return self._simulated_time_s
+
+    def set_simulated_time(self, seconds: float) -> None:
+        """Hand the bottleneck the workspace's simulated clock reading (s).
+
+        A candidate is stamped with the reading when the bottleneck first
+        sees it and, under the simulated recency clock, aged against the
+        reading at each later competition. A non-finite value is ignored.
+        """
+        value = _finite_float(seconds)
+        if value is not None:
+            self._simulated_time_s = value
+
+    def _stamp_candidates(self, candidates: List[WorkspaceCandidate]) -> None:
+        """Record the simulated time at which each new candidate was first seen."""
+        for candidate in candidates:
+            if candidate.submitted_at_s is None:
+                candidate.submitted_at_s = self._simulated_time_s
+
+    # ------------------------------------------------------------------
     # Competition
     # ------------------------------------------------------------------
 
@@ -718,6 +772,7 @@ class AttentionBottleneck:
 
         start_time = time.time()
 
+        self._stamp_candidates(candidates)
         candidates = self._apply_gate(candidates)
         if not candidates:
             return []
@@ -809,6 +864,7 @@ class AttentionBottleneck:
 
         start_time = time.time()
 
+        self._stamp_candidates(candidates)
         candidates = self._apply_gate(candidates)
         if not candidates:
             return []
@@ -1138,8 +1194,22 @@ class AttentionBottleneck:
         Recent content gets slight priority (attention has momentum).
         Exponential decay with rate 0.1 per second: full bonus at 0 s, half
         at about 6.9 s, about 0.37 at 10 s.
+
+        The age is measured on the recency clock. Under ``simulated`` (the
+        default) it is the simulated time since the bottleneck first saw
+        the candidate: a candidate submitted this cycle has age 0 and the
+        bonus exactly 1.0, one that competes again has aged by the
+        workspace's simulated clock, and no wall-clock read enters the
+        salience. Under ``v04_wall`` it is the wall-clock time since the
+        candidate was created (the v0.4.0 arithmetic, which follows the
+        machine's speed).
         """
-        age_seconds = time.time() - candidate.timestamp
+        if self.recency_clock == RECENCY_CLOCK_V04_WALL:
+            age_seconds = time.time() - candidate.timestamp
+        else:
+            if candidate.submitted_at_s is None:
+                candidate.submitted_at_s = self._simulated_time_s
+            age_seconds = max(0.0, self._simulated_time_s - candidate.submitted_at_s)
 
         decay_rate = 0.1  # Decay constant, per second
         recency = np.exp(-decay_rate * age_seconds)
@@ -1765,6 +1835,7 @@ class EnhancedGlobalWorkspace:
         legacy_coverage_ratio: bool = False,
         legacy_broadcast_receivers: bool = False,
         legacy_sustain_rate: bool = False,
+        recency_clock: str = RECENCY_CLOCK_SIMULATED,
         body_metrics_enabled: bool = True,
         precision_feedback_enabled: bool = True,
         self_prediction_enabled: bool = True,
@@ -1811,6 +1882,12 @@ class EnhancedGlobalWorkspace:
             legacy_sustain_rate: Report an ignition sustain rate of 1.0
                 although no sustain check runs (v0.4.0); the default reports
                 none until a sustain check has run.
+            recency_clock: Which clock the recency bonus of a candidate's
+                salience measures age on: ``simulated`` (the default) is the
+                workspace's simulated clock, so a seeded run under
+                ``per_cycle`` reads no wall clock; ``v04_wall`` is the
+                wall-clock age since the candidate was created (v0.4.0,
+                which follows the machine's speed).
             body_metrics_enabled: Feed real system metrics and the previous
                 cycle's duration to the protoself once per cycle.
             precision_feedback_enabled: Let workspace winners raise the
@@ -1861,6 +1938,7 @@ class EnhancedGlobalWorkspace:
             thalamic_gate=(
                 ThalamicGate(thalamic_gate_config) if thalamic_gate_enabled else None
             ),
+            recency_clock=recency_clock,
         )
 
         self.broadcaster = GlobalBroadcast(legacy_coverage_ratio=legacy_coverage_ratio)
@@ -2034,6 +2112,11 @@ class EnhancedGlobalWorkspace:
         return self.temporal_config.refractory_clock
 
     @property
+    def recency_clock(self) -> str:
+        """Which clock the recency bonus measures age on: ``simulated`` or ``v04_wall``."""
+        return self.bottleneck.recency_clock
+
+    @property
     def clock(self) -> Callable[[], float]:
         """The time source, in seconds, of the elapsed refractory clock."""
         return self._clock
@@ -2121,6 +2204,20 @@ class EnhancedGlobalWorkspace:
                     )
 
         # Step 2: Competition - who wins access to consciousness?
+        # The simulated clock first: under the elapsed clock the real time
+        # since the last cycle ended joins it here (per_cycle adds nothing,
+        # so the cadence stays machine independent), and the bottleneck is
+        # handed the reading to stamp and age candidates for the recency
+        # bonus.
+        cfg = self.temporal_config
+        if (
+            cfg.refractory_clock == REFRACTORY_CLOCK_ELAPSED
+            and self._last_cycle_end_s is not None
+        ):
+            gap_s = self._clock() - self._last_cycle_end_s
+            if math.isfinite(gap_s) and gap_s > 0.0:
+                self._simulated_time_ms += gap_s * 1000.0
+        self.bottleneck.set_simulated_time(self._simulated_time_ms / 1000.0)
         gate = self.bottleneck.thalamic_gate
         arousal_source: Optional[str] = None
         if gate is not None:
@@ -2149,18 +2246,8 @@ class EnhancedGlobalWorkspace:
 
         # Step 2b: Temporal competition -- biologically-plausible delay
         # Check refractory period first: the workspace cannot ignite
-        # again until refractory_period_ms of simulated time has passed.
-        cfg = self.temporal_config
-        # Under the elapsed clock the real time since the last cycle ended
-        # joins the simulated clock first; per_cycle adds nothing here, so
-        # the cadence stays machine independent.
-        if (
-            cfg.refractory_clock == REFRACTORY_CLOCK_ELAPSED
-            and self._last_cycle_end_s is not None
-        ):
-            gap_s = self._clock() - self._last_cycle_end_s
-            if math.isfinite(gap_s) and gap_s > 0.0:
-                self._simulated_time_ms += gap_s * 1000.0
+        # again until refractory_period_ms of simulated time has passed
+        # (the elapsed gap, if any, joined the clock before the competition).
         in_refractory = (
             self._simulated_time_ms - self._last_ignition_time_ms
         ) < cfg.refractory_period_ms
@@ -3243,6 +3330,7 @@ class EnhancedGlobalWorkspace:
         self._last_cycle_end_s = None
         self._previous_state = None
         self.bottleneck.cross_theory_bias = 0.0
+        self.bottleneck.set_simulated_time(0.0)
         # The theory interactions (smoothed signals, cycle count) and the
         # thalamic gate (statistics, habituation window) restart as new
         # objects built from the same constants
@@ -3377,6 +3465,7 @@ class EnhancedGlobalWorkspace:
         self._simulated_time_ms = _finite_or(
             s.get("simulated_time_ms"), self._simulated_time_ms
         )
+        self.bottleneck.set_simulated_time(self._simulated_time_ms / 1000.0)
         self._last_ignition_time_ms = _finite_or(
             s.get("last_ignition_time_ms"), self._last_ignition_time_ms
         )
@@ -3572,6 +3661,7 @@ def _candidate_to_record(candidate: WorkspaceCandidate) -> Dict[str, Any]:
         "priority_boost": _finite_or(candidate.priority_boost, 0.0),
         "hierarchy_level": int(candidate.hierarchy_level),
         "timestamp": _finite_or(candidate.timestamp, 0.0),
+        "submitted_at_s": _finite_float(candidate.submitted_at_s),
         # Only plain scalar metadata survives a save
         "metadata": {
             str(key): _json_scalar(value)
@@ -3602,6 +3692,7 @@ def _candidate_from_record(record: Dict[str, Any]) -> WorkspaceCandidate:
         hierarchy_level=int(record.get("hierarchy_level", -1)),
         timestamp=float(record.get("timestamp", time.time())),
         metadata=dict(record.get("metadata") or {}),
+        submitted_at_s=_finite_float(record.get("submitted_at_s")),
     )
     if record.get("id") is not None:
         candidate.id = str(record["id"])

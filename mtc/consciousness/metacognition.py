@@ -25,6 +25,7 @@ Research Foundation:
 """
 
 import asyncio
+import inspect
 import logging
 import math
 import time
@@ -32,9 +33,14 @@ import uuid
 from typing import Dict, Any, Optional, List, Callable, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
-from collections import deque
+from collections import Counter, deque
+
+from mtc.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# A failed step is logged the first time and every this many times after.
+FAILURE_LOG_EVERY = 100
 
 # Where the overall metacognitive confidence comes from. ``hot_mean`` reports
 # the mean confidence of the buffered higher-order thoughts and None before the
@@ -440,6 +446,7 @@ class MetacognitionModule:
         narrate_self_model: bool = True,
         overall_confidence_source: str = OVERALL_CONFIDENCE_HOT_MEAN,
         introspection_counting: str = INTROSPECTION_COUNTING_EPISODES,
+        settings: Any = None,
     ):
         """
         Initialize the Metacognition Module.
@@ -462,6 +469,18 @@ class MetacognitionModule:
                 episodes; ``v04_per_hot`` also adds one for every
                 higher-order thought once three have been generated, whether
                 or not an episode ran (v0.4.0).
+            settings: Settings read for ``DEBUG``; None reads
+                ``get_settings()`` when a step fails
+
+        A callback registered with ``on_hot_generated`` or
+        ``on_introspection_complete`` may be a plain function or a coroutine
+        function. One that raises is counted by step name (``hot_callback``,
+        ``introspection_callback``) in ``get_statistics()["failures"]``, is
+        logged the first time and every hundredth time with the exception type
+        only, and is raised when ``Settings.DEBUG`` is true; the thought or the
+        episode it was called for is kept either way. A HOT callback raised
+        under DEBUG inside an introspection episode ends that episode early:
+        it is not counted and the introspecting flag is reset.
         """
         if overall_confidence_source not in OVERALL_CONFIDENCE_SOURCES:
             raise ValueError(
@@ -483,6 +502,10 @@ class MetacognitionModule:
         self.introspection_cooldown = introspection_cooldown
         self.enable_third_order = enable_third_order
         self.narrate_self_model = narrate_self_model
+        self._settings = settings
+
+        # Failed steps by name (the two callback dispatches)
+        self.failures: Counter = Counter()
 
         # First-order state buffer (unconscious until targeted by HOT)
         self.first_order_states: deque = deque(maxlen=max_first_order_buffer)
@@ -716,12 +739,7 @@ class MetacognitionModule:
         self.state.current_level = MetaLevel.SECOND_ORDER
         self.state.hots_generated_this_cycle += 1
 
-        # Trigger callbacks
-        for callback in self._on_hot_generated:
-            try:
-                await callback(hot)
-            except Exception as e:
-                logger.error(f"HOT callback error: {e}")
+        await self._run_callbacks(self._on_hot_generated, hot, "hot_callback")
 
         logger.debug(f"Generated HOT ({meta_type.value}): '{meta_content[:60]}...'")
 
@@ -994,13 +1012,40 @@ class MetacognitionModule:
             )
 
         self.last_introspection_time = time.time()
-        self.introspection_count += 1
 
         # Update state
         self.state.is_introspecting = True
         self.state.introspection_target = target
         self.state.introspection_depth = depth
+        try:
+            result = await self._run_introspection_episode(
+                target, depth, max_states, start_time
+            )
+        finally:
+            # A callback that raises under DEBUG ends the episode early; the
+            # flag still drops so that later micro-introspections can run.
+            self.state.is_introspecting = False
+        self.state.last_introspection = time.time()
 
+        await self._run_callbacks(
+            self._on_introspection_complete, result, "introspection_callback"
+        )
+
+        logger.info(
+            f"Introspection complete: {len(result.hots_generated)} HOTs, "
+            f"{len(result.insights)} insights, depth={result.depth_reached.value}"
+        )
+
+        return result
+
+    async def _run_introspection_episode(
+        self,
+        target: Optional[str],
+        depth: int,
+        max_states: int,
+        start_time: float,
+    ) -> IntrospectionResult:
+        """Run one episode body and count it once it has completed."""
         # Get recent first-order states
         recent_states = list(self.first_order_states)[-max_states * 2 :]
 
@@ -1057,13 +1102,12 @@ class MetacognitionModule:
                         max_level = MetaLevel.THIRD_ORDER
                         insights.append(f"Deep reflection: {third.meta_content[:50]}")
 
-        # Update state
-        self.state.is_introspecting = False
-        self.state.last_introspection = time.time()
+        # The episode completed: only now does it count.
+        self.introspection_count += 1
 
         duration = time.time() - start_time
 
-        result = IntrospectionResult(
+        return IntrospectionResult(
             target=target or "general",
             hots_generated=hots_generated,
             insights=insights,
@@ -1071,20 +1115,6 @@ class MetacognitionModule:
             duration_seconds=duration,
             depth_reached=max_level,
         )
-
-        # Trigger callbacks
-        for callback in self._on_introspection_complete:
-            try:
-                await callback(result)
-            except Exception as e:
-                logger.error(f"Introspection callback error: {e}")
-
-        logger.info(
-            f"Introspection complete: {len(hots_generated)} HOTs, "
-            f"{len(insights)} insights, depth={max_level.value}"
-        )
-
-        return result
 
     def _generate_insight(
         self,
@@ -1686,6 +1716,7 @@ class MetacognitionModule:
             "introspection_count": self.introspection_count,
             "overall_confidence": self.state.overall_confidence,
             "doubt_level": self.state.doubt_level,
+            "failures": dict(self.failures),
         }
 
     # =========================================================================
@@ -1693,12 +1724,42 @@ class MetacognitionModule:
     # =========================================================================
 
     def on_hot_generated(self, callback: Callable) -> None:
-        """Register callback for when HOT is generated."""
+        """Register a plain or coroutine function called with each new HOT."""
         self._on_hot_generated.append(callback)
 
     def on_introspection_complete(self, callback: Callable) -> None:
-        """Register callback for introspection completion."""
+        """Register a plain or coroutine function called with each episode."""
         self._on_introspection_complete.append(callback)
+
+    async def _run_callbacks(
+        self, callbacks: List[Callable], payload: Any, step: str
+    ) -> None:
+        """Call each callback with the payload; a raising one counts as ``step``."""
+        for callback in callbacks:
+            try:
+                outcome = callback(payload)
+                if inspect.isawaitable(outcome):
+                    await outcome
+            except Exception as exc:
+                self._failure(step, exc)
+
+    def _debug(self) -> bool:
+        settings = self._settings if self._settings is not None else get_settings()
+        return bool(getattr(settings, "DEBUG", False))
+
+    def _failure(self, step: str, exc: BaseException) -> None:
+        """Count a failed step, log the first and every hundredth, raise in DEBUG."""
+        self.failures[step] += 1
+        count = self.failures[step]
+        if count == 1 or count % FAILURE_LOG_EVERY == 0:
+            logger.warning(
+                "metacognition step %s failed (%d so far): %s",
+                step,
+                count,
+                type(exc).__name__,
+            )
+        if self._debug():
+            raise exc
 
     # =========================================================================
     # RESET

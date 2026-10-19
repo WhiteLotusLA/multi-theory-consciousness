@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from mtc.consciousness.active_inference import ActiveInferenceConfig
+from mtc.consciousness import enhanced_global_workspace as egw
 from mtc.consciousness.enhanced_global_workspace import (
     HIERARCHY_LEVELS,
     SOURCE_LEVEL_MAP,
@@ -987,6 +988,36 @@ async def test_last_cycle_end_survives_a_round_trip():
     older = _workspace()
     older.from_state_dict(saved)
     assert older._last_cycle_end_s is None
+
+
+@pytest.mark.asyncio
+async def test_submitted_time_survives_a_round_trip():
+    """A buffered candidate keeps the simulated time the bottleneck first saw
+    it at through a save and restore, a record without the key restores
+    None, and the restored bottleneck reads the restored simulated clock."""
+    source = _workspace(thalamic_gate_enabled=False)
+    faint = _candidate("a faint percept", activation=0.05, emotional=0.0)
+    # First seen in cycle 1 (it wins on novelty), seen again in cycle 2 (it
+    # loses and joins the unconscious buffer with its original stamp)
+    await source.process_consciousness_cycle([faint])
+    await source.process_consciousness_cycle([faint, _candidate("a vivid percept")])
+    assert faint.submitted_at_s == 0.0
+    # Dropped by the temporal competition in cycle 1, a loser in cycle 2:
+    # the buffer holds it twice, both entries with the cycle 1 stamp
+    assert {c.id for c in source.unconscious_buffer} == {faint.id}
+    assert source._simulated_time_ms == pytest.approx(500.0)
+
+    state = _json_round_trip(source.to_state_dict())
+    restored = _workspace(thalamic_gate_enabled=False)
+    restored.from_state_dict(state)
+    assert len(restored.unconscious_buffer) == len(source.unconscious_buffer) >= 1
+    assert {c.submitted_at_s for c in restored.unconscious_buffer} == {0.0}
+    assert restored.bottleneck.simulated_time_s == pytest.approx(0.5)
+
+    record = egw._candidate_to_record(faint)
+    assert record["submitted_at_s"] == 0.0
+    del record["submitted_at_s"]
+    assert egw._candidate_from_record(record).submitted_at_s is None
 
 
 def test_restore_skips_malformed_records_and_foreign_hashes():
