@@ -229,7 +229,14 @@ def _none_as(value: Any, replacement: Any) -> Any:
     """``value`` unchanged, or ``replacement`` when the producer reported None.
 
     The v0.4.0 formula bodies read a statistic their producers now leave
-    None until it is measured; they keep the number v0.4.0 saw there.
+    None until it is measured, as a stand-in: the v0.4.0 constant where
+    v0.4.0 had one (prediction_accuracy 0.0, voluntary_ratio 0.5,
+    overall_confidence 0.5, the recurrence and binding averages 0.0), and
+    0.0 for broadcast.coverage_ratio and ignition.sustain_rate, where
+    v0.4.0 read 1.0 by construction (three acknowledgement-only receivers
+    and a sustained flag that defaulted True). The legacy preset restores
+    both producers, so it never reads None there; indicator_formulas="v04"
+    alone reads those two as 0.0.
     """
     return replacement if value is None else value
 
@@ -2383,8 +2390,10 @@ class ConsciousnessAssessment:
     ) -> Tuple[Optional[float], bool]:
         """(number, missing) for a real statistic.
 
-        Missing under v04_constants falls back to the v0.4.0 default; under
-        insufficient_data it stays missing for the caller to report.
+        Missing under v04_constants falls back to ``default``, the policy's
+        stand-in for that statistic (the v0.4.0 constant where v0.4.0 had
+        one); under insufficient_data it stays missing for the caller to
+        report.
         """
         number = _real(value)
         if number is not None:
@@ -2733,8 +2742,11 @@ class ConsciousnessAssessment:
         introspections = _count(stats.get("introspection_count"))
         overall_confidence = 0.0
         if introspections > 0:
+            # The module reported a constant 0.5 before it measured it; the
+            # v04 body reads a None confidence as that constant, and so does
+            # the v04_constants policy here
             overall_confidence, missing = self._stat_or_default(
-                stats.get("overall_confidence"), 0.0
+                stats.get("overall_confidence"), 0.5
             )
             if missing:
                 return self._insufficient_result("metacognition.overall_confidence")
@@ -3465,8 +3477,14 @@ class ConsciousnessAssessment:
         _avg_depth, _depth_missing, peak_depth = self._depth(stats)
         has_field_evidencing = fe_count > 0
         has_loop_quality = avg_quality >= 0.4
-        has_strange_loop = peak_depth >= 2
-        conditions_met = sum([has_field_evidencing, has_loop_quality, has_strange_loop])
+        # The third condition is the depth tracker having reached its
+        # meta-prediction level (depth 2, read from module state) at least
+        # once. It is not the tracker's strange-loop verdict: that verdict
+        # reaches this indicator only through field_evidencing_count.
+        has_meta_prediction_depth = peak_depth >= 2
+        conditions_met = sum(
+            [has_field_evidencing, has_loop_quality, has_meta_prediction_depth]
+        )
         score = 0.0 if cycles == 0 else conditions_met / 3.0
         confidence = 0.5 + 0.3 * min(1.0, cycles / 20)
         return self._measured(
@@ -3477,7 +3495,7 @@ class ConsciousnessAssessment:
                 "field_evidencing_count": fe_count,
                 "has_field_evidencing": has_field_evidencing,
                 "has_loop_quality": has_loop_quality,
-                "has_strange_loop": has_strange_loop,
+                "has_meta_prediction_depth": has_meta_prediction_depth,
                 "peak_depth": peak_depth,
                 "conditions_met": conditions_met,
             },
@@ -4173,6 +4191,9 @@ class ConsciousnessAssessment:
                     else:
                         has_field_evidencing = fe_count > 0
                         has_loop_quality = avg_quality >= 0.4
+                        # v0.4.0's key name and its read of max_depth_reached,
+                        # which no producer reports (always 0); kept for the
+                        # legacy output shape
                         has_strange_loop = depth_stats.get("max_depth_reached", 0) >= 2
                         conditions_met = sum(
                             [has_field_evidencing, has_loop_quality, has_strange_loop]

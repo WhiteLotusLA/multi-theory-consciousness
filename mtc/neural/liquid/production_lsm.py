@@ -10,11 +10,19 @@ and an offline ridge readout.
 Defaults: a 5,000-unit reservoir, spectral radius 0.9 and 10% recurrent
 connectivity.
 
+The live readout: ``process_input`` (and so ``process_subconscious``) reads
+one readout, named by ``active_readout``. It is the RLS readout until
+``train_ridge`` fits the ridge readout; after that the most recent training
+call selects it (``train_rls`` selects the RLS readout, ``train_ridge`` the
+ridge readout).
+
 Persistence: the reservoir weights are not saved. They regenerate from
-``LSMConfig.seed``, so the state dict carries only the learned RLS readout
-(output weights, bias, the inverse correlation matrix P and the sample
-count) together with the reservoir size and seed it was trained against.
-P is reservoir_size x reservoir_size, about 200 MB at the default size.
+``LSMConfig.seed``, so the state dict carries only the learned readouts: the
+RLS readout (output weights, bias, the inverse correlation matrix P and the
+sample count), the ridge readout's weights and bias once it was fitted, and
+the name of the live readout, together with the reservoir size and seed they
+were trained against. P is reservoir_size x reservoir_size, about 200 MB at
+the default size.
 
 Seeding: importing the module seeds nothing. A construction with a seed
 calls the library's ``set_seed`` with it (which also seeds NumPy's global
@@ -22,9 +30,9 @@ generator).
 
 Honest readings: the dynamics proxies are None when the trajectory is too
 short for them, and ``emotional_valence`` and ``emotional_arousal`` are None
-until the RLS readout was trained on this instance or restored; the raw
-readout statistics are always reported as ``readout_mean`` and
-``readout_std``.
+until the live readout was trained on this instance or restored from a
+trained one; the raw readout statistics are always reported as
+``readout_mean`` and ``readout_std``.
 """
 
 import numpy as np
@@ -41,6 +49,11 @@ logger = logging.getLogger(__name__)
 # Fewest reservoir states for the divergence proxy and the lag-1 correlation
 MIN_STATES_LYAPUNOV = 10
 MIN_STATES_CORRELATION = 3
+
+# Names of the readouts process_input can read
+READOUT_RLS = "rls"
+READOUT_RIDGE = "ridge"
+READOUTS = (READOUT_RLS, READOUT_RIDGE)
 
 
 @dataclass
@@ -80,9 +93,10 @@ class ProductionLSM:
     Liquid state machine with a reservoir near the edge of chaos.
 
     - A sparse recurrent reservoir (5,000 units by default)
-    - RLS readout for online adaptation, ridge readout for offline training
+    - RLS readout for online adaptation, ridge readout for offline training;
+      the live output is the readout trained most recently
     - Reservoir activity and dynamics metrics
-    - Persistence of the learned RLS readout
+    - Persistence of the learned readouts and of the live readout's name
     """
 
     def __init__(self, config: Optional[LSMConfig] = None, fast_mode: bool = True):
@@ -95,8 +109,10 @@ class ProductionLSM:
         """
         self.config = config or LSMConfig()
         self.fast_mode = fast_mode
-        # True once the RLS readout was trained here or restored; until then
-        # its output is not an affect reading
+        # The readout process_input reads (READOUT_RLS or READOUT_RIDGE)
+        self.active_readout = READOUT_RLS
+        # True once the live readout was trained here or restored from a
+        # trained one; until then its output is not an affect reading
         self.readout_trained = False
 
         if self.config.seed is not None:
@@ -154,8 +170,15 @@ class ProductionLSM:
         self.reservoir >> self.rls_readout
         self.reservoir >> self.ridge_readout
 
-        # Create the full model
+        # The input, reservoir and RLS chain as one ReservoirPy model;
+        # process_input runs the nodes itself and does not read it
         self.model = self.input_layer >> self.reservoir >> self.rls_readout
+
+    def _live_readout(self) -> Any:
+        """The readout named by ``active_readout``."""
+        if self.active_readout == READOUT_RIDGE:
+            return self.ridge_readout
+        return self.rls_readout
 
     def process_input(
         self, input_data: np.ndarray
@@ -190,8 +213,8 @@ class ProductionLSM:
         # Run through reservoir
         reservoir_states = self.reservoir.run(input_data)
 
-        # Get output from RLS readout
-        output = self.rls_readout.run(reservoir_states)
+        # Output of the live readout (the RLS one unless ridge was fitted last)
+        output = self._live_readout().run(reservoir_states)
 
         # Calculate state metrics
         processing_time = (time.time() - start_time) * 1000  # ms
@@ -379,6 +402,9 @@ class ProductionLSM:
         """
         Train the LSM using RLS (Recursive Least Squares) learning.
 
+        Training puts the RLS readout on the live path (``active_readout``)
+        and marks the readout trained.
+
         Args:
             input_sequences: Input data (samples, timesteps, input_dim)
             target_sequences: Target outputs (samples, timesteps, output_dim)
@@ -403,6 +429,7 @@ class ProductionLSM:
 
         avg_loss = total_loss / num_sequences
         if num_sequences > 0:
+            self.active_readout = READOUT_RLS
             self.readout_trained = True
         logger.info(f"RLS training complete: avg_loss={avg_loss:.4f}")
 
@@ -414,12 +441,23 @@ class ProductionLSM:
         """
         Train the LSM using ridge regression (offline).
 
+        The first ``config.washout`` timesteps of each sequence are dropped
+        and the ridge readout is fitted on the remaining reservoir states in
+        one solve, replacing any earlier ridge fit. The fit puts the ridge
+        readout on the live path (``active_readout``), so ``process_input``
+        and ``process_subconscious`` read it until ``train_rls`` is called,
+        and marks the readout trained.
+
         Args:
-            input_sequences: Input data
-            target_sequences: Target outputs
+            input_sequences: Input data (samples, timesteps, input_dim)
+            target_sequences: Target outputs (samples, timesteps, output_dim)
 
         Returns:
-            Training loss
+            Training loss (NRMSE of the fit on its own training states)
+
+        Raises:
+            ValueError: no timestep is left after the washout, so there is
+                nothing to fit; the live readout is left as it was.
         """
         # Collect all reservoir states
         all_states = []
@@ -428,20 +466,30 @@ class ProductionLSM:
         for i in range(input_sequences.shape[0]):
             states = self.reservoir.run(input_sequences[i])
             all_states.append(states[self.config.washout :])  # Remove washout
-            all_targets.append(target_sequences[i][self.config.washout :])
+            all_targets.append(np.asarray(target_sequences[i])[self.config.washout :])
+
+        samples = sum(len(states) for states in all_states)
+        if samples == 0:
+            raise ValueError(
+                "ridge training needs sequences longer than the washout of "
+                f"{self.config.washout} timesteps; none of the "
+                f"{len(all_states)} sequences leaves a timestep to fit"
+            )
 
         # Concatenate
         X = np.vstack(all_states)
         y = np.vstack(all_targets)
 
-        # Train ridge regression
-        self.ridge_readout.train(X, y)
+        # Fit the ridge regression in one offline solve
+        self.ridge_readout.fit(X, y)
 
         # Evaluate
         predictions = self.ridge_readout.run(X)
-        loss = nrmse(y, predictions)
-        r2 = rsquare(y, predictions)
+        loss = float(nrmse(y, predictions))
+        r2 = float(rsquare(y, predictions))
 
+        self.active_readout = READOUT_RIDGE
+        self.readout_trained = True
         logger.info(f"Ridge training complete: loss={loss:.4f}, R2={r2:.4f}")
 
         return loss
@@ -450,13 +498,23 @@ class ProductionLSM:
     # Persistence
     # ------------------------------------------------------------------
 
-    def to_state_dict(self) -> Dict[str, Any]:
-        """Serialize the learned RLS readout.
+    def _ridge_fitted(self) -> bool:
+        """True once the ridge readout holds fitted weights and bias."""
+        readout = self.ridge_readout
+        return isinstance(getattr(readout, "Wout", None), np.ndarray) and isinstance(
+            getattr(readout, "bias", None), np.ndarray
+        )
 
-        The arrays are the readout's output weights (reservoir_size x
+    def to_state_dict(self) -> Dict[str, Any]:
+        """Serialize the learned readouts and the name of the live one.
+
+        The RLS arrays are the readout's output weights (reservoir_size x
         output_dim), bias and P matrix, present only once the readout has
-        been initialized. The scalars record the reservoir size and seed the
-        readout was trained against.
+        been initialized. The ridge arrays are its output weights and bias,
+        present only once ``train_ridge`` fitted it. The scalars record the
+        reservoir size and seed the readouts were trained against, the RLS
+        sample count, whether the ridge readout was fitted and the name of
+        the live readout (``readout``).
 
         Returns:
             Dict with scalars, arrays and histories keys.
@@ -470,6 +528,10 @@ class ProductionLSM:
                 if isinstance(value, np.ndarray):
                     arrays[f"rls_{name}"] = value
         samples = getattr(readout, "S", 0) if initialized else 0
+        ridge_fitted = self._ridge_fitted()
+        if ridge_fitted:
+            arrays["ridge_Wout"] = self.ridge_readout.Wout
+            arrays["ridge_bias"] = self.ridge_readout.bias
         return {
             "scalars": {
                 "reservoir_size": self.config.reservoir_size,
@@ -477,25 +539,37 @@ class ProductionLSM:
                 "spectral_radius": self.config.spectral_radius,
                 "rls_initialized": initialized,
                 "rls_samples": float(samples),
+                "ridge_fitted": ridge_fitted,
+                "readout": self.active_readout,
             },
             "arrays": arrays,
             "histories": {},
         }
 
     def from_state_dict(self, state: Dict[str, Any]) -> None:
-        """Restore the RLS readout saved by ``to_state_dict``.
+        """Restore the readouts saved by ``to_state_dict``.
 
-        The readout is restored only when the saved reservoir size and seed
+        A readout is restored only when the saved reservoir size and seed
         match this instance (otherwise it was trained on a different
-        reservoir) and the output weights and bias have the expected shapes
-        and are finite. A non-finite or misshapen P is replaced by the RLS
-        initial value (identity over alpha), keeping the weights for
+        reservoir) and its output weights and bias have the expected shapes
+        and are finite. A non-finite or misshapen RLS P is replaced by the
+        RLS initial value (identity over alpha), keeping the weights for
         inference while online learning restarts its correlation estimate.
-        Every rejection is logged.
+
+        The saved ``readout`` scalar names the live readout; a state without
+        it names the RLS readout. When the named readout is refused, nothing
+        is restored and the other readout is not put on the live path in its
+        place. When it is accepted it becomes the live readout, and the
+        instance counts as trained when that readout was trained: a fitted
+        ridge readout always, an RLS readout when it saw at least one
+        training sample (a readout that processing initialized but no
+        training fitted is restored untrained). Every rejection is logged.
         """
         scalars = state.get("scalars") or {}
         arrays = state.get("arrays") or {}
-        if not scalars.get("rls_initialized") or "rls_Wout" not in arrays:
+        has_rls = bool(scalars.get("rls_initialized")) and "rls_Wout" in arrays
+        has_ridge = "ridge_Wout" in arrays
+        if not (has_rls or has_ridge):
             return
 
         size = self.config.reservoir_size
@@ -513,6 +587,42 @@ class ProductionLSM:
             )
             return
 
+        live = scalars.get("readout", READOUT_RLS)
+        if live not in READOUTS:
+            logger.warning(
+                f"LSM restore skipped: the saved live readout {live!r} is not "
+                f"one of {READOUTS}"
+            )
+            return
+
+        rls = self._prepare_rls(scalars, arrays) if has_rls else None
+        ridge = self._prepare_ridge(arrays) if has_ridge else None
+        named = ridge if live == READOUT_RIDGE else rls
+        if named is None:
+            logger.warning(
+                f"LSM restore skipped: the live {live} readout was not restored"
+            )
+            return
+
+        if rls is not None:
+            self._apply_rls(rls)
+        if ridge is not None:
+            self._apply_ridge(ridge)
+        self.active_readout = live
+        if live == READOUT_RIDGE:
+            self.readout_trained = True
+        else:
+            self.readout_trained = rls["S"] > 0.0
+        logger.info(
+            f"LSM readout restored for a {size}-unit reservoir "
+            f"(live readout {live}, trained {self.readout_trained})"
+        )
+
+    def _prepare_rls(
+        self, scalars: Dict[str, Any], arrays: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Validate the saved RLS readout; None (logged) when it is refused."""
+        size = self.config.reservoir_size
         out_dim = self.config.output_dim
         wout = np.asarray(arrays["rls_Wout"], dtype=float)
         bias = np.asarray(arrays.get("rls_bias", np.zeros(out_dim)), dtype=float)
@@ -521,15 +631,14 @@ class ProductionLSM:
                 f"LSM restore skipped: readout shapes {wout.shape} and "
                 f"{bias.shape}, expected {(size, out_dim)} and {(out_dim,)}"
             )
-            return
+            return None
         if not (np.all(np.isfinite(wout)) and np.all(np.isfinite(bias))):
             logger.warning(
                 "LSM restore skipped: the saved readout holds non-finite values"
             )
-            return
+            return None
 
-        readout = self.rls_readout
-        alpha = float(getattr(readout, "alpha", 1e-6))
+        alpha = float(getattr(self.rls_readout, "alpha", 1e-6))
         p_matrix = arrays.get("rls_P")
         if p_matrix is not None:
             p_matrix = np.asarray(p_matrix, dtype=float)
@@ -551,17 +660,53 @@ class ProductionLSM:
             samples = 0.0
         if not np.isfinite(samples):
             samples = 0.0
+        return {"Wout": wout, "bias": bias, "P": p_matrix, "S": samples}
 
-        readout.input_dim = size
+    def _prepare_ridge(self, arrays: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Validate the saved ridge readout; None (logged) when it is refused."""
+        size = self.config.reservoir_size
+        out_dim = self.config.output_dim
+        wout = np.asarray(arrays["ridge_Wout"], dtype=float)
+        if "ridge_bias" not in arrays:
+            logger.warning("LSM restore: the saved ridge readout has no bias")
+            return None
+        bias = np.asarray(arrays["ridge_bias"], dtype=float)
+        if wout.shape != (size, out_dim) or bias.shape != (out_dim,):
+            logger.warning(
+                f"LSM restore: ridge readout shapes {wout.shape} and "
+                f"{bias.shape}, expected {(size, out_dim)} and {(out_dim,)}"
+            )
+            return None
+        if not (np.all(np.isfinite(wout)) and np.all(np.isfinite(bias))):
+            logger.warning(
+                "LSM restore: the saved ridge readout holds non-finite values"
+            )
+            return None
+        return {"Wout": wout, "bias": bias}
+
+    def _apply_rls(self, prepared: Dict[str, Any]) -> None:
+        """Install a validated RLS readout."""
+        out_dim = self.config.output_dim
+        readout = self.rls_readout
+        readout.input_dim = self.config.reservoir_size
         readout.output_dim = out_dim
-        readout.Wout = wout
-        readout.bias = bias
-        readout.P = p_matrix
-        readout.S = samples
+        readout.Wout = prepared["Wout"]
+        readout.bias = prepared["bias"]
+        readout.P = prepared["P"]
+        readout.S = prepared["S"]
         readout.state = {"out": np.zeros((out_dim,))}
         readout.initialized = True
-        self.readout_trained = True
-        logger.info(f"LSM readout restored for a {size}-unit reservoir")
+
+    def _apply_ridge(self, prepared: Dict[str, Any]) -> None:
+        """Install a validated ridge readout."""
+        out_dim = self.config.output_dim
+        readout = self.ridge_readout
+        readout.input_dim = self.config.reservoir_size
+        readout.output_dim = out_dim
+        readout.Wout = prepared["Wout"]
+        readout.bias = prepared["bias"]
+        readout.state = {"out": np.zeros((out_dim,))}
+        readout.initialized = True
 
     def benchmark_performance(self) -> Dict[str, Any]:
         """

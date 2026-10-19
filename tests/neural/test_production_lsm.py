@@ -36,7 +36,6 @@ def _make_mock_readout(output_dim: int = 50):
 
     readout.run = MagicMock(side_effect=run_side_effect)
     readout.fit = MagicMock()
-    readout.train = MagicMock()
     readout.__rshift__ = MagicMock(return_value=readout)
     return readout
 
@@ -346,3 +345,105 @@ def test_import_does_not_seed_the_library(monkeypatch):
         assert calls == [7]
     finally:
         sys.modules.pop(name, None)
+
+
+# ---------------------------------------------------------------------------
+# The offline ridge readout on a real (small) reservoir
+# ---------------------------------------------------------------------------
+
+RIDGE_INPUT_DIM = 4
+RIDGE_OUTPUT_DIM = 2
+
+
+def _real_lsm(**overrides):
+    """A real ProductionLSM small enough for a unit test (40 units)."""
+    pytest.importorskip("reservoirpy")
+    from mtc.neural.liquid.production_lsm import LSMConfig, ProductionLSM
+
+    values = dict(
+        reservoir_size=40,
+        input_dim=RIDGE_INPUT_DIM,
+        output_dim=RIDGE_OUTPUT_DIM,
+        washout=5,
+    )
+    values.update(overrides)
+    return ProductionLSM(LSMConfig(**values))
+
+
+def _sequences(seed: int, samples: int = 2, timesteps: int = 30):
+    rng = np.random.default_rng(seed)
+    inputs = rng.standard_normal((samples, timesteps, RIDGE_INPUT_DIM))
+    targets = rng.standard_normal((samples, timesteps, RIDGE_OUTPUT_DIM))
+    return inputs, targets
+
+
+def test_train_ridge_alone_reports_affect_from_the_ridge_readout():
+    """After train_ridge and no other training, the live output is the ridge
+    readout's and the affect fields carry its statistics."""
+    lsm = _real_lsm()
+    inputs, targets = _sequences(0)
+
+    loss = lsm.train_ridge(inputs, targets)
+
+    assert isinstance(loss, float) and np.isfinite(loss)
+    assert lsm.readout_trained is True
+    assert lsm.active_readout == "ridge"
+
+    probe = np.random.default_rng(1).standard_normal((8, RIDGE_INPUT_DIM))
+    lsm.reservoir.reset()
+    result = lsm.process_subconscious(probe)
+    output = np.asarray(result["raw_output"])
+    lsm.reservoir.reset()
+    expected = (
+        lsm.reservoir.run(probe) @ lsm.ridge_readout.Wout + lsm.ridge_readout.bias
+    )
+    assert output.shape == (8, RIDGE_OUTPUT_DIM)
+    np.testing.assert_allclose(output, expected, rtol=1e-10, atol=1e-12)
+    assert isinstance(result["emotional_valence"], float)
+    assert result["emotional_valence"] == pytest.approx(float(np.mean(output)))
+    assert result["emotional_arousal"] == pytest.approx(float(np.std(output)))
+
+
+def test_train_ridge_refuses_sequences_no_longer_than_the_washout():
+    """With nothing left after the washout there is nothing to fit: the call
+    raises and the readout stays untrained."""
+    lsm = _real_lsm(washout=10)
+    inputs, targets = _sequences(2, timesteps=10)
+
+    with pytest.raises(ValueError, match="washout"):
+        lsm.train_ridge(inputs, targets)
+
+    assert lsm.readout_trained is False
+    assert lsm.active_readout == "rls"
+    result = lsm.process_subconscious(np.zeros((4, RIDGE_INPUT_DIM)))
+    assert result["emotional_valence"] is None
+
+
+def test_the_latest_training_selects_the_live_readout():
+    """train_rls after train_ridge puts the RLS readout back on the live path,
+    and train_ridge after train_rls takes it again."""
+    lsm = _real_lsm()
+    inputs, targets = _sequences(3)
+    probe = np.random.default_rng(4).standard_normal((6, RIDGE_INPUT_DIM))
+
+    lsm.train_ridge(inputs, targets)
+    lsm.train_rls(inputs, targets)
+    assert lsm.active_readout == "rls"
+    lsm.reservoir.reset()
+    output, _ = lsm.process_input(probe)
+    lsm.reservoir.reset()
+    rls_expected = (
+        lsm.reservoir.run(probe) @ lsm.rls_readout.Wout + lsm.rls_readout.bias
+    )
+    np.testing.assert_allclose(output, rls_expected, rtol=1e-10, atol=1e-12)
+
+    lsm.train_ridge(inputs, targets)
+    assert lsm.active_readout == "ridge"
+    lsm.reservoir.reset()
+    output, _ = lsm.process_input(probe)
+    lsm.reservoir.reset()
+    ridge_expected = (
+        lsm.reservoir.run(probe) @ lsm.ridge_readout.Wout + lsm.ridge_readout.bias
+    )
+    np.testing.assert_allclose(output, ridge_expected, rtol=1e-10, atol=1e-12)
+    assert not np.allclose(ridge_expected, rls_expected)

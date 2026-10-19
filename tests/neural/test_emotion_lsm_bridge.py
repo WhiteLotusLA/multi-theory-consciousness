@@ -223,6 +223,28 @@ def test_trained_readout_reports_values_production(production_bridge):
     )
 
 
+def test_ridge_trained_production_readout_reports_values(production_bridge):
+    """A reservoir whose live readout was fitted offline by ridge regression
+    counts as trained: the bridge reports the readout's values."""
+    bridge = production_bridge
+    rng = np.random.default_rng(0)
+    inputs = rng.random((2, 120, 20))
+    targets = np.tile([0.5, -0.25, 0.75, 0.0, 0.0, 0.0], (2, 120, 1))
+    assert bridge.readout_trained() is False
+    bridge.lsm.train_ridge(inputs, targets)
+    assert bridge.readout_trained() is True
+    _, state = bridge.process_emotion(_state())
+    assert state.readout_trained is True
+    assert all(
+        isinstance(v, float)
+        for v in (
+            state.intuitive_valence,
+            state.intuitive_arousal,
+            state.emotional_coherence,
+        )
+    )
+
+
 def test_pattern_thresholds_from_config(numpy_bridge):
     flat = [1.0] * 12
     assert numpy_bridge._classify_pattern(flat)[0] == "stable"

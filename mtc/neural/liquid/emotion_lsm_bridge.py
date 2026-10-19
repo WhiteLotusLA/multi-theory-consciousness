@@ -306,17 +306,15 @@ class EmotionLSMBridge:
     # ---- readout ------------------------------------------------------
 
     def readout_trained(self) -> bool:
-        """True once the readout has been trained."""
+        """True once the readout has been trained.
+
+        On the production path this is the reservoir's own flag: its live
+        readout (RLS, or ridge once ``ProductionLSM.train_ridge`` fitted it)
+        was trained there or restored from a trained one.
+        """
         if self.path == "numpy":
             return self._numpy_readout_trained
-        try:
-            scalars = self.lsm.to_state_dict().get("scalars") or {}
-            return bool(scalars.get("rls_initialized")) and (
-                float(scalars.get("rls_samples", 0.0)) > 0.0
-            )
-        except Exception as exc:
-            logger.debug("readout state unavailable: %s", exc)
-            return False
+        return getattr(self.lsm, "readout_trained", False) is True
 
     def train_readout(self, input_sequences: Any, target_sequences: Any) -> Any:
         """Train the readout; the first three target columns must be valence,

@@ -438,16 +438,21 @@ async def test_genuine_implementation_reads_peak_depth():
         beautiful_loop=_DepthLoop(peak=3), normalize=False
     )
     genuine = deep.indicator_results["genuine_implementation"]
-    assert genuine.evidence["has_strange_loop"] is True
+    # The third condition is the depth tracker reaching its meta-prediction
+    # level (peak_depth >= 2), read from module state; it is not the
+    # tracker's strange-loop verdict, which reaches this indicator only
+    # through field_evidencing_count, so the evidence key says so.
+    assert genuine.evidence["has_meta_prediction_depth"] is True
+    assert "has_strange_loop" not in genuine.evidence
     assert genuine.score == pytest.approx(1.0)
     assert deep.indicator_results["epistemic_depth"].confidence == 0.6
 
     shallow = await ConsciousnessAssessment().run_full_assessment(
         beautiful_loop=_DepthLoop(peak=1), normalize=False
     )
-    assert shallow.indicator_results["genuine_implementation"].score == pytest.approx(
-        2.0 / 3.0
-    )
+    shallow_genuine = shallow.indicator_results["genuine_implementation"]
+    assert shallow_genuine.evidence["has_meta_prediction_depth"] is False
+    assert shallow_genuine.score == pytest.approx(2.0 / 3.0)
     assert shallow.indicator_results["epistemic_depth"].confidence == 0.3
 
 

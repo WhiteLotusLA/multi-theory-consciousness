@@ -948,7 +948,7 @@ MISSING_STATISTIC_CASES = [
     ("attention_schema", "capacity_used", "embodiment", 0.0),
     ("attention_schema", "voluntary_ratio", "embodiment", 0.5),
     ("attention_schema", "voluntary_ratio", "attention_control", 0.0),
-    ("metacognition", "overall_confidence", "metacognition", 0.0),
+    ("metacognition", "overall_confidence", "metacognition", 0.5),
     ("active_inference", "variational_free_energy", "agency", 0.0),
     ("rpt_measurement", "average_local", "local_recurrence", 0.0),
     ("rpt_measurement", "average_local", "algorithmic_recurrence", 0.0),
@@ -992,7 +992,50 @@ async def test_missing_statistic_is_insufficient_and_names_the_key(
     )
 
 
-# (contract key, statistic path, the value the v0.4.0 formulas saw there)
+@pytest.mark.asyncio
+async def test_v05_metacognition_reads_none_confidence_as_the_v04_constant():
+    # The module reported a constant 0.5 before it measured its confidence,
+    # and the v04 body reads a None confidence as that constant; the v05
+    # body under v04_constants reads the same stand-in, not 0.0.
+    constants = ConsciousnessAssessment(missing_signal_policy="v04_constants")
+    with_none = await constants.run_full_assessment(
+        **_modules_with("metacognition", "overall_confidence", None),
+        normalize=False,
+    )
+    with_half = await constants.run_full_assessment(
+        **_modules_with("metacognition", "overall_confidence", 0.5),
+        normalize=False,
+    )
+    with_zero = await constants.run_full_assessment(
+        **_modules_with("metacognition", "overall_confidence", 0.0),
+        normalize=False,
+    )
+    seen = with_none.indicator_results["metacognition"]
+    assert seen.evidence["introspections"] > 0
+    assert seen.status == MEASURED
+    assert _same_result(seen, with_half.indicator_results["metacognition"])
+    assert seen.evidence["overall_confidence"] == 0.5
+    assert seen.score != with_zero.indicator_results["metacognition"].score
+
+
+def test_none_as_docstring_names_the_two_stand_ins_that_differ_from_v04():
+    # The v04 bodies read a None broadcast.coverage_ratio and a None
+    # ignition.sustain_rate as 0.0, where v0.4.0 read 1.0 by construction;
+    # the helper's docstring must not claim that every stand-in is the
+    # number v0.4.0 saw.
+    from mtc.assessment.assessment import _none_as
+
+    doc = _none_as.__doc__
+    assert "v0.4.0 saw" not in doc
+    assert "coverage_ratio" in doc and "sustain_rate" in doc
+    assert "1.0" in doc
+
+
+# (contract key, statistic path, the stand-in the v04 bodies read a None as:
+# the v0.4.0 constant where v0.4.0 had one; 0.0 for broadcast.coverage_ratio
+# and ignition.sustain_rate, where v0.4.0 read 1.0 by construction (the
+# acknowledgement-only receivers and the sustained flag that defaulted True;
+# the legacy preset restores both producers, so it never reads None there))
 V04_NONE_READS = [
     ("global_workspace", "broadcast.coverage_ratio", 0.0),
     ("global_workspace", "ignition.sustain_rate", 0.0),
@@ -1007,14 +1050,14 @@ V04_NONE_READS = [
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("contract_key,path,v04_value", V04_NONE_READS)
-async def test_v04_formulas_read_none_as_the_v04_value(contract_key, path, v04_value):
+@pytest.mark.parametrize("contract_key,path,stand_in", V04_NONE_READS)
+async def test_v04_formulas_read_none_as_the_stand_in(contract_key, path, stand_in):
     legacy = ConsciousnessAssessment(**V04_SETTINGS)
     with_none = await legacy.run_full_assessment(
         **_modules_with(contract_key, path, None), normalize=False
     )
     with_value = await legacy.run_full_assessment(
-        **_modules_with(contract_key, path, v04_value), normalize=False
+        **_modules_with(contract_key, path, stand_in), normalize=False
     )
     for name, result in with_value.indicator_results.items():
         seen = with_none.indicator_results[name]
