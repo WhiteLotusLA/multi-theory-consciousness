@@ -31,7 +31,7 @@ See [docs/HONEST_LIMITATIONS.md](docs/HONEST_LIMITATIONS.md) before anything els
 
 ### Path 1: in memory, with the mock provider
 
-No database, no model server, no network after the install for the commands below. This is the path run on the development machine. Running `mtc serve` with `mtc chat` on an install with the `all` extra also loads the sentence embedder, and the model hub library makes a request on that first load even with the model cached (and downloads the model when it is not): set `HF_HUB_OFFLINE=1` once the model is cached to keep that path off the network as well.
+No database, no model server, no network after the install for the commands below. This is the path run on the development machine. Running `mtc serve` with `mtc chat` on an install with the `all` extra also loads the sentence embedder, and the model hub library contacts the model hub on that first load even with the model cached (and downloads the model when it is not): set `HF_HUB_OFFLINE=1` once the model is cached to keep that path off the network as well.
 
 The minimum install that can run the assessment is the `fep` extra (`pip install -e ".[fep]"`): the workspace builds active inference unconditionally, and on a bare install `mtc assess`, `mtc serve`, the demo and the examples that build a workspace stop with one `MISSING EXTRA` line on stderr and exit code 2.
 

@@ -16,7 +16,9 @@ in its place. A degraded brain re-checks the provider on the call path when a
 call arrives, at most once every 5 seconds (`HEALTH_RECHECK_S` in
 `mtc/brain/brain.py`, measured on the brain's own monotonic clock), so turns
 succeed again once the provider recovers, without a restart; a healthy
-brain is never re-probed. The brain's `status()` also records the outcome
+brain is never re-probed. A re-check whose health probe raises any error
+counts as unhealthy, so the call still raises `BrainUnavailableError` and
+the turn answers 503 (`brain_unavailable`). The brain's `status()` also records the outcome
 of the last real provider call (`last_call_ok`: None before one, true when
 a completion came back, false on a provider error or timeout; and
 `last_call_at`) and `health_recheck_s`; these are reported, never used to

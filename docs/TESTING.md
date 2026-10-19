@@ -135,18 +135,27 @@ Three evidence values of the seeded assessment, `hots_generated` and
 is a wall-clock gate, and under the legacy preset no score, status,
 confidence, count or printed line depends on them; the comparison of a run
 that keeps the wall-clock cooldown (the legacy preset) leaves exactly these
-three keys out (`WALL_CLOCK_EVIDENCE_KEYS`). What makes the v0.5.0 fixtures
-comparable in full is the runner pin, not that allowance: both runners pin
-`hot.introspection_cooldown` at 0.0 unless the overrides set it, so the
+three keys out (`WALL_CLOCK_EVIDENCE_KEYS`), and the legacy seeded assessment
+run at clock speeds 1, 1 and 25 differs in exactly those three readouts and
+otherwise only in its timings, timestamps and session id. What makes the
+v0.5.0 fixtures comparable in full is the runner pin, not that allowance:
+both runners pin `hot.introspection_cooldown` at 0.0 unless the overrides
+set it, so the
 default seeded assessment reads 14, 2.8 and 3 for those three values on
 every machine (under the defaults the 1.0 s gate would also move the
-metacognition score). The pin removes the gate, not every clock read: one
-evidence value of the default seeded assessment,
-`genuine_implementation.evidence.avg_loop_quality`, moved by 1.2e-9 when every
-clock ran 25 times faster, while no score, status or count moved; it is
-recorded under "What the cooldown pin removes" in
-[MIGRATION_FROM_V04.md](MIGRATION_FROM_V04.md), and the 1e-9 bound was not
-widened for it.
+metacognition score). The pin removes the gate, not every clock read: the
+attention bottleneck's recency bonus (0.1 x exp(-0.1 x a candidate's age in
+seconds) in every composite salience), while it aged candidates on the wall
+clock, moved `genuine_implementation.evidence.avg_loop_quality` by 1.2e-9 when
+every clock ran 25 times faster, and moved no score, status or count. The
+bonus now ages candidates on the workspace's simulated clock
+(`gwt.recency_clock`, default `simulated`; `v04_wall` restores the v0.4.0
+wall-clock age), so under the defaults the seeded assessment reads no wall
+clock into a score or an evidence value: two runs of one seed at normal
+speed and one with every clock 25 times faster differ only in their timings,
+timestamps and session id. The measurements are recorded under "What the
+cooldown pin removes" in [MIGRATION_FROM_V04.md](MIGRATION_FROM_V04.md), and
+the 1e-9 bound was not widened for it.
 
 The baseline tests start the runners as subprocesses and are marked `slow`
 (one runner run takes one to two minutes on the development machine). Three noise tests in `tests/assessment/test_recalibration.py`

@@ -55,3 +55,30 @@ def test_api_doc_lists_every_frame_and_error_code():
         assert frame in rows, f"frame {frame!r} has no row in API.md"
     for code in schemas.ERROR_CODES:
         assert f"`{code}`" in text, f"error code {code!r} missing from API.md"
+
+
+def _server_frame_row(frame: str) -> list:
+    """The cells of the server-to-client table row of one frame type."""
+    text = DOC.read_text(encoding="utf-8")
+    rows = [
+        [cell.strip() for cell in line.strip().strip("|").split("|")]
+        for line in text.splitlines()
+        if line.startswith(f"| `{frame}` |")
+    ]
+    assert len(rows) == 1, f"{len(rows)} rows of API.md describe the {frame!r} frame"
+    return rows[0]
+
+
+def test_api_doc_error_frame_names_the_turn_fields():
+    """A failed turn's error frame carries the turn result's safety fields
+    (``schemas.TURN_ERROR_FIELDS``); the error row names each of them, says
+    they come from the turn payload, and says that an error which is not a
+    turn result carries none of them."""
+    _frame, _when, data = _server_frame_row("error")
+    data = " ".join(data.split())
+    assert schemas.TURN_ERROR_FIELDS, "the schema names no turn field"
+    for name in ("code", "message", "request_id") + schemas.TURN_ERROR_FIELDS:
+        assert f"`{name}`" in data, f"the error row lacks `{name}`: {data}"
+    assert "a failed turn's frame also carries" in data, data
+    assert "`TurnPayload`" in data, data
+    assert "an error that is not a turn result carries none of the three" in data

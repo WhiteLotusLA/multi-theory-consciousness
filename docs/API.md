@@ -271,7 +271,7 @@ Server to client:
 | `response` | the turn finished | `TurnPayload` and `request_id`; this text is authoritative |
 | `consciousness_state` | after each turn, and every `METRICS_UPDATE_INTERVAL` (60) seconds, to every subscriber, keyed or not | the state payload |
 | `spontaneous_thought` | the thought machine expressed a thought | `thought_id`, `content`, `thought_type`, `timestamp`, `intensity`, `salience`, `salience_basis` (what the salience rests on) and `form` (`template`, `model` or `injected`); the last two are null when the record lacks them; sent only to clients that presented the API key |
-| `error` | a frame or turn failed | `code`, `message`, `request_id` when known |
+| `error` | a frame or turn failed | `code`, `message`, `request_id` when known; a failed turn's frame also carries `blocked`, `safety_gate` and `safety_decision` from its `TurnPayload` (the HTTP body's fields), so a client can tell an emergency suspension (`emergency_shutdown`) from an ordinary deny and see that a `safety_unavailable` refusal was an unchecked gate; an error that is not a turn result carries none of the three (`invalid_message`, `unknown_type`, `runtime_not_ready`, `generation_timeout`, and `turn_failed` when the turn raised) |
 | `pong` | after a `ping` | `timestamp` |
 
 Close codes: 1008 for a refused handshake (missing, wrong or unconfigured

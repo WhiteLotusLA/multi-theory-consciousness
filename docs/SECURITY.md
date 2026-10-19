@@ -145,13 +145,17 @@ credentials.
 
 ## Data that leaves the machine
 
-With the defaults nothing does. These are the paths that can send data out:
+On a bare install with the defaults nothing does. With the `embeddings`
+extra (part of `all`) the defaults do reach the network: the first load
+of the sentence embedder in each process that uses it asks the model hub
+about `EMBEDDING_MODEL`, even with the model cached, until
+`HF_HUB_OFFLINE=1` is set. These are the paths that can send data out:
 
 | Path | What leaves | When |
 |---|---|---|
 | The Anthropic provider (`LLM_PROVIDER=anthropic`) | the system prompt (persona, recalled memories, theory sections) and the conversation | every turn and every background brain call |
 | The DCM evaluator's Anthropic mode (`DCM_EVALUATOR_MODE`) | the indicator evaluation prompts | when the DCM benchmark is run in that mode |
-| The embedding model download | a request for `EMBEDDING_MODEL` from the model hub | once, on first use or with `mtc doctor --fetch-models`; set the hub's offline variable afterwards |
+| The embedding model (the `embeddings` extra) | the model name in `EMBEDDING_MODEL`, sent to the model hub, and the model download when it is not cached | on the first load of the sentence embedder in each process, even with the model cached, and with `mtc doctor --fetch-models`; set `HF_HUB_OFFLINE=1` once the model is cached |
 | The DCM scheme fetch | a request for the scheme at `DCM_API_URL` | when the benchmark runs with no cached scheme; the bundled copy under `data/dcm` is the fallback |
 
 A local chat-completions server on this machine keeps the conversation local.

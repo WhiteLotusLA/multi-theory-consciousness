@@ -199,7 +199,9 @@ payload index is an advisory `warning`.
 **The embedding model.** Vectors come from `EMBEDDING_MODEL`
 (`sentence-transformers/all-MiniLM-L6-v2`, the `embeddings` extra). It is the
 memory layer's one network dependency: the model is downloaded from the model
-hub on first use. `mtc doctor` reports whether it is in the local cache and
+hub on first use, and until the hub's offline variable is set each process's
+first load of the model asks the hub again even with the model cached.
+`mtc doctor` reports whether it is in the local cache and
 `mtc doctor --fetch-models` downloads it once; after that, set the hub's
 offline variable (`HF_HUB_OFFLINE=1`) so nothing is fetched again. Without
 the model nothing is embedded and recall falls back to full-text search,

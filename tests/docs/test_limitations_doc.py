@@ -318,6 +318,15 @@ SENTENCES = (
             "sets `gwt.refractory_clock = elapsed`",
         ),
     ),
+    (
+        "recency-clock",
+        13,
+        (
+            "A workspace built directly ages its candidates' recency bonus on its "
+            "simulated clock",
+            "`gwt.recency_clock = v04_wall` restores the v0.4.0 wall-clock read",
+        ),
+    ),
 )
 
 
@@ -370,6 +379,62 @@ def test_appended_sentences_sit_in_the_bullet_they_qualify():
     assert "The NARRATE_ keys govern the pipeline" in narration
     safety = _bullet(12, "Safety scoring, the trust compass's simple mode")
     assert "The safety gate is a keyword heuristic" in safety
+
+
+def test_binding_bullet_states_that_vectors_of_different_lengths_are_never_compared():
+    bullet = _bullet(11, "Bayesian binding quality is a correlation proxy")
+    for phrase in (
+        "Two vectors of different lengths are never compared",
+        "a three-entry content vector and a longer embedding bind only with "
+        "vectors of their own length",
+        "a percept with no comparable pair has no measured binding quality",
+        "`blt.binding_evidence = v04_salience_posterior` truncates both vectors "
+        "to their common prefix, as v0.4.0 did",
+    ):
+        assert phrase in bullet, phrase
+
+
+def test_strange_loop_bullet_states_how_loose_its_threshold_is():
+    """The agreement threshold is the tracker's default, and the bullet says
+    what it admits when the history minimums are first met."""
+    import inspect
+
+    from mtc.consciousness.beautiful_loop.epistemic_depth import (
+        EpistemicDepthTracker,
+    )
+
+    default = (
+        inspect.signature(EpistemicDepthTracker)
+        .parameters["strange_loop_threshold"]
+        .default
+    )
+    bullet = _bullet(11, "The strange-loop condition is agreement")
+    for phrase in (
+        f"Its agreement threshold of {default} on two quantities in [0, 1] is "
+        "loose by design",
+        "moves a fifth of the way toward each scored batch of self-predictions",
+        "five meta predictions, three scored batches",
+        "it lies between 0.256 and 0.744 and any ledger accuracy between 0.244 "
+        "and 0.756 agrees with it whatever it is",
+        "the hyper-model having compared a precision prediction with the update "
+        "that followed",
+    ):
+        assert phrase in bullet, phrase
+
+
+def test_seeding_bullet_states_that_the_defaults_read_no_wall_clock():
+    """The recency bonus runs on the simulated clock by default, so the
+    seeding bullet no longer records a default evidence value that follows
+    the clock."""
+    bullet = _bullet(9, "`mtc assess` seeds random, numpy and torch")
+    assert "moves 1.2e-9 at a clock 25 times" not in bullet
+    for phrase in (
+        "Under the defaults the seeded assessment reads no wall clock into a "
+        "score or an evidence value",
+        "the candidate recency bonus runs on the workspace's simulated clock "
+        "(`gwt.recency_clock = simulated`)",
+    ):
+        assert phrase in bullet, phrase
 
 
 def test_reserve_sentences_are_absent():

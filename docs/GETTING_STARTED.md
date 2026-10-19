@@ -5,7 +5,7 @@ MTC installs as a Python package with one command, `mtc`. The setup wizard
 the first path below: its commands need no database, no model server and no
 network after the install, and they show the whole pipeline running. One
 qualifier: `mtc serve` with `mtc chat` on an install with the `all` extra
-loads the sentence embedder, and the model hub library makes a request on
+loads the sentence embedder, and the model hub library contacts the model hub on
 that first load even with the model cached (and downloads the model when it
 is not); set `HF_HUB_OFFLINE=1` once the model is cached (`mtc doctor
 --fetch-models` fetches it) to keep that path off the network too.

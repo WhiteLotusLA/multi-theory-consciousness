@@ -8,6 +8,7 @@ comparators. The privacy audit page is held to the boundary rule's wording.
 Bold markup and line breaks are ignored.
 """
 
+import ast
 import re
 from pathlib import Path
 
@@ -138,3 +139,56 @@ def test_continuous_thought_doc_lists_every_salience_basis():
     text = _text("CONTINUOUS_THOUGHT.md")
     missing = sorted(b for b in bases if f"`{b}`" not in text)
     assert missing == [], missing
+
+
+def _workspace_constants() -> dict:
+    """The module-level string constants of the workspace module, read from
+    its source so that no workspace is built or imported."""
+    path = ROOT / "mtc" / "consciousness" / "enhanced_global_workspace.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return {
+        node.targets[0].id: node.value.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    }
+
+
+def test_testing_doc_states_the_recency_clock():
+    """The one clock read the cooldown pin left on the default path, the
+    recency bonus, is named as the cause of the recorded 1.2e-9 move and as
+    running on the simulated clock under the defaults, with the switch value
+    that restores the wall-clock read taken from the workspace module."""
+    constants = _workspace_constants()
+    simulated = constants["RECENCY_CLOCK_SIMULATED"]
+    wall = constants["RECENCY_CLOCK_V04_WALL"]
+    text = _text("TESTING.md")
+    assert (
+        "The pin removes the gate, not every clock read: one evidence value of "
+        "the default seeded assessment" not in text
+    )
+    for phrase in (
+        "the attention bottleneck's recency bonus",
+        "moved `genuine_implementation.evidence.avg_loop_quality` by 1.2e-9 when "
+        "every clock ran 25 times faster",
+        f"(`gwt.recency_clock`, default `{simulated}`; `{wall}` restores the "
+        "v0.4.0 wall-clock age)",
+        "under the defaults the seeded assessment reads no wall clock into a "
+        "score or an evidence value",
+        "the legacy seeded assessment run at clock speeds 1, 1 and 25 differs in "
+        "exactly those three readouts",
+        "the 1e-9 bound was not widened for it",
+    ):
+        assert phrase in text, phrase
+
+
+def test_llm_setup_states_that_a_raising_recheck_is_unhealthy():
+    text = _text("LLM_SETUP.md")
+    assert (
+        "A re-check whose health probe raises any error counts as unhealthy, so "
+        "the call still raises `BrainUnavailableError` and the turn answers 503 "
+        "(`brain_unavailable`)." in text
+    )
