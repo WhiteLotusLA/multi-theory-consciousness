@@ -18,6 +18,7 @@ from mtc.api.auth import API_KEY_HEADER
 from mtc.api.schemas import (
     INTEGRATION_PROXY_LABEL,
     MAX_FRAME_BYTES,
+    ErrorData,
     SpontaneousThoughtData,
     StatusData,
 )
@@ -563,10 +564,25 @@ def test_ws_turn_returns_the_reply_when_post_turn_is_slow(clean_env, key):
 
 
 def test_failed_turn_codes_reach_the_client(clean_env, key):
-    for code in ("blocked", "no_answer", "brain_unavailable", "safety_unavailable"):
+    """A failed turn reaches the client as an error frame with its code and the
+    safety fields of the turn result, so a client can tell an emergency
+    suspension from an ordinary deny and see that a refusal was an unchecked
+    gate."""
+    gates = {
+        "blocked": ("applied", "emergency_shutdown"),
+        "no_answer": ("applied", None),
+        "brain_unavailable": ("bypassed", None),
+        "safety_unavailable": ("unchecked", None),
+    }
+    for code, (gate, decision) in gates.items():
         pipeline = ScriptedPipeline(
             result=_result(
-                None, error="no reply", error_code=code, blocked=code == "blocked"
+                None,
+                error="no reply",
+                error_code=code,
+                blocked=code == "blocked",
+                safety_gate=gate,
+                safety_decision=decision,
             )
         )
         app, _ = _app(clean_env, key, pipeline)
@@ -575,8 +591,30 @@ def test_failed_turn_codes_reach_the_client(clean_env, key):
             _send(ws, "hi", "req-1")
             frames = _turn_frames(ws, "req-1")
         assert frames[-1]["type"] == "error"
-        assert frames[-1]["data"]["code"] == code
+        data = frames[-1]["data"]
+        assert data["code"] == code
+        assert data["request_id"] == "req-1"
+        assert data["blocked"] is (code == "blocked"), code
+        assert data["safety_gate"] == gate, code
+        assert data["safety_decision"] == decision, code
+        model = ErrorData.model_validate(data)
+        assert model.safety_gate == gate and model.safety_decision == decision
         assert not any(f["type"] == "response" for f in frames)
+    assert {"blocked", "safety_gate", "safety_decision"} <= set(ErrorData.model_fields)
+
+
+def test_frame_errors_carry_no_turn_safety_fields(clean_env, key):
+    """An error that is not a turn result (here a malformed frame) names no
+    safety gate or decision."""
+    app, _ = _app(clean_env, key, ScriptedPipeline())
+    with TestClient(app) as client, _connect(client, key) as ws:
+        ws.receive_json()
+        ws.send_text("not json")
+        frame = _until(ws, "error")[-1]
+    assert frame["data"]["code"] == "invalid_message"
+    assert "safety_gate" not in frame["data"]
+    assert "safety_decision" not in frame["data"]
+    assert "blocked" not in frame["data"]
 
 
 def _real_app(tmp, key, **settings):

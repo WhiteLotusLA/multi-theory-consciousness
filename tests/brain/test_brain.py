@@ -556,6 +556,54 @@ async def test_concurrent_calls_on_a_degraded_brain_probe_once(tmp_path):
     assert provider.requests == []
 
 
+class RaisingHealthMock(CountingMock):
+    """A mock whose health check raises a plain error while ``fault`` is set."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fault: Optional[Exception] = None
+
+    async def health_check(self) -> HealthStatus:
+        if self.fault is not None:
+            self.health_checks += 1
+            raise self.fault
+        return await super().health_check()
+
+
+@pytest.mark.asyncio
+async def test_recheck_that_raises_leaves_the_brain_degraded_and_unavailable(
+    tmp_path,
+):
+    provider = RaisingHealthMock(healthy=False)
+    brain = _recheck_brain(tmp_path, provider, health_recheck_s=0.0)
+    assert (await brain.initialize()).ok is False
+    assert provider.health_checks == 1
+    provider.fault = OSError("connection closed under the health probe")
+    with pytest.raises(BrainUnavailableError, match="OSError"):
+        await brain.think("hello")
+    assert provider.health_checks == 2
+    assert brain.available is False
+    health = brain.status()["health"]
+    assert health["ok"] is False
+    assert health["detail"].startswith("OSError: connection closed")
+    # the conversational path refuses the same way
+    provider.fault = RuntimeError("health probe bug")
+    with pytest.raises(BrainUnavailableError, match="RuntimeError"):
+        await brain.think_with_context("hello")
+    assert provider.health_checks == 3
+    assert brain.available is False
+    assert provider.requests == []
+    # an explicit refresh records the same unhealthy state instead of raising
+    recorded = await brain.refresh_health()
+    assert recorded.ok is False and recorded.detail.startswith("RuntimeError:")
+    # once the probe stops raising and the provider is healthy, calls are served
+    provider.fault = None
+    provider.healthy = True
+    assert (await brain.think("hello")).text
+    assert brain.available is True
+    assert len(provider.requests) == 1
+
+
 @pytest.mark.asyncio
 async def test_last_call_outcome_is_recorded_and_never_gates(tmp_path):
     from mtc.brain.providers.base import ProviderError, ProviderTimeoutError

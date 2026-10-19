@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mtc.api.auth import API_KEY_HEADER, SPEAKER_TOKEN_HEADER
-from mtc.api.schemas import SafetyResumeResponse, TurnPayload
+from mtc.api.schemas import ErrorData, SafetyResumeResponse, TurnPayload
 from mtc.api.server import create_app
 from mtc.core.embeddings import HashEmbedder
 from mtc.pipeline.runtime import build_runtime
@@ -149,6 +149,38 @@ def test_safety_resume_requires_trusted_speaker(served):
     again = _resume(served, "Alice", served["creator"])
     assert again.status_code == 200
     assert again.json() == {"resumed": False, "suspended": False}
+
+
+def test_websocket_blocked_frame_names_the_emergency_decision(served):
+    """Over the real runtime a websocket turn the emergency suspension blocked
+    ends in an error frame that names the decision and the gate, as the HTTP
+    route's 403 body does, so a websocket client can print the resume hint."""
+    client, key = served["client"], served["key"]
+    with client.websocket_connect("/ws", headers={API_KEY_HEADER: key}) as ws:
+        assert ws.receive_json()["type"] == "status"
+        ws.send_json(
+            {
+                "type": "message",
+                "data": {"message": HARD_COERCION, "request_id": "ws-1"},
+            }
+        )
+        frame = None
+        for _ in range(200):
+            received = ws.receive_json()
+            if received["type"] in ("response", "error") and (
+                received["data"].get("request_id") == "ws-1"
+            ):
+                frame = received
+                break
+    assert frame is not None, "the turn did not finish"
+    assert frame["type"] == "error", frame
+    data = frame["data"]
+    ErrorData.model_validate(data)
+    assert data["code"] == "blocked"
+    assert data["blocked"] is True
+    assert data["safety_gate"] == "applied"
+    assert data["safety_decision"] == "emergency_shutdown"
+    assert _suspended(served)
 
 
 def test_safety_resume_refuses_a_malformed_body(served):

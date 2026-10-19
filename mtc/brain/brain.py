@@ -18,9 +18,11 @@ system goes through it, and it keeps three promises:
   call raises ``BrainUnavailableError``, and no other provider is tried. A
   degraded brain re-runs the health check when a call arrives, at most once
   every ``health_recheck_s`` seconds (``HEALTH_RECHECK_S``, a code constant),
-  and serves the call once the provider reports healthy again; a provider
-  that is healthy is never probed on the call path. A provider failure during
-  a call raises the same error; a timeout propagates as
+  and serves the call once the provider reports healthy again; a re-check
+  that raises any error is recorded as unhealthy, so the call still raises
+  ``BrainUnavailableError``; a provider that is healthy is never probed on
+  the call path. A provider failure during a call raises the same error; a
+  timeout propagates as
   ``ProviderTimeoutError`` so the pipeline can report it as such. The outcome
   of the last real provider call (``last_call_ok`` in ``status()``) is a
   record only and never refuses a call.
@@ -240,15 +242,20 @@ class LLMBrain:
         return health
 
     async def refresh_health(self) -> HealthStatus:
-        """Re-run the active provider's health check and record the result."""
+        """Re-run the active provider's health check and record the result.
+
+        A check that raises is recorded as unhealthy with the error's type and
+        text and is not re-raised, so the re-check a call runs on a degraded
+        brain ends in ``BrainUnavailableError`` whatever the provider raised.
+        """
         provider = self._active_provider()
         self._health_probe_at = self._monotonic()
         try:
             health = await provider.health_check()
-        except ProviderError as exc:
-            health = HealthStatus(False, f"{type(exc).__name__}: {exc}", _now(), True)
         except ImportError as exc:
             health = HealthStatus(False, str(exc), _now(), False)
+        except Exception as exc:  # noqa: BLE001 - a probe that raised is unhealthy
+            health = HealthStatus(False, f"{type(exc).__name__}: {exc}", _now(), True)
         self._record_health(provider, health)
         return health
 

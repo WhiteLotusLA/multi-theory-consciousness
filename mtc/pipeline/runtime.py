@@ -1321,7 +1321,7 @@ async def build_runtime(
     )
     await runtime.snapshots.initialize()
     runtime.hub = ConsciousnessStateManager(
-        state_dir=resolve_path(cfg.STATE_DIR, settings=cfg)
+        state_dir=resolve_path(cfg.STATE_DIR, settings=cfg), settings=cfg
     )
     runtime.orchestrator = ConsciousnessOrchestrator(
         workspace,

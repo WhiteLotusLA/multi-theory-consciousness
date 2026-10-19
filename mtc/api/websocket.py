@@ -36,7 +36,12 @@ Server to client:
   ``salience_basis``, and ``form``: ``template``, ``model`` or ``injected``),
   sent only to clients that presented the configured API key (the only frame
   withheld from a connection without the key);
-- ``error`` with ``code``, ``message`` and the ``request_id`` when known;
+- ``error`` with ``code``, ``message`` and the ``request_id`` when known; a
+  failed turn's frame also carries ``blocked``, ``safety_gate`` and
+  ``safety_decision`` from its ``TurnResult.to_payload()`` (the HTTP route's
+  body carries the same fields), so a client can tell an emergency
+  suspension (``emergency_shutdown``) from an ordinary deny and see that a
+  ``safety_unavailable`` refusal was an unchecked gate;
 - ``pong``.
 
 Auth and trust: the handshake needs the ``X-API-Key`` header (a key in the
@@ -93,6 +98,7 @@ from mtc.api.progress import GenerationTimeout, run_with_heartbeat
 from mtc.api.schemas import (
     MAX_FRAME_BYTES,
     SERVER_FRAME_TYPES,
+    TURN_ERROR_FIELDS,
     ClientFrame,
     WSMessageData,
     brain_verified,
@@ -374,12 +380,14 @@ async def _error(
     code: str,
     message: str,
     request_id: Optional[str] = None,
+    turn: Optional[Dict[str, Any]] = None,
 ) -> None:
-    await manager.send(
-        connection,
-        "error",
-        {"code": code, "message": message, "request_id": request_id},
-    )
+    """Send an error frame; ``turn`` is a failed turn's payload, whose safety
+    fields the frame then carries."""
+    data: Dict[str, Any] = {"code": code, "message": message, "request_id": request_id}
+    if turn is not None:
+        data.update({key: turn.get(key) for key in TURN_ERROR_FIELDS})
+    await manager.send(connection, "error", data)
 
 
 async def _run_turn(
@@ -478,6 +486,7 @@ async def _run_turn(
             str(result.error_code or "turn_failed"),
             str(result.error or "the turn ended without a reply"),
             request_id,
+            turn=payload,
         )
     try:
         await manager.push_state(state_payload(runtime))

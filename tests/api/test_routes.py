@@ -618,8 +618,9 @@ def test_safety_unavailable_is_503(served):
         "The safety check could not run; the message was not processed and "
         "nothing was stored."
     )
-    # The turn stored nothing: no message row, no working-memory entry (the
-    # session's conversation record is opened before the gate runs).
+    # The turn stored nothing: no message row, no working-memory entry. (The
+    # conversation record is opened only after the gate let a turn through;
+    # this test checks the message row and the working-memory write.)
     assert not [row for row in rows if row["content"] == text]
     assert memory_after_refusal == memory_writes
     assert trusted.status_code == 200

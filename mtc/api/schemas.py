@@ -493,9 +493,23 @@ class StreamRetryData(_Response):
 
 
 class ErrorData(_Response):
+    """An error frame. A failed turn's frame also carries the turn result's
+    ``blocked``, ``safety_gate`` and ``safety_decision`` (as in
+    ``TurnPayload``), so a client can tell an emergency suspension from an
+    ordinary deny and an unchecked gate from a refusal; an error that is not
+    a turn result (a malformed frame, a cancelled or crashed turn) leaves the
+    three out."""
+
     code: str
     message: str
     request_id: Optional[str] = None
+    blocked: Optional[bool] = None
+    safety_gate: Optional[Literal["absent", "bypassed", "applied", "unchecked"]] = None
+    safety_decision: Optional[str] = None
+
+
+# The fields of a failed turn's payload that its websocket error frame carries.
+TURN_ERROR_FIELDS: Tuple[str, ...] = ("blocked", "safety_gate", "safety_decision")
 
 
 class SpontaneousThoughtData(_Response):
