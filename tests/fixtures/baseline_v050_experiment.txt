@@ -15,6 +15,6 @@ gwt_score:          0.000000
 hot_score:          0.000000
 iit_score:          0.034115
 rpt_score:          0.008566
-processing_ms:     1789.9
+processing_ms:     1782.1
 warmup_cycles:     25
-total_seconds:     92.5
+total_seconds:     96.3

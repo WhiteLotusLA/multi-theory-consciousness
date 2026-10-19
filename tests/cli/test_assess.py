@@ -167,7 +167,7 @@ def test_quick_flag_is_the_default_mode(tmp_path, monkeypatch, capsys):
     full = _record_run(monkeypatch, tmp_path / "full", ["--full"])
     assert quick[0] == default[0] == 0
     assert quick[1]["warmup"] == default[1]["warmup"] == 0
-    # The workspace's tracker reaches the assessment in every mode (R1-13):
+    # The workspace's tracker reaches the assessment in every mode:
     # quick mode then reports integrated_information as insufficient_data
     # rather than absent.
     assert list(quick[1]["extra_modules"]) == ["phi_tracker"]

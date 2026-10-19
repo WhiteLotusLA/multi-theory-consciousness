@@ -34,7 +34,7 @@ whose output no published number depends on carries no switch; those are
 listed under Fixes without a switch.
 
 A whole-branch review before the release found more defects of the same kind.
-Their fixes add the ten Phase 9 rows of the Switches section and move the
+Their fixes add the eleven Phase 9 rows of the Switches section and move the
 overall score and the passing count of both v0.5.0 runs: the workspace
 registers no acknowledgement-only broadcast receivers and reports no ignition sustain rate until a sustain check runs, so
 global_broadcast, recurrent_processing, ignition_dynamics and
@@ -74,7 +74,7 @@ legacy run (`scripts/run_assessment.py --preset legacy_v04 --full --json --seed 
 `tests/test_legacy_preset.py` compares every field of that report (statuses,
 counts, keys and booleans exactly, floats within 1e-9) and every metric line
 of the experiment runner as printed. Three evidence readouts of the legacy
-seeded assessment follow the wall clock and nothing else:
+seeded assessment follow the wall clock, through the introspection cooldown:
 `higher_order_representations.evidence.hots_generated`,
 `higher_order_representations.evidence.coverage_ratio` and
 `metacognition.evidence.introspections` (11, 2.2 and 11 on the recorded
@@ -83,7 +83,19 @@ score, status, confidence, count or printed line depends on them, and the
 legacy assessment test leaves exactly those three out. They follow the clock
 because the preset keeps `hot.introspection_cooldown = 1.0`, the v0.4.0
 wall-clock gate; without a preset both runners pin the cooldown at 0.0, so
-the v0.5.0 fixtures are compared in full.
+the v0.5.0 fixtures are compared in full. The cooldown is not the only clock
+read on the legacy path: under the preset's `gwt.recency_clock = "v04_wall"`
+the attention bottleneck's recency bonus (0.1 x exp(-0.1 x the wall-clock
+age in seconds of a candidate) in every composite salience) and, under the
+v0.4.0 binding path, the binding's temporal coherence term reach the
+workspace's loop state, but in the legacy seeded assessment neither reaches
+a field of the report: three runs in one process at clock speeds 1, 1 and
+25 differ in the three cooldown readouts (11, 2.2, 11 against 14, 2.8, 15
+at speed 25) and in nothing else. Under the defaults the bonus is measured
+on the workspace's simulated clock (`gwt.recency_clock = "simulated"`), so
+no wall-clock read enters the salience and the default seeded assessment is
+bit identical at clock speeds 1 and 25 and between runs (see "What the
+cooldown pin removes" in the Phase 9 measurements section).
 
 The workspace builds its own inference, beautiful loop, damasio and metacognition
 modules. The runners hand the matching overrides to its constructor
@@ -127,7 +139,7 @@ runner's attention module and the workspace's own one (through
 | `runner.warmup_profile` | `v04` | `v05` | The warmup feeds the attention schema alternating voluntary and captured shifts, with goal-driven ones, instead of captured shifts only, so typed provenance has chosen shifts to count. | Voluntary ratio in the runner. A runner setting; it changes no module default. |
 | `phi.scale` | (none) | 1.0 | New. The PhiTracker's integration proxy is reported in raw bits; this multiplies it. The runner's own lightweight tracker is gone: the real tracker is attached to the workspace. The tracker's module graph has five nodes named after theories, but two of them read other layers: the AST node is the protoself stability and the HOT node the core layer's feeling of knowing (the FEP node the most urgent drive's urgency, the BLT node the binding quality or, while binding is unmeasured, the loop quality, the GWT node the integration level or a composite of the conscious flag and the ignition count). | Nothing at 1.0. |
 | `phi.warmup_reference` | (none) | 5.0 | New. Denominator of the normalized readout until enough values exist for a percentile; a display calibration, never part of the measurement. The readout is over the same five module signals, so a partition that separates the AST or HOT node separates the protoself and core-layer signals, not the attention schema or the higher-order thought module. | The normalized Phi readout during warm-up only. |
-| `assessment.indicator_formulas` | `v04` | `v05` | The indicators read the statistics their producers emit: the bottleneck's `total_competitions`, `avg_candidates` and `source_distribution` instead of a `competition` key the workspace never emits; `peak_depth` instead of `max_depth_reached`; `total_hots_generated` instead of `total_generated`; a numeric prediction-error trend from the inference history instead of a text label that never compared equal to a number; the agent's real policy count; zero floors where v0.4.0 granted presence credit. Under v05 the causal_emergence pass rule is also strict (`score > threshold`, because sigmoid(0) is exactly 0.5); the v04 rule is inclusive. The noise stubs of the assessment CLI's baseline pass ride on this switch too: `v04` keeps the v0.4.0 stubs (see Fixes without a switch). | sequential_module_querying, organized_percepts, flexible_responsiveness, genuine_implementation, epistemic_depth, no_metacognitive_access, prediction_error_minimization, complex_agency, temporal_prediction_depth, recurrent_processing, online_reportable_learning, agency and embodiment. In the runner, under the Phase 3 defaults, it moved FEP from 0.009010 to 0.081411 and RPT from 0.003695 to 0.005109 (the Phase 3 record). Under the Phase 9 defaults, `v04` set alone prints 0.010680, 0 passing, measured, coverage 1.000 against the default 0.017317, 0 passing, partial, 0.800: FEP 0.017706 to 0.042338, RPT 0.004442 to 0.008566, AE 0.011778 to 0.002917 and GWT 0.009726 to 0.000000 (v04 to v05; the v04 bodies read the six unmeasured indicators as the v0.4.0 constants, so they count in the averages and the coverage again). Through the pass rule it also acts on `passing_count` together with `assessment.causal_emergence_threshold` (see that row). |
+| `assessment.indicator_formulas` | `v04` | `v05` | The indicators read the statistics their producers emit: the bottleneck's `total_competitions`, `avg_candidates` and `source_distribution` instead of a `competition` key the workspace never emits; `peak_depth` instead of `max_depth_reached`; `total_hots_generated` instead of `total_generated`; a numeric prediction-error trend from the inference history instead of a text label that never compared equal to a number; the agent's real policy count; zero floors where v0.4.0 granted presence credit. Under v05 the causal_emergence pass rule is also strict (`score > threshold`, because sigmoid(0) is exactly 0.5); the v04 rule is inclusive. The noise stubs of the assessment CLI's baseline pass ride on this switch too: `v04` keeps the v0.4.0 stubs (see Fixes without a switch). | sequential_module_querying, organized_percepts, flexible_responsiveness, genuine_implementation, epistemic_depth, no_metacognitive_access, prediction_error_minimization, complex_agency, temporal_prediction_depth, recurrent_processing, online_reportable_learning, agency and embodiment. In the runner, under the Phase 3 defaults, it moved FEP from 0.009010 to 0.081411 and RPT from 0.003695 to 0.005109 (the Phase 3 record). Under the Phase 9 defaults, `v04` set alone prints 0.010680, 0 passing, measured, coverage 1.000 against the default 0.017317, 0 passing, partial, 0.800: FEP 0.017706 to 0.042338, RPT 0.004442 to 0.008566, AE 0.011778 to 0.002917 and GWT 0.009726 to 0.000000 (v04 to v05; the v04 bodies read the six unmeasured indicators as their stand-ins, the v0.4.0 constant where v0.4.0 had one and 0.0 for the broadcast coverage and the sustain rate, where v0.4.0 read 1.0, so they count in the averages and the coverage again). Through the pass rule it also acts on `passing_count` together with `assessment.causal_emergence_threshold` (see that row). |
 | `assessment.missing_signal_policy` | `v04_constants` | `insufficient_data` | A module the caller did not supply scores 0.0 as absent; a supplied module that has not produced its evidence yet is reported by name and left out of the averages and the passing count, instead of a 0.1, 0.3 or 0.5 stand-in. | Any indicator whose module has no data, plus the report's `status`, `coverage` and confidence. In the experiment runner nothing under the Phase 3 defaults, where every indicator was measured after 25 cycles (the Phase 3 record); under the Phase 9 defaults six indicators are unmeasured there as well, so `v04_constants` set alone moves the runner from 0.017317, 0 passing, partial, coverage 0.800 to 0.015245, 0 passing, measured, coverage 1.000 (default to legacy value: gwt 0.000000 to 0.008626, rpt 0.008566 to 0.006852, the other theory lines unchanged). In the seeded assessment CLI eight indicators are named under the Phase 9 defaults and coverage reads 0.533 (five and 0.633 in the Phase 3 record). |
 | `assessment.irreducibility_method` | `spectral_entropy` | `weighted_fiedler` | The algebraic connectivity of the symmetrized weighted graph through its normalized Laplacian, instead of a spectral entropy that a 1e-9 binarization turned into a complete graph for any dense matrix. | irreducibility. In the runner IIT moved from 0.005406 to 0.026167 under the Phase 3 defaults (the Phase 3 record) and moves from 0.013354 to 0.034115 under the Phase 9 defaults (`spectral_entropy` set alone; overall 0.014588 to 0.017317, no other theory line moves): both methods read the random connectivity close to their own noise mean (0.857 against 0.845 for `weighted_fiedler`, 0.754 against 0.750 for `spectral_entropy`, unchanged since Phase 3), so the move is seed position under a different statistic, not signal. |
 | `assessment.causal_emergence_threshold` | 0.0 | 0.5 | The causal emergence indicator passes only when the macro scale carries more causal power than the micro scale (a score strictly above sigmoid(0) = 0.5 under the v05 pass rule). At 0.0 with the inclusive v04 rule every causal_emergence result passed, including an absent analyzer scored 0.0: the v0.4.0 assessment fixture passes it that way (score 0.0, threshold 0.0, `analyzer not provided`). | The pass decision of causal_emergence, so `passing_count`. Under the legacy preset it is one of the two runner passes (normalized 0.000 at threshold 0.0, inclusive; the other is affect_coherence), and in the seeded assessment CLI one of the legacy run's 13. Set alone on top of the Phase 3 defaults it was inert (0.021675, 1 passing: the Phase 3 record), because causal_emergence normalized to 0.000 there and 0.0 > 0.0 is false under the strict v05 rule. Under the Phase 9 defaults it is not inert: causal_emergence normalizes to 0.024 (raw 0.708 against 0.701, see the moved-indicator table), which is above a threshold of 0.0 under the strict rule, so the threshold at 0.0 set alone prints 0.017317, 1 passing, partial, 0.800 against the default's 0 passing, with no theory line moved (the one-switch table of the Phase 9 measurements). |
@@ -162,7 +174,9 @@ untouched), so the runner numbers below are unaffected.
 
 ### Phase 9 rows
 
-The v0.5.0 fix round (Phase 9) put ten more corrections behind switches. Each
+The v0.5.0 fix round (Phase 9) put eleven more corrections behind switches:
+ten at the first regeneration of the v0.5.0 fixtures and `gwt.recency_clock`
+at the second (see the Phase 9 measurements section). Each
 row has its v0.4.0 value in `legacy_v04.toml`; the "What it can move" column is
 measured in the Phase 9 measurements section (one switch at a time from the
 defaults, seed 42; the numbers read legacy value to default).
@@ -174,10 +188,11 @@ defaults, seed 42; the numbers read legacy value to default).
 | `gwt.legacy_broadcast_receivers` | `true` | `false` | No acknowledgement-only receivers: broadcast coverage is reported only for receivers a caller registers, and is none until then, instead of 1.0 by construction. | global_broadcast and recurrent_processing read insufficient_data in both runners. Experiment: coverage 0.867 to 0.800, rpt_score 0.016029 to 0.008566, overall 0.017033 to 0.017317. Seeded assessment: GWT 0.459 to 0.189, RPT 0.225 to 0.098, 13 to 11 passing, overall 0.341 to 0.275. |
 | `gwt.legacy_sustain_rate` | `true` | `false` | The ignition sustain rate is none until a sustain check has run, instead of a constant 1.0 while no check runs. | ignition_dynamics and global_ignition_nuanced read insufficient_data in both runners. Experiment: gwt_score 0.039474 to 0.000000, coverage 0.867 to 0.800, overall 0.023765 to 0.017317. Seeded assessment: GWT 0.432 to 0.189, 13 to 11 passing, overall 0.321 to 0.275. |
 | `gwt.refractory_clock` | `per_cycle` | `per_cycle` | New row, the same value on both sides. `per_cycle` advances the simulated refractory clock by the competition duration per cycle, machine independent; `elapsed` also adds the real time between cycles. | Nothing in either runner (both keep the default; measured: identical runs). The live runtime sets `elapsed`, so the pipeline no longer discards the winners of turns that arrive within one simulated refractory period. |
+| `gwt.recency_clock` | `v04_wall` | `simulated` | The attention bottleneck ages a candidate's recency bonus (0.1 x exp(-0.1 x age) in every composite salience) on the workspace's simulated clock since it first saw the candidate, instead of on the wall clock since the candidate was created, so no wall-clock read enters the salience of a seeded run. Added at the second regeneration. | One evidence value of the default seeded assessment, `genuine_implementation.evidence.avg_loop_quality`, 0.5300177410248634 (the first regeneration, under the wall-clock bonus) to 0.5300177409697049 (5.5e-11, under the 1e-9 comparator); no score, status or count, and no printed line of the experiment runner. Under `v04_wall` that value follows the machine's speed (1.2e-9 at a clock 25 times faster); under `simulated` the report is bit identical at clock speeds 1 and 25 and between runs. |
 | `hot.overall_confidence_source` | `v04_constant` | `hot_mean` | The metacognition module reports the mean confidence of its buffered higher-order thoughts (none before the first) instead of the constants 0.5 and doubt 0.0. | Experiment: iit_score 0.026167 to 0.034115 and overall 0.016063 to 0.017317 (causal_emergence reads the PhiTracker's transitions, and the tracker's HOT node reads the feeling of knowing the self-model derives from this confidence). Seeded assessment: metacognition 0.394 to 0.473 (the confidence term 0.5 to 0.6), HOT 0.609 to 0.628, 10 to 11 passing, overall 0.272 to 0.275. |
 | `hot.introspection_counting` | `v04_per_hot` | `episodes` | Introspections count completed episodes, not one more per higher-order thought after the third. The legacy preset also sets `hot.introspection_cooldown = 1.0`; both runners otherwise pin the cooldown at 0.0. | Seeded assessment: metacognition 0.684 to 0.473 (the activity term 1.0 to 0.6), online_reportable_learning 0.451 to 0.319, HOT 0.714 to 0.628, overall 0.287 to 0.275. No printed line of the experiment runner moves. |
 | `blt.binding_evidence` | `v04_salience_posterior` | `candidate_vectors` | Binding is measured only between winners that carry their own numeric vector and reports no quality otherwise, instead of belief vectors built from salience and a shared posterior, which bound at about 1 for any input and drew from the shared random stream on every inference. | The largest mover. Experiment: bayesian_binding_quality insufficient_data (coverage 0.833 to 0.800) and, through the shared random stream (the default path draws nothing), fep_score 0.081411 to 0.042338, iit_score 0.026167 to 0.034115, ae_score 0.000000 to 0.002917, rpt_score 0.005452 to 0.008566, passing_count 1 to 0, overall 0.026982 to 0.017317. Seeded assessment: bayesian_binding_quality 0.999 to insufficient_data, sparse_smooth_coding 0.815 to 0.722, complex_agency 0.524 to 0.096, sequential_module_querying 0.335 to 0.378, temporal_prediction_depth 0.332 to 0.318, agency 0.219 to 0.209; FEP 0.336 to 0.247, BLT 0.666 to 0.500, HOT 0.652 to 0.628, GWT 0.168 to 0.189, AE 0.157 to 0.152; 13 to 11 passing, overall 0.328 to 0.275. |
-| `blt.strange_loop_test` | `v04_confidence_match` | `independent_calibration` | The strange-loop test compares the self-model's scored self-prediction accuracy with the inference ledger's forecast accuracy instead of comparing the self-model's confidence with the value it was copied from. | Nothing in either published run (measured: identical runs). The experiment runner's standalone loop reads `self_calibration_score` from the runner's stand-in self-model (`_WarmupSelfModel` in `scripts/run_experiment.py`, a constant 0.5), so its strange-loop condition is met on any input under either test (genuine_implementation raw 1.000 against a noise baseline of 1.000), and the seeded assessment's genuine_implementation reads the same condition from the workspace loop, true on both sides. |
+| `blt.strange_loop_test` | `v04_confidence_match` | `independent_calibration` | The strange-loop test compares the self-model's scored self-prediction accuracy with the inference ledger's forecast accuracy instead of comparing the self-model's confidence with the value it was copied from. | Nothing in either published run (measured: identical runs). The experiment runner's standalone loop reads `self_calibration_score` from the runner's stand-in self-model (`_WarmupSelfModel` in `scripts/run_experiment.py`, a constant 0.5), so the verdict is true on any input there under either test (genuine_implementation raw 1.000 against a noise baseline of 1.000). The verdict reaches genuine_implementation only through `field_evidencing_count` (the loop counts a cycle as field evidencing only when the verdict is true): the indicator's third condition is the evidence key `has_meta_prediction_depth`, the depth tracker's `peak_depth` >= 2 read from module state, not the verdict. In the default seeded run the verdict is false with basis insufficient_data on all five cycles (`meta_state.total_predictions` 4, minimum 5), so `field_evidencing_count` is 0 under either test while `has_meta_prediction_depth` is true. |
 | `damasio.first_delta` | `v04_zero` | `unmeasured` | The protoself reports no body delta, stability or arousal on the first update, which has no previous body state, instead of recording 0.0, 1.0 and 0.0. Under the default the first delta also stays out of the stability history, so the stability differs on every following cycle, not only the first. | Experiment: iit_score 0.037811 to 0.034115, fep_score 0.040530 to 0.042338, rpt_score 0.009301 to 0.008566, ae_score 0.002660 to 0.002917, overall 0.017488 to 0.017317 (the stability feeds the PhiTracker's AST node and, through the theory interactions, the next cycle's salience bias). Seeded assessment: one evidence value (genuine_implementation `avg_loop_quality`), no score or status. |
 
 One dependency: `blt.loop_quality_formula = "v04"` requires
@@ -197,15 +212,15 @@ a workspace in real time sets `gwt.refractory_clock = elapsed`.
 No new row and no change of legacy value; one line per cause.
 
 - `assessment.missing_signal_policy` (`v04_constants` keeps every v0.4.0 constant):
-  - the attention schema's prediction accuracy is None until a prediction has been scored, so `attention_schema` reads insufficient_data in both published runs (R2-17): on its own this moves the experiment's coverage 1.000 to 0.967 and overall 0.021675 to 0.022394 (the same weighted mean without that indicator), and the seeded AST 0.280 to 0.449;
-  - the voluntary ratio is None with nothing classifiable (R2-02);
-  - the local recurrence index is None without an SNN or LSM state, so the seeded assessment's `organized_percepts` records `avg_local_recurrence` None where it recorded 0.0 (R1-03; no score moves);
-  - the statistics listed under R1-10 are None until measured;
-  - the average binding quality is None when nothing was bound (R6-01, consumer side);
-  - the overall is None when no included indicator is measured, and a theory with no measured member is omitted from `theory_scores`: the seeded assessment loses its IIT entry of 0.0 (K2).
-- `assessment.indicator_formulas` (`v04`): the v04 bodies read each None as the v0.4.0 value, which is what keeps the legacy preset exact.
-- `assessment.saturated_baseline_min_range` (`0.0`): the oscillatory binding layer measures its own zero-stimulus order parameter on every bind and the v05 formula applies the same headroom guard to that floor (R1-02, option C). In the experiment runner `oscillatory_binding_coherence` reads raw 0.0 flagged `floor_saturated` (zero-stimulus order parameter 0.9987, noise baseline 0.0) where it read 0.997 flagged noise-saturated; its normalized score is 0.0 either way and no printed line moves.
-- `ast.provenance_mode` (`legacy_strength`): the ratio is None with nothing classifiable (R2-02) and a request matches a shift only by its own type (R2-09); only a run with no chosen and no pulled shift sees either, and neither published run does.
+  - the attention schema's prediction accuracy is None until a prediction has been scored, so `attention_schema` reads insufficient_data in both published runs: on its own this moves the experiment's coverage 1.000 to 0.967 and overall 0.021675 to 0.022394 (the same weighted mean without that indicator), and the seeded AST 0.280 to 0.449;
+  - the voluntary ratio is None with nothing classifiable;
+  - the local recurrence index is None without an SNN or LSM state, so the seeded assessment's `organized_percepts` records `avg_local_recurrence` None where it recorded 0.0 (no score moves);
+  - the v05 bodies read a missing statistic as missing instead of its v0.4.0 stand-in (0.0 for each of these, 0.5 for the embodiment's voluntary ratio) and report insufficient_data naming it (the bottleneck's average candidate count, the embodiment's capacity used and voluntary ratio, the free energy of agency, the local and global recurrence averages, the binding order parameter, the average binding quality, the average epistemic depth and the average loop quality);
+  - the average binding quality is None when nothing was bound (the consumer side of `blt.binding_evidence`);
+  - the overall is None when no included indicator is measured, and a theory with no measured member is omitted from `theory_scores`: the seeded assessment loses its IIT entry of 0.0.
+- `assessment.indicator_formulas` (`v04`): the v04 bodies read each None as a stand-in: the v0.4.0 constant where v0.4.0 had one, and 0.0 for broadcast.coverage_ratio and ignition.sustain_rate, where v0.4.0 read 1.0 by construction (the acknowledgement-only receivers and the sustained flag that defaulted True); the legacy preset restores both producers, which is what keeps it exact, while `v04` alone reads those two as 0.0.
+- `assessment.saturated_baseline_min_range` (`0.0`): the oscillatory binding layer measures its own zero-stimulus order parameter on every bind and the v05 formula applies the same headroom guard to that floor. In the experiment runner `oscillatory_binding_coherence` reads raw 0.0 flagged `floor_saturated` (zero-stimulus order parameter 0.9987, noise baseline 0.0) where it read 0.997 flagged noise-saturated; its normalized score is 0.0 either way and no printed line moves.
+- `ast.provenance_mode` (`legacy_strength`): the ratio is None with nothing classifiable and a request matches a shift only by its own type; only a run with no chosen and no pulled shift sees either, and neither published run does.
 
 ## Fixes without a switch
 
@@ -227,9 +242,10 @@ The release gate added these, none of which a published number reads:
 
 - The legacy 14-metric measurement framework (`mtc.assessment.framework`) is repaired and kept. It returned Phi 0.0 for every input, NaN-derived values, a constant confidence of 0.5 and a fixed ten percent interval; its metrics are now Optional, the Phi entry is a spectral integration proxy over (time, units) arrays with at least three rows (None for a one-dimensional snapshot, and exported as `spectral_integration_proxy`), the four metrics that need an HTM array are None without one, a confidence interval exists only with more than 30 historical values, and the analysis averages only the measured metrics and labels the rest `not_measured`. `measure_consciousness` loses its `input_data` parameter and the native HTM path. No runner or assessment number comes from this framework.
 - The legacy 14-indicator panel's global workspace indicator reports a missing input, because its token-attention vector has no producer, and is left out of the legacy aggregate and its coverage; the panel's level and coverage move accordingly.
-- The DCM reference adapter no longer reports four indicators derived from the configured planning horizon, reports the informational bottleneck only when there were broadcasts and the coverage lies strictly between 0 and 1, and omits the binding indicators when no binding was measured (and, under decision D5, when the binding layer's zero-stimulus floor leaves less than 0.1 headroom) instead of copying the workspace coverage into them.
+- The DCM reference adapter no longer reports four indicators derived from the configured planning horizon, reports the informational bottleneck only when there were broadcasts and the coverage lies strictly between 0 and 1, and omits the binding indicators when no binding was measured (and when the binding layer's zero-stimulus floor leaves less than 0.1 headroom) instead of copying the workspace coverage into them.
 - The spectral Phi proxy rejects a connectivity matrix that is not square, does not match the state or holds non-finite values: integrated_information then reports insufficient_data with the error in `phi_error`, where an integration term of 0.5 or a density fallback was substituted. Both runners pass square, finite connectivity.
 - The production liquid-state machine reports no Lyapunov estimate or edge-of-chaos score for fewer than ten states (it read a perfect 1.0), reports no valence or arousal until its readout was trained or restored (the raw `readout_mean` and `readout_std` are new keys), and seeds the reservoir library at construction instead of at import.
+- `ProductionLSM.train_ridge` called a method the reservoir library does not have and raised; it now fits the ridge readout, which then drives the live output and the valence and arousal fields until `train_rls` is called. Both readouts and the name of the live one persist, and a restored readout that never saw a training sample does not count as trained.
 - The active inference report is empty on a fresh module: the trend sentence needs more than ten prediction errors, the urgent-need sentence a positive urgency and the free-energy sentence an inference that ran, and the low branch reads "Low free energy." with no accuracy claim.
 - The workspace's integration level is None without two usable signals (a constant vector is dropped, not fatal), where it read 0.0 without signals and 0.5 for one; the observation channel and the homeostasis activity still receive 0.0 for it. No runner passes neural signals.
 - PAD: the label reads Neutral inside a pleasure band of 0.1 around zero, and `PADAffectModel.compute(sources, measured=...)` with a list of measured inputs renormalises each dimension over them and returns None when a dimension has none. Called without the list the arithmetic is unchanged, and both runners keep `cycle.pad_from_state` off, so only the live pipeline's coordinate changes.
@@ -376,7 +392,8 @@ of those ratios are Phase 2 switches (`ast.provenance_mode`,
 
 The one-switch table now lives in the Phase 9 measurements section: it was
 re-measured from the Phase 9 defaults for the nine Phase 3 switches, for the
-ten Phase 9 rows, for `damasio.circadian`, for the
+ten Phase 9 rows of the first regeneration (the eleventh, `gwt.recency_clock`,
+was measured at the second), for `damasio.circadian`, for the
 `blt.loop_quality_formula` pair and for `hot.introspection_cooldown`, and for
 nothing else: the Phase 1 and Phase 2 switches of the Switches table were not
 run one at a time in Phase 9. Of the Phase 3 rows,
@@ -398,7 +415,7 @@ unmeasured under the defaults and leave the averages (coverage 0.800, 24 of
 | ignition_dynamics | 0.130 (raw 0.904, noise 0.890) | insufficient_data (`global_workspace.ignition.sustain_rate`) | `gwt.legacy_sustain_rate`: no sustain check runs in the runner, so the rate is none instead of 1.0. |
 | global_ignition_nuanced | 0.130 (raw 0.920, noise 0.908) | insufficient_data (the same statistic) | `gwt.legacy_sustain_rate`. |
 | recurrent_processing | 0.130 (raw 0.920, noise 0.908) | insufficient_data (`global_workspace.broadcast.coverage_ratio`) | `gwt.legacy_broadcast_receivers`, through the GWT term of the v05 body. |
-| attention_schema | 0.000 (raw 0.500, noise 0.500) | insufficient_data (`attention_schema.prediction_accuracy`) | `assessment.missing_signal_policy` (R2-17): the accuracy is none until a prediction has been scored, and the runner's warmup scores none. |
+| attention_schema | 0.000 (raw 0.500, noise 0.500) | insufficient_data (`attention_schema.prediction_accuracy`) | `assessment.missing_signal_policy`: the accuracy is None until a prediction has been scored, and the runner's warmup scores none. |
 | bayesian_binding_quality | 0.000 (raw 0.999, noise 0.999) | insufficient_data (`beautiful_loop.average_binding_quality`) | `blt.binding_evidence`: the warmup's winners carry no numeric vector, so nothing is bound. |
 | affect_coherence | 0.438 (raw 0.991, noise 0.985) | 0.106 (raw 0.155, noise 0.054) | `pad.coherence_method` together with `assessment.saturated_baseline_min_range`, as in Phase 3; the autocorrelation reads 0.155 against 0.054 here where the Phase 3 defaults read 0.093 against 0.042, because `blt.binding_evidence` moved the shared random stream. |
 | irreducibility | 0.016 (raw 0.754, noise 0.750) | 0.079 (raw 0.857, noise 0.845) | `assessment.irreducibility_method`, unchanged since Phase 3: seed position under a different statistic. |
@@ -426,13 +443,12 @@ and prediction_error_minimization, the one pass of the Phase 3 defaults (0.434),
 sits inside its noise baseline once `blt.binding_evidence` stops drawing from
 the shared stream (raw 0.364 against 0.472).
 
-### Noise saturation under the defaults (decision D7, provisional)
+### Noise saturation under the defaults (the check waived, provisional)
 
 The re-baseline plan required confirming that no indicator is `noise_saturated`
 under the defaults, and stopping to report if a default inflated a noise score.
-Both conditions fired in Phase 3. Decision D7 (2026-10-06, recorded by the
-orchestrator as provisional, to be confirmed by the maintainer before the push):
-the check is waived for the experiment runner in v0.5.0 and the fixtures are
+Both conditions fired in Phase 3. The decision of 2026-10-06, provisional until
+the maintainer confirms it: the check is waived for the experiment runner in v0.5.0 and the fixtures are
 kept as regenerated. The guard already scores the saturated indicators 0.0 as
 uninformative, `tests/assessment/test_recalibration.py` passes under the
 defaults (at most 3 indicators pass on noise, no perfect score, overall below
@@ -447,8 +463,8 @@ The list, rewritten from the regenerated run (Phase 9): five indicators carry
 `noise_saturated: true` under the defaults in this runner (their five-seed noise
 baseline leaves less than the 0.1 headroom of
 `assessment.saturated_baseline_min_range`), and one carries `floor_saturated`
-(decision D5: the oscillatory binding layer's own zero-stimulus order parameter
-leaves no headroom). global_broadcast and bayesian_binding_quality, which Phase 3
+(the oscillatory binding layer's own zero-stimulus order parameter leaves no
+headroom). global_broadcast and bayesian_binding_quality, which Phase 3
 listed, now report insufficient_data instead (unmeasured, not saturated).
 
 | Indicator | legacy_v04 noise | v0.5.0 noise | Why the floor is where it is |
@@ -456,9 +472,9 @@ listed, now report insufficient_data instead (unmeasured, not saturated).
 | higher_order_representations | 1.000 | 1.000 | Same floor in v0.4.0, which already normalized to 0.0. |
 | hierarchical_prediction | 1.000 | 1.000 | Same floor in v0.4.0. |
 | agent_environment_coupling | 0.980 | 0.980 | Same floor; unflagged under the legacy preset only because its headroom guard is 0.0. |
-| genuine_implementation | 0.667 | 1.000 | Raised by `assessment.indicator_formulas`. The v05 body reads the loop's real `peak_depth` where the v04 body read a dead key that always gave 0 (two of three conditions, hence 0.667). The runner's warmup hands the loop one AWARENESS higher-order thought per cycle, which the metacognition module phrases as "I notice that i am perceiving ..." and the epistemic depth tracker counts as a self-referential thought, so `peak_depth` is 3 on every seed; and the strange-loop condition reads the runner's stand-in self-model, a constant 0.5, so it is met on any input under either `blt.strange_loop_test`. |
+| genuine_implementation | 0.667 | 1.000 | Raised by `assessment.indicator_formulas`. The v05 body reads the loop's real `peak_depth` where the v04 body read a dead key that always gave 0 (two of three conditions, hence 0.667). The runner's warmup hands the loop one AWARENESS higher-order thought per cycle, which the metacognition module phrases as "I notice that i am perceiving ..." and the epistemic depth tracker counts as a self-referential thought, so `peak_depth` is 3 on every seed (the third condition, `has_meta_prediction_depth`); and the depth tracker's strange-loop verdict, which reaches the indicator through `field_evidencing_count`, reads the runner's stand-in self-model, a constant 0.5, so it is true on any input under either `blt.strange_loop_test`. |
 | temporal_prediction_depth | 0.860 | 0.917 | Raised by `assessment.indicator_formulas`. 0.4 of the v05 formula is belief and free-energy history depth (0.2 x min(1, length / 20) each), which any 20-cycle run fills, and `experiments/params.toml` pins the planning horizon at 10, so the horizon term reads 0.6 x (1 - average error). The v04 body read (1 - average error) alone. |
-| oscillatory_binding_coherence (floor) | 0.997 | 0.000 (zero-stimulus order parameter 0.9987) | The static coupling synchronizes the 30 oscillators with no input (decision D5); the v05 formula reads 0.0 flagged `floor_saturated` and the legacy preset's zero headroom reads the old 0.997 unflagged. |
+| oscillatory_binding_coherence (floor) | 0.997 | 0.000 (zero-stimulus order parameter 0.9987) | The static coupling synchronizes the 30 oscillators with no input; the v05 formula reads 0.0 flagged `floor_saturated` and the legacy preset's zero headroom reads the old 0.997 unflagged. |
 
 The two raised floors (genuine_implementation and temporal_prediction_depth)
 were the gate's trigger in Phase 3 and are unchanged in Phase 9. In both cases
@@ -469,8 +485,9 @@ guard to its v0.4.0 value of 0.0 leaves every printed line of the regenerated
 run unchanged (0.017317, 0 passing). What changed is that two indicators which
 could register in this runner under v0.4.0 can no longer register in it under
 the defaults: genuine_implementation because the warmup's own higher-order
-thought and stand-in self-model satisfy the strange-loop condition on any
-input, and temporal_prediction_depth because 0.4 of its range is filled by run
+thought satisfies the depth condition and the stand-in self-model makes the
+strange-loop verdict, and so the field evidencing, true on any input, and
+temporal_prediction_depth because 0.4 of its range is filled by run
 length alone.
 
 ### Candidate mix
@@ -529,18 +546,65 @@ is set explicitly.
 
 ## Phase 9 measurements
 
-The fix round of v0.5.0 (Phase 9) put ten more corrections behind switches (the
-Phase 9 rows of the Switches section) and widened the reach of four existing
-ones. Every v0.5.0 number was regenerated once, from the committed tree, in the
-environment of `tests/fixtures/baseline_v050_env.txt` (python 3.14.3 arm64
-Darwin, numpy 2.4.2, scipy 1.17.1, torch 2.10.0, PyPhi 1.2.1.dev1562, the pymdp 0.0.7
-release as distribution inferactively-pymdp: unchanged since Phase 3). Two runs of each default runner agree on
-every printed line and every report field with nothing left out; that
-determinism rests on the two runner pins (`hot.introspection_cooldown` 0.0 and
-`gwt.body_metrics_enabled` off). The legacy numbers did not move: the legacy
-experiment prints every v0.4.0 line and the legacy seeded assessment equals its
-fixture on every field. "Before" below is the Phase 3 record (the fixtures
-committed before the fix round); "after" is the committed fixture.
+The fix round of v0.5.0 (Phase 9) put eleven more corrections behind switches
+(the Phase 9 rows of the Switches section) and widened the reach of four
+existing ones. Every v0.5.0 number was regenerated from the tree twice, both
+times in the environment of `tests/fixtures/baseline_v050_env.txt` (python
+3.14.3 arm64 Darwin, numpy 2.4.2, scipy 1.17.1, torch 2.10.0, PyPhi
+1.2.1.dev1562, the pymdp 0.0.7 release as distribution inferactively-pymdp:
+unchanged since Phase 3): once after the fix round, and a second time after
+two corrections of the fix round's own review (see "The second
+regeneration"). Two runs of each default runner agree on every printed line
+and on every report field with nothing left out; that determinism rests on
+the two runner pins (`hot.introspection_cooldown` 0.0 and
+`gwt.body_metrics_enabled` off) and, since the second regeneration, on the
+simulated recency clock (`gwt.recency_clock`), which leaves no wall-clock
+read on the default path (see "What the cooldown pin removes"). The legacy
+numbers did not move: the legacy experiment prints every v0.4.0 line and the
+legacy seeded assessment equals its fixture on every field. "Before" below is
+the Phase 3 record (the fixtures committed before the fix round); "after" is
+the committed fixture. Where the two regenerations differ (one evidence value
+under 1e-9 and one evidence key name, nothing printed or scored) the second
+is the one quoted.
+
+### The second regeneration
+
+The v0.5.0 fixtures were regenerated a second time on 2026-10-18, after the
+review of the fix round itself, for two causes and nothing else:
+
+- `gwt.recency_clock`: the attention bottleneck's recency bonus is measured on
+  the workspace's simulated clock (the default, `simulated`) instead of on the
+  wall clock since the candidate was created (`v04_wall`, which the legacy
+  preset sets); the clock read behind the first regeneration's one residual
+  term (see "What the cooldown pin removes").
+- the evidence key `has_strange_loop` of genuine_implementation became
+  `has_meta_prediction_depth` under the v05 formula, because the condition it
+  reports is the depth tracker's `peak_depth` >= 2, not the tracker's
+  strange-loop verdict (value true, unchanged; the v04 body and the legacy
+  fixture keep `has_strange_loop`).
+
+The procedure was the one of the first regeneration: two default experiment
+runs and two default seeded assessments, compared with nothing excluded, agree
+(every printed line; the two reports are bit identical apart from the run id,
+the timestamp and the timing fields), the fixtures were written from the first
+run, and the environment record did not change. Against the first
+regeneration's fixtures: every printed line of the experiment runner is
+unchanged; in the seeded assessment one evidence value moved,
+`genuine_implementation.evidence.avg_loop_quality` 0.5300177410248634 to
+0.5300177409697049 (5.5e-11, under the 1e-9 comparator), and one key was
+renamed; no score, status, count or confidence moved (0.275203, 11 of 30,
+partial, coverage 0.533, confidence 0.295). With every Python clock 25 times
+faster the default seeded assessment is bit identical to the regenerated
+fixture apart from the run id, the timestamp and the timing fields. The legacy
+proof was repeated with `gwt.recency_clock = "v04_wall"` in the preset: the
+legacy experiment prints every line of
+`tests/fixtures/baseline_v040_experiment.txt` (0.031247, 2 passing; the three
+added lines measured, 1.000 and calculator_spectral_proxy) and the legacy
+seeded assessment equals `tests/fixtures/baseline_legacy_assessment.json` on
+every field, the three wall-clock readouts included on that run (11, 2.2 and
+11). The one-switch and cumulative proofs below are the first regeneration's
+and were not rerun: the eleventh row moves the one evidence value measured
+here and nothing else.
 
 ### Headline numbers
 
@@ -559,10 +623,10 @@ the defaults, prints the "before" string again.
 
 | Line | Before Phase 9 | After Phase 9 | Restored by |
 | --- | --- | --- | --- |
-| overall_score | 0.021675 | 0.017317 | no single switch: it is the weighted mean over the lines below. With the ten Phase 9 rows at their legacy values together it prints 0.022394, which is the "before" mean without attention_schema (see the cumulative proof). |
+| overall_score | 0.021675 | 0.017317 | no single switch: it is the weighted mean over the lines below. With the ten Phase 9 rows of the first regeneration at their legacy values together it prints 0.022394, which is the "before" mean without attention_schema (see the cumulative proof). |
 | passing_count | 1 | 0 | `blt.binding_evidence`: prediction_error_minimization passes again (0.434 against its threshold of 0.4). `assessment.causal_emergence_threshold = 0.0` also prints 1, through a different pass: causal_emergence reads 0.024 under the defaults, above a threshold of 0.0 under the strict rule. |
 | assessment_status | measured | partial | `assessment.missing_signal_policy` or `assessment.indicator_formulas` (see coverage). |
-| coverage | 1.000 | 0.800 | six indicators read insufficient_data: global_broadcast and recurrent_processing (`gwt.legacy_broadcast_receivers` alone: 0.867), ignition_dynamics and global_ignition_nuanced (`gwt.legacy_sustain_rate` alone: 0.867), bayesian_binding_quality (`blt.binding_evidence` alone: 0.833) and attention_schema (R2-17, reached only through `assessment.missing_signal_policy`). Either reused assessment switch alone reads all six as numbers again (1.000, measured). |
+| coverage | 1.000 | 0.800 | six indicators read insufficient_data: global_broadcast and recurrent_processing (`gwt.legacy_broadcast_receivers` alone: 0.867), ignition_dynamics and global_ignition_nuanced (`gwt.legacy_sustain_rate` alone: 0.867), bayesian_binding_quality (`blt.binding_evidence` alone: 0.833) and attention_schema (its prediction accuracy is None until a prediction has been scored, reached only through `assessment.missing_signal_policy`). Either reused assessment switch alone reads all six as numbers again (1.000, measured). |
 | phi_source_used | phi_tracker_iit4 | phi_tracker_iit4 | unchanged (`assessment.phi_source = "calculator"` prints calculator_spectral_proxy and moves no other line). |
 | ae_score | 0.000000 | 0.002917 | `blt.binding_evidence` (agency 0.006 through the shared random stream). |
 | ast_score | 0.000000 | 0.000000 | unchanged: attention_control reads 0.0 and attention_schema left the average. |
@@ -580,13 +644,13 @@ standalone modules without RPT, PAD, the analyzer or neural states.
 
 | Indicator | Before Phase 9 | After Phase 9 | Switch |
 | --- | --- | --- | --- |
-| global_broadcast | measured 1.000, pass | insufficient_data (`global_workspace.broadcast.coverage_ratio`) | `gwt.legacy_broadcast_receivers` (R3-01) |
-| recurrent_processing | measured 0.732, pass | insufficient_data (the same statistic) | `gwt.legacy_broadcast_receivers` (R3-01) |
-| ignition_dynamics | measured 0.626, pass | insufficient_data (`global_workspace.ignition.sustain_rate`) | `gwt.legacy_sustain_rate` (R3-02) |
-| global_ignition_nuanced | measured 0.724, pass | insufficient_data (the same statistic) | `gwt.legacy_sustain_rate` (R3-02) |
-| attention_schema | measured 0.110 | insufficient_data (`attention_schema.prediction_accuracy`) | `assessment.missing_signal_policy` (R2-17, no new row) |
+| global_broadcast | measured 1.000, pass | insufficient_data (`global_workspace.broadcast.coverage_ratio`) | `gwt.legacy_broadcast_receivers` (no acknowledgement-only receivers) |
+| recurrent_processing | measured 0.732, pass | insufficient_data (the same statistic) | `gwt.legacy_broadcast_receivers` (no acknowledgement-only receivers) |
+| ignition_dynamics | measured 0.626, pass | insufficient_data (`global_workspace.ignition.sustain_rate`) | `gwt.legacy_sustain_rate` (no sustain check ran) |
+| global_ignition_nuanced | measured 0.724, pass | insufficient_data (the same statistic) | `gwt.legacy_sustain_rate` (no sustain check ran) |
+| attention_schema | measured 0.110 | insufficient_data (`attention_schema.prediction_accuracy`) | `assessment.missing_signal_policy` (no new row: the accuracy is None until a prediction has been scored) |
 | epistemic_depth | insufficient_data (`beautiful_loop.cycle_count`) | measured 0.385, pass (raw 0.45, noise 0.106) | `runner.assess_blt_source`: the assessment reads the workspace's loop, which the warmup drives |
-| genuine_implementation | insufficient_data | measured 0.615, pass (raw 0.667: loop quality and strange loop, no field evidencing) | `runner.assess_blt_source` |
+| genuine_implementation | insufficient_data | measured 0.615, pass (raw 0.667: loop quality and the meta-prediction depth, `has_meta_prediction_depth`; no field evidencing, so the strange-loop verdict, false with basis insufficient_data on every cycle, does not reach it) | `runner.assess_blt_source` |
 | bayesian_binding_quality | insufficient_data (`beautiful_loop.cycle_count`) | insufficient_data (`beautiful_loop.average_binding_quality`: the winners carry no vector) | the missing statistic changes through `runner.assess_blt_source`; `blt.binding_evidence` measures it (0.999) |
 | metacognition | 0.605 (raw 0.700) | 0.473 (raw 0.600) | `hot.overall_confidence_source` and `hot.introspection_counting` together: the raw score is 0.6 x confidence + 0.4 x activity; the constant 0.5 alone gives 0.394, the per-thought count alone 0.684, both together 0.605 |
 | online_reportable_learning | 0.451 (raw 0.50) | 0.319 (raw 0.38) | `hot.introspection_counting` (the body reads the introspection count) |
@@ -595,19 +659,19 @@ standalone modules without RPT, PAD, the analyzer or neural states.
 | agency | 0.219 | 0.209 | `blt.binding_evidence` (the same: the free energy) |
 | sequential_module_querying | 0.335 (3.8 candidates) | 0.378 (4.2 candidates) | `blt.binding_evidence` (the same: the candidates the warmup draws) |
 | complex_agency | 0.524, pass | 0.096 | `blt.binding_evidence` (the same: the free-energy and prediction variances) |
-| organized_percepts | 0.393, `avg_local_recurrence` 0.0, `perceptual_candidates` 13 | 0.393, `avg_local_recurrence` None, `perceptual_candidates` 14 | evidence only: `avg_local_recurrence` is R1-03 under `assessment.missing_signal_policy` (`mtc assess` builds no RPT); the candidate count is `blt.binding_evidence` (the shared random stream: the candidates the warmup draws) |
+| organized_percepts | 0.393, `avg_local_recurrence` 0.0, `perceptual_candidates` 13 | 0.393, `avg_local_recurrence` None, `perceptual_candidates` 14 | evidence only: `avg_local_recurrence` is None without an SNN or LSM state, under `assessment.missing_signal_policy` (`mtc assess` builds no RPT); the candidate count is `blt.binding_evidence` (the shared random stream: the candidates the warmup draws) |
 | irreducibility | absent, `noise_baseline` 0.8198 | absent, `noise_baseline` 0.7990 | evidence only: `blt.binding_evidence` (the shared random stream reaches the five-seed baseline of an indicator that is itself absent) |
 
 Report level: `theory_scores.BLT` appears (0.500) through
-`runner.assess_blt_source`; `theory_scores.IIT` (0.0) is omitted under K2
-through `assessment.missing_signal_policy` (no measured member:
+`runner.assess_blt_source`; `theory_scores.IIT` (0.0) is omitted
+through `assessment.missing_signal_policy` (a theory with no measured member:
 integrated_information insufficient, irreducibility and causal_emergence
 absent); AST rises from 0.280 to 0.449 because attention_schema left its
 average; GWT 0.537 to 0.189 needs both `gwt` switches and the binding evidence;
 HOT 0.718 to 0.628 needs the two `hot` switches and the binding evidence; RPT
 0.225 to 0.098 is recurrent_processing; FEP 0.336 to 0.247 and AE 0.157 to
 0.152 are the binding evidence. `passing_count` 14 to 11: four passes left the
-averages (the four D9 indicators), complex_agency fails, epistemic_depth and
+averages (the two coverage and the two sustain indicators), complex_agency fails, epistemic_depth and
 genuine_implementation pass. The three counter readouts
 (`higher_order_representations.evidence.hots_generated` and `coverage_ratio`,
 `metacognition.evidence.introspections`) read 14, 2.8 and 3 on every machine
@@ -633,12 +697,13 @@ differs from the default run.
 | `gwt.legacy_broadcast_receivers = true` | 0.017033, 0, partial, 0.867; rpt 0.008566 to 0.016029 | 0.340767, 13, 0.600; global_broadcast 1.000 and recurrent_processing 0.732 measured again; GWT 0.459, RPT 0.225 |
 | `gwt.legacy_sustain_rate = true` | 0.023765, 0, partial, 0.867; gwt 0.000000 to 0.039474 | 0.321491, 13, 0.600; ignition_dynamics 0.626 and global_ignition_nuanced 0.724 measured again; GWT 0.432 |
 | `gwt.refractory_clock = "per_cycle"` (the default) | identical | identical |
+| `gwt.recency_clock = "v04_wall"` (added at the second regeneration; measured as the first regeneration's fixtures, which were produced under the wall-clock bonus, against the second) | identical | identical scores and statuses (one evidence value: genuine_implementation `avg_loop_quality`, 0.5300177409697049 to 0.5300177410248634, 5.5e-11) |
 | `hot.overall_confidence_source = "v04_constant"` | 0.016063, 0, partial, 0.800; iit 0.034115 to 0.026167 | 0.272359, 10, 0.533; metacognition 0.473 to 0.394; HOT 0.609 |
 | `hot.introspection_counting = "v04_per_hot"` | identical | 0.287100, 11, 0.533; metacognition 0.473 to 0.684, online_reportable_learning 0.319 to 0.451; HOT 0.714 |
 | `blt.binding_evidence = "v04_salience_posterior"` | 0.026982, 1, partial, 0.833; ae 0.002917 to 0.000000, fep 0.042338 to 0.081411, iit 0.034115 to 0.026167, rpt 0.008566 to 0.005452 | 0.328068, 13, 0.567; bayesian_binding_quality 0.999 measured, sparse_smooth_coding 0.815, complex_agency 0.524, sequential_module_querying 0.335, temporal_prediction_depth 0.332, agency 0.219; FEP 0.336, BLT 0.666, HOT 0.652, GWT 0.168, AE 0.157 |
 | `blt.strange_loop_test = "v04_confidence_match"` | identical | identical |
 | `damasio.first_delta = "v04_zero"` | 0.017488, 0, partial, 0.800; ae 0.002917 to 0.002660, fep 0.042338 to 0.040530, iit 0.034115 to 0.037811, rpt 0.008566 to 0.009301 | identical scores and statuses (one evidence value: genuine_implementation `avg_loop_quality`) |
-| `assessment.indicator_formulas = "v04"` | 0.010680, 0, measured, 1.000; ae 0.002917 to 0.011778, fep 0.042338 to 0.017706, gwt 0.000000 to 0.009726, rpt 0.008566 to 0.004442 | 0.202811, 7, 0.767; the seven unmeasured indicators read as numbers again (the v04 bodies read None as the v0.4.0 constant) and 21 scores move; GWT 0.135, AST 0.288, HOT 0.607, FEP 0.254, RPT 0.000, AE 0.240, BLT 0.173 |
+| `assessment.indicator_formulas = "v04"` | 0.010680, 0, measured, 1.000; ae 0.002917 to 0.011778, fep 0.042338 to 0.017706, gwt 0.000000 to 0.009726, rpt 0.008566 to 0.004442 | 0.202811, 7, 0.767; the seven unmeasured indicators read as numbers again (the v04 bodies read None as their stand-ins: 0.0 for the broadcast coverage and the sustain rate, where v0.4.0 read 1.0, and the v0.4.0 constant elsewhere) and 21 scores move; GWT 0.135, AST 0.288, HOT 0.607, FEP 0.254, RPT 0.000, AE 0.240, BLT 0.173 |
 | `assessment.missing_signal_policy = "v04_constants"` | 0.015245, 0, measured, 1.000; gwt 0.000000 to 0.008626, rpt 0.008566 to 0.006852 | 0.196840, 11, 0.800; the eight insufficient indicators read their stand-ins (attention_schema 0.110, prediction_error_minimization 0.068, global_ignition_nuanced 0.035, ignition_dynamics 0.004, the rest 0.0), IIT 0.0 is listed again; GWT 0.083, AST 0.280, FEP 0.217, RPT 0.079, BLT 0.333 |
 | `assessment.irreducibility_method = "spectral_entropy"` | 0.014588, 0, partial, 0.800; iit 0.034115 to 0.013354 | identical scores and statuses (irreducibility is absent; only its noise baseline evidence moves) |
 | `assessment.causal_emergence_threshold = 0.0` | 0.017317, 1, partial, 0.800; passing_count 0 to 1 (causal_emergence 0.024 passes at 0.0 under the strict rule); no theory line moves | identical scores and statuses (the threshold field of the absent indicator) |
@@ -667,21 +732,23 @@ causal_emergence).
 
 ### The cumulative reversion proof
 
-A params file equal to `experiments/params.toml` plus the ten Phase 9 rows at
+A params file equal to `experiments/params.toml` plus the ten Phase 9 rows of
+the first regeneration (`gwt.recency_clock` was not yet a row) at
 their legacy values (and nothing else) run against the Phase 3 record:
 
 - Experiment runner: every theory line, `passing_count` 1, `total_indicators`
   and `phi_source_used` print the Phase 3 strings. Three lines differ:
   overall_score 0.021675 to 0.022394, assessment_status measured to partial,
   coverage 1.000 to 0.967. All three are attention_schema reading
-  insufficient_data (R2-17, under `assessment.missing_signal_policy`, no new
-  row): recomputing the Phase 3 weighted mean without that indicator gives
+  insufficient_data (the prediction accuracy that is None until scored, under
+  `assessment.missing_signal_policy`, no new row): recomputing the Phase 3 weighted mean without that indicator gives
   0.022394 to nine decimals, and no other indicator score, status or noise
   baseline moved.
 - Seeded assessment (the ten rows alone): the same attention_schema (AST 0.280
   to 0.449, overall 0.380308 to 0.391395, coverage 0.633 to 0.600, confidence
-  0.337 to 0.316), `theory_scores.IIT` omitted (K2) and
-  `organized_percepts.evidence.avg_local_recurrence` 0.0 to None (R1-03), all
+  0.337 to 0.316), `theory_scores.IIT` omitted (no measured member) and
+  `organized_percepts.evidence.avg_local_recurrence` 0.0 to None (no SNN or
+  LSM state), all
   under `assessment.missing_signal_policy`; and the three counter readouts 11,
   2.2, 11 to 14, 2.8, 15, which is the runner's cooldown pin (0.0) against the
   1.0 s wall-clock gate of the Phase 3 run. No score moves with them.
@@ -689,7 +756,7 @@ their legacy values (and nothing else) run against the Phase 3 record:
   of the run), two more residues, neither reaching a printed line:
   oscillatory_binding_coherence reads raw 0.0 and noise baseline 0.0 flagged
   `floor_saturated` with a zero-stimulus order parameter of 0.9987 where the
-  Phase 3 run read 0.997 noise-saturated (R1-02 option C under
+  Phase 3 run read 0.997 noise-saturated (the zero-stimulus floor guard under
   `assessment.saturated_baseline_min_range`; normalized 0.0 either way); and the
   three counter readouts (61, 2.44, 71 to 94, 3.76, 115), the same pin. The
   v0.4.0 binding path's `temporal_coherence` term reads the inference
@@ -722,19 +789,36 @@ fixtures comparable with nothing left out. Under the legacy preset (per-thought
 counting, both counters past their caps) only the three readouts follow the
 clock, which is why the legacy assessment test leaves exactly those three out.
 
-The pin removes the gate, not every clock read. The default seeded assessment
-was run seven times with every Python clock scaled (speeds 1, 1, 1, 5, 0.2, 25
-and 0.04, the first run discarded): against the regenerated fixture, with
-nothing excluded, every speed but 25 gives no difference at 1e-9, and speed 25
-gives one, `genuine_implementation.evidence.avg_loop_quality` 0.5300177422
-against 0.5300177410 (1.2e-9). No score, status or count moves at any speed,
-and the counters read 14 and 3 at every speed. The residual is a wall-clock
-term on the loop quality path under the measured HOT confidence (under
-`v04_constant` the legacy run is clean at every speed); neutralising the
-workspace candidate recency bonus, the metacognition salience recency term or
-the attention target duration one at a time leaves it in place, so the clock
-read behind it is not yet identified. It is recorded here, and the bound was
-not widened.
+The pin removes the gate; the one other clock read on the default path was
+found after the first regeneration and removed at the second. The default
+seeded assessment of the first regeneration was run seven times with every
+Python clock scaled (speeds 1, 1, 1, 5, 0.2, 25 and 0.04, the first run
+discarded): against that fixture, with nothing excluded, every speed but 25
+gave no difference at 1e-9, and speed 25 gave one,
+`genuine_implementation.evidence.avg_loop_quality` 0.5300177422 against
+0.5300177410 (1.2e-9); no score, status or count moved at any speed, and the
+counters read 14 and 3 at every speed. The read behind it was the attention
+bottleneck's recency bonus: every candidate's composite salience carries 0.1
+x exp(-0.1 x age), and the age was the wall-clock time in seconds since the
+candidate was created (`AttentionBottleneck._calculate_recency_bonus` in
+`mtc/consciousness/enhanced_global_workspace.py`), so the winners' salience,
+the self-model states the epistemic depth tracker records (their confidence
+differed by 8e-6 between clock speeds 1 and 25), the hyper-model's precisions
+and the loop quality followed machine speed at the scale of the microseconds
+a candidate waits within a cycle: three seeded assessments in one process at
+clock speeds 1, 1 and 25 read that value as 0.5300177410282785,
+0.5300177410223317 and 0.5300177422498947, with 84 entries of the loop's
+state differing between speeds 1 and 25. Since the second regeneration the
+bonus is measured on the workspace's simulated clock since the bottleneck
+first saw the candidate (`gwt.recency_clock = "simulated"`, the default): the
+default seeded assessment is bit identical at clock speeds 1 and 25 and
+between runs, the value reads 0.5300177409697049 (5.5e-11 below the first
+regeneration's 0.5300177410248634, under the 1e-9 comparator), and no score,
+status or count moved with it. `gwt.recency_clock = "v04_wall"` (the legacy
+preset) keeps the v0.4.0 wall-clock arithmetic; under `v04_constant` the HOT
+confidence is a constant, and the legacy seeded assessment moves no field of
+its report between speeds 1 and 25 but the three cooldown readouts. The 1e-9
+bound was not widened.
 
 ### Fixes without a switch outside the published runs
 
@@ -742,17 +826,17 @@ Four Phase 9 corrections change behaviour that no fixture covers and the legacy
 preset never reads, so they carry no switch and are listed here as fixes
 without a switch:
 
-- R1-07: `mtc assess --state-dir` restores the causal emergence analyzer's last
+- `mtc assess --state-dir` restores the causal emergence analyzer's last
   result (partition, label and computation time, None when none was saved) and
   marks it restored, instead of dropping it.
-- R3-12: a restored PhiTracker keeps the constructor's `min_transitions`,
+- A restored PhiTracker keeps the constructor's `min_transitions`,
   `history_size` and `laplace_alpha`, and `is_exact` says the exact analysis ran
   on the empirical matrix, not how much of that matrix was observed
   (`tpm_coverage` reports that).
-- R1-13 part (a): `mtc assess` without `--full` (quick mode) hands the
+- `mtc assess` without `--full` (quick mode) hands the
   assessment the workspace's PhiTracker, so integrated_information reads
   insufficient_data (the tracker is warming up) instead of absent.
-- R6-07: the hyper-model's recursive confidence is None until a meta-error has
+- The hyper-model's recursive confidence is None until a meta-error has
   been observed; under the recursive loop-quality formula a None drops its 0.15
   term and renormalises the rest. The experiment runner's default loop observes
   a meta-error before the first loop quality it averages, so its record is
@@ -764,9 +848,16 @@ Under the default `blt.strange_loop_test` the experiment runner's standalone
 loop compares the self-model's scored self-prediction accuracy with the
 ledger's forecast accuracy, but the runner's self-model is its own stand-in
 (`_WarmupSelfModel` in `scripts/run_experiment.py`), whose
-`self_calibration_score` is a constant 0.5. genuine_implementation's
-strange-loop condition is therefore met on any input in this runner under
-either test, which is part of why the indicator is noise-saturated there.
+`self_calibration_score` is a constant 0.5. The verdict is therefore true on
+any input in this runner under either test, which is part of why
+genuine_implementation is noise-saturated there. The verdict reaches that
+indicator only through `field_evidencing_count` (the loop counts a cycle as
+field evidencing only when the verdict is true); the indicator's third
+condition is `has_meta_prediction_depth`, the depth tracker's `peak_depth`
+>= 2, not the verdict. In the seeded assessment the verdict is false with
+basis insufficient_data on all five cycles (`meta_state.total_predictions` 4,
+minimum 5), so `field_evidencing_count` is 0 there and the indicator's 0.667
+is the loop quality and the depth.
 
 `damasio.first_delta` moves four theory lines of the experiment on its own,
 more than the first cycle's three values suggest: under the default the first

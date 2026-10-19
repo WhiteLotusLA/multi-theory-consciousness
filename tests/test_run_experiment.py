@@ -86,7 +86,7 @@ class _NoneAssessment:
 
 def test_ablation_printer_shows_insufficient_data_for_none(capsys):
     """A None ablated score prints insufficient_data, never 0.000000, and the
-    ablation cannot pass on it (K2)."""
+    ablation cannot pass on it."""
     runner = _load_runner()
     runner.print_report(
         _Report(0.25),

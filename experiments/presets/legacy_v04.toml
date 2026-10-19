@@ -22,6 +22,7 @@ legacy_coverage_ratio = true
 legacy_broadcast_receivers = true
 legacy_sustain_rate = true
 refractory_clock = "per_cycle"
+recency_clock = "v04_wall"
 body_metrics_enabled = false
 precision_feedback_enabled = false
 self_prediction_enabled = false

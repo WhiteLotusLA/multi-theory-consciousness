@@ -901,7 +901,7 @@ def test_runner_environment_is_explicit_about_device_provider_and_stores(
     assert environment["PATH"] == os.environ["PATH"]
 
 
-# -- a top-level key added after a fixture was captured (amendment A13) ---
+# -- a top-level key added after a fixture was captured --------------------
 
 
 def test_failures_absent_on_the_expected_side_equals_an_empty_mapping():

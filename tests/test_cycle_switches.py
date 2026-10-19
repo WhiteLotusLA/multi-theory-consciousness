@@ -88,9 +88,22 @@ def test_runner_forwards_legacy_preset_switches_to_standalone_modules():
     assert workspace.legacy_broadcast_receivers is True
     assert workspace.ignition_detector.legacy_sustain_rate is True
     assert workspace.temporal_config.refractory_clock == "per_cycle"
+    assert workspace.recency_clock == "v04_wall"
     assert workspace.metacognition.overall_confidence_source == "v04_constant"
     assert workspace.beautiful_loop.binding_evidence == "v04_salience_posterior"
     assert workspace.damasio.protoself.first_delta == "v04_zero"
+
+
+def test_runner_recency_clock_is_simulated_unless_set():
+    """Without a preset the runner's workspace ages a candidate's recency
+    bonus on the simulated clock, so no wall-clock read enters the salience
+    of a seeded run; gwt.recency_clock = v04_wall (the legacy preset) is the
+    one way back to the v0.4.0 wall-clock read."""
+    runner = _load_runner()
+    default = runner.build_modules({})
+    assert default["global_workspace"].recency_clock == "simulated"
+    explicit = runner.build_modules({"gwt": {"recency_clock": "v04_wall"}})
+    assert explicit["global_workspace"].recency_clock == "v04_wall"
 
 
 def test_legacy_preset_rows_turn_cycle_off():

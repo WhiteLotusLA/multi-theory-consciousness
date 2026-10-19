@@ -97,8 +97,11 @@ def test_switch_families_name_real_fields():
     constructor = inspect.signature(EnhancedGlobalWorkspace).parameters
     assert all(name in constructor for name in GWT_SWITCHES)
     assert {"legacy_broadcast_receivers", "legacy_sustain_rate"} <= set(GWT_SWITCHES)
-    # The refractory clock is a temporal field (amendment A8): it reaches the
-    # temporal config and has no entry in the workspace switch family
+    # The recency clock of the attention bottleneck is a workspace constructor
+    # field: the legacy preset's v04_wall reaches it only through this family
+    assert "recency_clock" in GWT_SWITCHES
+    # The refractory clock is a temporal field: it reaches the temporal
+    # config and has no entry in the workspace switch family
     assert "refractory_clock" not in GWT_SWITCHES
     assert set(runner_support._TEMPORAL_FIELDS) == {
         "competition_duration_ms",
@@ -127,6 +130,7 @@ def test_build_workspace_passes_every_switch_family():
             "self_prediction_enabled": False,
             "refractory_period_ms": 123.0,
             "refractory_clock": "elapsed",
+            "recency_clock": "v04_wall",
         },
         "fep": {
             "drive_model": "v04",
@@ -171,6 +175,9 @@ def test_build_workspace_passes_every_switch_family():
     assert workspace.self_prediction_enabled is False
     assert workspace.temporal_config.refractory_period_ms == pytest.approx(123.0)
     assert workspace.temporal_config.refractory_clock == "elapsed"
+    # The recency clock lives on the bottleneck it is forwarded to
+    assert workspace.recency_clock == "v04_wall"
+    assert workspace.bottleneck.recency_clock == "v04_wall"
 
     fep = workspace.active_inference.config
     assert fep.drive_model == "v04"
@@ -201,6 +208,8 @@ def test_build_workspace_defaults_and_body_metrics_default():
     assert workspace.bottleneck.capacity == 7
     assert workspace.body_metrics_enabled is True
     assert workspace.attention_schema.provenance_mode == "typed"
+    # No wall-clock read enters the salience of a run built from the defaults
+    assert workspace.recency_clock == "simulated"
 
     seeded = build_workspace({}, None, body_metrics_default=False)
     assert seeded.body_metrics_enabled is False
@@ -217,8 +226,8 @@ def test_build_workspace_accepts_nested_temporal_table():
 
 
 def test_refractory_override_reaches_the_temporal_config():
-    """gwt.refractory_clock is forwarded as a temporal field (amendment A8):
-    per_cycle unless set, elapsed when the overrides say so, flat or nested."""
+    """gwt.refractory_clock is forwarded as a temporal field: per_cycle
+    unless set, elapsed when the overrides say so, flat or nested."""
     assert build_workspace({}, None).temporal_config.refractory_clock == "per_cycle"
     flat = build_workspace({"gwt": {"refractory_clock": "elapsed"}}, None)
     assert flat.temporal_config.refractory_clock == "elapsed"
@@ -258,6 +267,7 @@ def test_legacy_preset_rows_reach_their_constructors():
     assert workspace.legacy_broadcast_receivers is True
     assert workspace.ignition_detector.legacy_sustain_rate is True
     assert workspace.temporal_config.refractory_clock == "per_cycle"
+    assert workspace.recency_clock == "v04_wall"
     hot = workspace.metacognition
     assert hot.overall_confidence_source == "v04_constant"
     assert hot.introspection_counting == "v04_per_hot"
@@ -285,7 +295,7 @@ def test_legacy_preset_rows_reach_their_constructors():
 def test_each_legacy_row_alone_builds_or_names_its_companion():
     """Every key of the legacy preset applied alone builds a workspace, except
     the v04 loop quality formula, which raises the dependency error naming
-    its companion row (amendment A6)."""
+    its companion row."""
     rows = _flat_rows(_legacy_overrides())
     assert len(rows) >= 52
     raised = {}

@@ -17,13 +17,14 @@ What each test compares and needs:
   keys and booleans exactly, floats within 1e-9). Left out: the session id,
   the timestamp and the timing fields. The seeded CLI pins the introspection
   cooldown at 0.0, which removes the wall-clock gate, so the three counter
-  readouts are compared in full. One residual clock term is on record: on
-  a machine 25 times slower one evidence value
-  (``genuine_implementation.evidence.avg_loop_quality``) moves by 1.2e-9;
-  the measurement is in ``docs/MIGRATION_FROM_V04.md`` under "What the
-  cooldown pin removes". It needs pymdp only: a five-cycle warmup leaves
-  the tracker warming up, so the report is the same with and without
-  PyPhi.
+  readouts are compared in full; and the workspace ages a candidate's
+  recency bonus on its simulated clock (``gwt.recency_clock`` at its default
+  ``simulated``), so no wall-clock read is left on the default path and the
+  report is bit identical between runs and at a clock 25 times faster. The
+  measurement, and the wall-clock term the first regeneration carried, are
+  in ``docs/MIGRATION_FROM_V04.md`` under "What the cooldown pin removes".
+  It needs pymdp only: a five-cycle warmup leaves the tracker warming up,
+  so the report is the same with and without PyPhi.
 
 When a comparison fails, the message lists every differing line or field and
 then how the running environment differs from the recorded one.
@@ -127,7 +128,7 @@ def test_v050_assessment_fixture_reproduces(tmp_path):
     assert result.returncode == 0, result.stderr[-2000:]
     report = json.loads(json_path.read_text())
     # The seeded CLI pins the introspection cooldown at 0.0, which removes the
-    # wall-clock gate, so every field is compared (one recorded residual at a
-    # clock 25 times slower: see the module docstring)
+    # wall-clock gate, and the recency bonus runs on the simulated clock, so
+    # every field is compared and nothing follows the machine's speed
     differences = assessment_diff(baseline, report)
     assert differences == [], _failure_message(differences)

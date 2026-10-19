@@ -1,6 +1,6 @@
 {
-  "session_id": "8c32dfd3",
-  "timestamp": "2026-10-18T01:18:42.991884",
+  "session_id": "c709ad1b",
+  "timestamp": "2026-10-18T21:04:19.879858",
   "overall_score": 0.275203096148249,
   "status": "partial",
   "coverage": 0.5333333333333333,
@@ -58,7 +58,7 @@
         "missing": "global_workspace.broadcast.coverage_ratio",
         "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.11110305786132812
+      "measurement_time_ms": 0.08988380432128906
     },
     "ignition_dynamics": {
       "name": "ignition_dynamics",
@@ -72,7 +72,7 @@
         "missing": "global_workspace.ignition.sustain_rate",
         "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.047206878662109375
+      "measurement_time_ms": 0.05888938903808594
     },
     "global_ignition_nuanced": {
       "name": "global_ignition_nuanced",
@@ -86,7 +86,7 @@
         "missing": "global_workspace.ignition.sustain_rate",
         "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.032901763916015625
+      "measurement_time_ms": 0.0362396240234375
     },
     "attention_schema": {
       "name": "attention_schema",
@@ -100,7 +100,7 @@
         "missing": "attention_schema.prediction_accuracy",
         "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.007867813110351562
+      "measurement_time_ms": 0.0069141387939453125
     },
     "attention_control": {
       "name": "attention_control",
@@ -139,7 +139,7 @@
         "noise_baseline": 0.43,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.031948089599609375
+      "measurement_time_ms": 0.029802322387695312
     },
     "metacognition": {
       "name": "metacognition",
@@ -161,7 +161,7 @@
         "noise_baseline": 0.24116150883009171,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.028848648071289062
+      "measurement_time_ms": 0.03504753112792969
     },
     "sparse_smooth_coding": {
       "name": "sparse_smooth_coding",
@@ -180,7 +180,7 @@
         "noise_baseline": 0.1074946596432647,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.047206878662109375
+      "measurement_time_ms": 0.031948089599609375
     },
     "prediction_error_minimization": {
       "name": "prediction_error_minimization",
@@ -195,7 +195,7 @@
         "missing": "active_inference.inference_history (10 prediction errors)",
         "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.022172927856445312
+      "measurement_time_ms": 0.021696090698242188
     },
     "hierarchical_prediction": {
       "name": "hierarchical_prediction",
@@ -214,7 +214,7 @@
         "noise_baseline": 0.24878144998801965,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.0152587890625
+      "measurement_time_ms": 0.015020370483398438
     },
     "temporal_prediction_depth": {
       "name": "temporal_prediction_depth",
@@ -236,7 +236,7 @@
         "noise_baseline": 0.06539250171911784,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.017881393432617188
+      "measurement_time_ms": 0.015974044799804688
     },
     "agent_environment_coupling": {
       "name": "agent_environment_coupling",
@@ -255,7 +255,7 @@
         "noise_baseline": 0.04331370849898476,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.014066696166992188
+      "measurement_time_ms": 0.012159347534179688
     },
     "affect_coherence": {
       "name": "affect_coherence",
@@ -290,7 +290,7 @@
         "missing": "phi_tracker result (warming up or failed) and neural_states for the calculator",
         "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.0030994415283203125
+      "measurement_time_ms": 0.0019073486328125
     },
     "irreducibility": {
       "name": "irreducibility",
@@ -308,7 +308,7 @@
         "noise_baseline": 0.7990063461184519,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.00095367431640625
+      "measurement_time_ms": 0.0011920928955078125
     },
     "causal_emergence": {
       "name": "causal_emergence",
@@ -326,7 +326,7 @@
         "noise_baseline": 0.4682530589405219,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.0011920928955078125
+      "measurement_time_ms": 0.00095367431640625
     },
     "recurrent_processing": {
       "name": "recurrent_processing",
@@ -340,7 +340,7 @@
         "missing": "global_workspace.broadcast.coverage_ratio",
         "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.029802322387695312
+      "measurement_time_ms": 0.030040740966796875
     },
     "algorithmic_recurrence": {
       "name": "algorithmic_recurrence",
@@ -358,7 +358,7 @@
         "noise_baseline": 0.13718843329101565,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.0019073486328125
+      "measurement_time_ms": 0.0021457672119140625
     },
     "local_recurrence": {
       "name": "local_recurrence",
@@ -376,7 +376,7 @@
         "noise_baseline": 0.16569021569197784,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.0016689300537109375
+      "measurement_time_ms": 0.0011920928955078125
     },
     "oscillatory_binding_coherence": {
       "name": "oscillatory_binding_coherence",
@@ -394,7 +394,7 @@
         "noise_baseline": 0.38436960184523444,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.00095367431640625
+      "measurement_time_ms": 0.0007152557373046875
     },
     "agency": {
       "name": "agency",
@@ -414,7 +414,7 @@
         "noise_baseline": 0.21103225966340214,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.012874603271484375
+      "measurement_time_ms": 0.013113021850585938
     },
     "embodiment": {
       "name": "embodiment",
@@ -434,7 +434,7 @@
         "noise_baseline": 0.11348733365172695,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.00476837158203125
+      "measurement_time_ms": 0.004291534423828125
     },
     "bayesian_binding_quality": {
       "name": "bayesian_binding_quality",
@@ -448,7 +448,7 @@
         "missing": "beautiful_loop.average_binding_quality",
         "status": "insufficient_data"
       },
-      "measurement_time_ms": 0.04100799560546875
+      "measurement_time_ms": 0.03910064697265625
     },
     "epistemic_depth": {
       "name": "epistemic_depth",
@@ -467,7 +467,7 @@
         "noise_baseline": 0.10596871548641687,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.0209808349609375
+      "measurement_time_ms": 0.019788742065429688
     },
     "genuine_implementation": {
       "name": "genuine_implementation",
@@ -478,11 +478,11 @@
       "threshold": 0.4,
       "passes_threshold": true,
       "evidence": {
-        "avg_loop_quality": 0.5300177410248634,
+        "avg_loop_quality": 0.5300177409697049,
         "field_evidencing_count": 0,
         "has_field_evidencing": false,
         "has_loop_quality": true,
-        "has_strange_loop": true,
+        "has_meta_prediction_depth": true,
         "peak_depth": 3,
         "conditions_met": 2,
         "module_active": true,
@@ -491,7 +491,7 @@
         "noise_baseline": 0.13333333333333333,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.0171661376953125
+      "measurement_time_ms": 0.017881393432617188
     },
     "sequential_module_querying": {
       "name": "sequential_module_querying",
@@ -511,7 +511,7 @@
         "noise_baseline": 0.5335425951573204,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.029087066650390625
+      "measurement_time_ms": 0.028848648071289062
     },
     "organized_percepts": {
       "name": "organized_percepts",
@@ -530,7 +530,7 @@
         "noise_baseline": 0.1758430161217371,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.029087066650390625
+      "measurement_time_ms": 0.028848648071289062
     },
     "flexible_responsiveness": {
       "name": "flexible_responsiveness",
@@ -552,7 +552,7 @@
         "noise_baseline": 0.6026666666666667,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.051021575927734375
+      "measurement_time_ms": 0.06222724914550781
     },
     "online_reportable_learning": {
       "name": "online_reportable_learning",
@@ -571,7 +571,7 @@
         "noise_baseline": 0.09,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.014066696166992188
+      "measurement_time_ms": 0.015020370483398438
     },
     "complex_agency": {
       "name": "complex_agency",
@@ -594,10 +594,10 @@
         "noise_baseline": 0.36910243777619556,
         "noise_saturated": false
       },
-      "measurement_time_ms": 0.030279159545898438
+      "measurement_time_ms": 0.03218650817871094
     }
   },
   "ablation_config": null,
-  "processing_time_ms": 2.663850784301758,
+  "processing_time_ms": 5.364894866943359,
   "failures": {}
 }

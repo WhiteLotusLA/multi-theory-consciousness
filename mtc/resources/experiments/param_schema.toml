@@ -122,6 +122,12 @@ default = "per_cycle"
 choices = ["per_cycle", "elapsed"]
 description = "per_cycle advances the simulated clock by the competition duration per cycle, machine independent (v0.4.0 and the default); elapsed also adds the real time between cycles (the live runtime sets it)"
 
+[gwt.recency_clock]
+type = "str"
+default = "simulated"
+choices = ["simulated", "v04_wall"]
+description = "simulated ages a candidate's recency bonus on the workspace's simulated clock since the bottleneck first saw it, so no wall-clock read enters salience and a seeded run is machine independent (the default); v04_wall is time.time() since the candidate was created (v0.4.0, which follows the machine's speed)"
+
 # -----------------------------------------------------------------------------
 # AST: AttentionSchemaModule
 # -----------------------------------------------------------------------------

@@ -38,7 +38,8 @@ FEP_BEHAVIOUR_SWITCHES = (
 
 # gwt.* behaviour switches that are EnhancedGlobalWorkspace constructor fields.
 # The refractory clock is not one of them: it is a TemporalWorkspaceConfig
-# field and reaches the workspace through the temporal config below.
+# field and reaches the workspace through the temporal config below. The
+# recency clock is: the workspace forwards it to its attention bottleneck.
 GWT_SWITCHES = (
     "competition_mode",
     "thalamic_gate_enabled",
@@ -46,6 +47,7 @@ GWT_SWITCHES = (
     "legacy_coverage_ratio",
     "legacy_broadcast_receivers",
     "legacy_sustain_rate",
+    "recency_clock",
     "body_metrics_enabled",
     "precision_feedback_enabled",
     "self_prediction_enabled",

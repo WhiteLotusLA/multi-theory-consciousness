@@ -202,12 +202,13 @@ class TestParamOverrides:
         assert result["fep"]["legacy_double_decay"] is True
         assert result["blt"]["loop_quality_formula"] == "v04"
         assert result["damasio"]["circadian"] == "v04_sawtooth"
-        # The ten switch rows added for v0.5.0 (section 7.1 of the fix plan)
+        # The eleven switch rows added for v0.5.0, each at its v0.4.0 value
         assert result["assessment"]["noise_baseline_matching"] == "v04_any"
         assert result["runner"]["assess_blt_source"] == "standalone"
         assert result["gwt"]["legacy_broadcast_receivers"] is True
         assert result["gwt"]["legacy_sustain_rate"] is True
         assert result["gwt"]["refractory_clock"] == "per_cycle"
+        assert result["gwt"]["recency_clock"] == "v04_wall"
         assert result["hot"]["overall_confidence_source"] == "v04_constant"
         assert result["hot"]["introspection_counting"] == "v04_per_hot"
         assert result["hot"]["introspection_cooldown"] == 1.0
@@ -215,13 +216,14 @@ class TestParamOverrides:
         assert result["blt"]["strange_loop_test"] == "v04_confidence_match"
         assert result["damasio"]["first_delta"] == "v04_zero"
 
-    # The ten rows of section 7.1: (row, legacy value, v0.5.0 default)
+    # The eleven switch rows added for v0.5.0: (row, legacy value, default)
     NEW_SWITCH_ROWS = (
         ("assessment.noise_baseline_matching", "v04_any", "producer"),
         ("runner.assess_blt_source", "standalone", "workspace"),
         ("gwt.legacy_broadcast_receivers", True, False),
         ("gwt.legacy_sustain_rate", True, False),
         ("gwt.refractory_clock", "per_cycle", "per_cycle"),
+        ("gwt.recency_clock", "v04_wall", "simulated"),
         ("hot.overall_confidence_source", "v04_constant", "hot_mean"),
         ("hot.introspection_counting", "v04_per_hot", "episodes"),
         ("blt.binding_evidence", "v04_salience_posterior", "candidate_vectors"),
@@ -250,7 +252,7 @@ class TestParamOverrides:
                 if legacy != default:
                     assert set(row["choices"]) == {legacy, default}, key
         # The refractory clock keeps its v0.4.0 arithmetic as the default
-        # (amendment A8) and offers the elapsed clock as the other choice
+        # and offers the elapsed clock as the other choice
         assert set(flat["gwt.refractory_clock"]["choices"]) == {"per_cycle", "elapsed"}
         assert "machine independent" in flat["gwt.refractory_clock"]["description"]
 
@@ -303,7 +305,7 @@ class TestParamOverrides:
 
     def test_single_level_loop_is_rejected_by_the_schema(self, tmp_path):
         """blt.num_levels needs at least two levels: precision balance is
-        undefined for one (R6-17)."""
+        undefined for one."""
         from pathlib import Path
 
         from mtc.core.param_overrides import load_overrides
@@ -317,7 +319,7 @@ class TestParamOverrides:
         assert load_overrides(two, schema)["blt"]["num_levels"] == 2
 
     def test_voluntary_boost_row_says_it_has_no_effect(self):
-        """ast.voluntary_boost is stored and has no effect in v0.5.0 (R2-N2):
+        """ast.voluntary_boost is stored and has no effect in v0.5.0:
         its schema description says so instead of promising a boost."""
         import tomllib
         from pathlib import Path
@@ -332,9 +334,9 @@ class TestParamOverrides:
         assert "v0.5.0" in description
         assert "applied" not in description.lower()
 
-    def test_phase3_switches_validate(self, tmp_path):
-        """The preset loads its Phase 3 values and each string switch rejects
-        a bad choice."""
+    def test_assessment_pad_emergence_and_rpt_switches_validate(self, tmp_path):
+        """The preset loads its assessment, PAD, causal emergence and RPT
+        values and each string switch rejects a bad choice."""
         from pathlib import Path
 
         from mtc.core.param_overrides import load_layered_overrides, load_overrides

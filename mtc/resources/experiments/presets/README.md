@@ -32,9 +32,9 @@ the v0.4.0 baseline (`tests/fixtures/baseline_v040_experiment.txt`) was
 captured. `tests/test_legacy_preset.py` checks that the preset still lands on
 that baseline.
 
-The Phase 3 part of the preset adds an `[assessment]` block (`indicator_formulas`,
+The preset also sets an `[assessment]` block (`indicator_formulas`,
 `missing_signal_policy`, `irreducibility_method`, `causal_emergence_threshold`,
-`phi_source`) and three new tables: `[pad]` (`coherence_method = "v04_variance"`),
+`phi_source`) and three tables: `[pad]` (`coherence_method = "v04_variance"`),
 `[causal_emergence]` (`tpm_row_order = "little_endian"`) and `[rpt]`
 (`stdp_plasticity_enabled = false`). `assessment.phi_normalization`,
 `assessment.phi_fixed_reference`, `pad.coherence_window` and
@@ -42,11 +42,13 @@ The Phase 3 part of the preset adds an `[assessment]` block (`indicator_formulas
 v0.4.0 divide-by-5.0 behaviour and the PAD tuning keys are inert under
 `v04_variance`.
 
-The v0.5.0 release added ten switch rows, each with its v0.4.0 value in the
-preset: `assessment.noise_baseline_matching = "v04_any"`,
+The v0.5.0 release added eleven switch rows, each with its v0.4.0 value in
+the preset: `assessment.noise_baseline_matching = "v04_any"`,
 `runner.assess_blt_source = "standalone"`, `gwt.legacy_broadcast_receivers =
 true`, `gwt.legacy_sustain_rate = true`, `gwt.refractory_clock = "per_cycle"`
-(also the default), a `[hot]` table (`overall_confidence_source =
+(also the default), `gwt.recency_clock = "v04_wall"` (the wall-clock recency
+bonus of v0.4.0; the default is the simulated clock), a `[hot]` table
+(`overall_confidence_source =
 "v04_constant"`, `introspection_counting = "v04_per_hot"` and an explicit
 `introspection_cooldown = 1.0`, the wall-clock gate the runners otherwise pin
 at 0.0), `blt.binding_evidence = "v04_salience_posterior"`,

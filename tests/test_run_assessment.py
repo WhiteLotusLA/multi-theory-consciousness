@@ -83,8 +83,8 @@ def _run_in_process(tmp_path, monkeypatch, *args: str) -> dict:
 
 def test_quick_mode_reports_tracker_as_insufficient(tmp_path, monkeypatch):
     """The standalone path hands the assessment the workspace's PhiTracker in
-    every mode (R1-13 part a): with no cycles run the tracker is present and
-    warming up, so integrated_information is insufficient_data, not absent."""
+    every mode: with no cycles run the tracker is present and warming up, so
+    integrated_information is insufficient_data, not absent."""
     report = _run_in_process(tmp_path, monkeypatch, "--quick", "--seed", "3")
     result = report["indicator_results"]["integrated_information"]
     assert result["status"] == "insufficient_data"
@@ -94,16 +94,41 @@ def test_quick_mode_reports_tracker_as_insufficient(tmp_path, monkeypatch):
 
 def test_full_mode_reads_the_loop_that_ran(tmp_path, monkeypatch):
     """Under the default runner.assess_blt_source (workspace) the BLT indicators
-    read the workspace's own loop, which the warmup drove for five cycles;
-    under standalone they read the separate loop nothing drove (R1-13 part b,
-    decision D21)."""
+    read the workspace's own loop, the one the warmup drove once per cycle:
+    the evidence equals that loop's statistics, the loop ran exactly the
+    warmup cycles and the separate loop ran none. Under standalone they read
+    the separate loop, which nothing drove."""
+    from mtc.cli import assess
+
+    built = {}
+    real_build = assess._build_standalone_modules
+
+    def capturing_build(overrides):
+        modules = real_build(overrides)
+        built["modules"] = modules
+        return modules
+
+    monkeypatch.setattr(assess, "_build_standalone_modules", capturing_build)
     report = _run_in_process(
         tmp_path, monkeypatch, "--full", "--warmup-cycles", "5", "--seed", "3"
     )
-    binding = report["indicator_results"]["bayesian_binding_quality"]
-    assert binding["evidence"].get("missing") != "beautiful_loop.cycle_count"
-    depth = report["indicator_results"]["epistemic_depth"]
-    assert depth["evidence"].get("missing") != "beautiful_loop.cycle_count"
+    workspace, _attention, _hot, _fep, separate = built["modules"]
+    loop = workspace.beautiful_loop
+    assert loop.cycle_count == 5
+    assert separate.cycle_count == 0
+    stats = loop.get_loop_statistics()
+    results = report["indicator_results"]
+    genuine = results["genuine_implementation"]
+    assert genuine["status"] == "measured"
+    assert genuine["evidence"]["avg_loop_quality"] == stats["average_loop_quality"]
+    assert genuine["evidence"]["peak_depth"] == stats["epistemic_depth"]["peak_depth"]
+    depth = results["epistemic_depth"]
+    assert depth["status"] == "measured"
+    assert depth["evidence"]["avg_depth"] == stats["epistemic_depth"]["average_depth"]
+    binding = results["bayesian_binding_quality"]
+    # The loop ran, so the one input it lacks is the binding statistic (the
+    # warmup's winners carry no vector), not the cycle count
+    assert binding["evidence"]["missing"] == "beautiful_loop.average_binding_quality"
 
     params = tmp_path / "standalone.toml"
     params.write_text('[runner]\nassess_blt_source = "standalone"\n')
@@ -118,10 +143,19 @@ def test_full_mode_reads_the_loop_that_ran(tmp_path, monkeypatch):
         "--params",
         str(params),
     )
-    for name in ("bayesian_binding_quality", "epistemic_depth"):
+    for name in (
+        "bayesian_binding_quality",
+        "epistemic_depth",
+        "genuine_implementation",
+    ):
         result = standalone["indicator_results"][name]
         assert result["status"] == "insufficient_data", name
         assert result["evidence"]["missing"] == "beautiful_loop.cycle_count", name
+    workspace, _attention, _hot, _fep, separate = built["modules"]
+    # The warmup still drove the workspace's loop; the separate loop it read
+    # ran nothing
+    assert workspace.beautiful_loop.cycle_count == 5
+    assert separate.cycle_count == 0
 
 
 @pytest.mark.slow
@@ -221,9 +255,9 @@ def test_state_dir_restores_and_assesses(tmp_path):
     assert indicators["affect_coherence"]["status"] == "insufficient_data"
     assert indicators["affect_coherence"]["score"] is None
     # Under the defaults the workspace registers no acknowledgement-only
-    # receiver and runs no sustain check (decision D9), so the coverage and
-    # sustain indicators stay insufficient_data after a restore too, each
-    # naming the statistic it lacks
+    # receiver and runs no sustain check, so the coverage and sustain
+    # indicators stay insufficient_data after a restore too, each naming the
+    # statistic it lacks
     for name in ("global_broadcast", "recurrent_processing"):
         assert indicators[name]["status"] == "insufficient_data", name
         assert indicators[name]["evidence"]["missing"] == (
