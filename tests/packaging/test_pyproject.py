@@ -99,7 +99,7 @@ def _comment_above(text: str, line_start: str) -> str:
     return " ".join(reversed(block))
 
 
-def test_fep_stays_an_extra_and_the_comment_records_the_decision():
+def test_fep_stays_an_extra_and_the_comment_states_only_the_reason():
     project = _load()["project"]
     core = {
         re.split(r"[<>=!~ \[;@]", item, maxsplit=1)[0]
@@ -112,8 +112,14 @@ def test_fep_stays_an_extra_and_the_comment_records_the_decision():
     ] == ["inferactively-pymdp"]
     comment = _comment_above(PYPROJECT.read_text(encoding="utf-8"), "fep = [")
     assert "mtc assess, mtc serve and the demos need this extra" in comment
-    assert "the release gate revisited the question and kept the extra" in comment
-    assert "may revisit" not in comment
+    assert (
+        "It stays an extra rather than a core dependency because promoting an"
+        " extra to a core dependency later is not a breaking change and the"
+        " reverse is." in comment
+    )
+    lowered = comment.lower()
+    for process_label in ("gate", "revisit", "review", "phase", "kept the extra"):
+        assert process_label not in lowered, process_label
 
 
 def test_all_excludes_iit():
