@@ -71,6 +71,26 @@ class TestHyperModel:
             hyper_model.precision_beliefs, [1.0, 1.0, 1.0]
         )
 
+    def test_has_observed_update_follows_the_meta_error(self, hyper_model):
+        """A precision prediction alone is not an observed update: the flag
+        turns on only when observe_meta_error has compared a prediction with
+        the update that followed, which is also when recursive_confidence
+        becomes a measurement; a restored record that holds predictions but
+        no meta-error is unobserved."""
+        assert hyper_model.has_observed_update is False
+        hyper_model.predict_precision_update([0.2, 0.1, 0.3])
+        assert hyper_model._prediction_count == 1
+        assert hyper_model.has_observed_update is False
+        assert hyper_model.recursive_confidence is None
+        hyper_model.observe_meta_error()
+        assert hyper_model.has_observed_update is True
+        assert isinstance(hyper_model.recursive_confidence, float)
+
+        restored = HyperModel(num_levels=3)
+        restored.from_state_dict({"scalars": {"prediction_count": 3}})
+        assert restored._prediction_count == 3
+        assert restored.has_observed_update is False
+
     def test_allocate_precision_default(self, hyper_model):
         """Allocates default precision for known levels."""
         p0 = hyper_model.allocate_precision(0)
@@ -215,9 +235,12 @@ class TestBayesianBinding:
         is unmeasured; the legacy evidence mode reports its 0.0."""
         percept = binding.bind_inferences([])
         assert percept.binding_quality is None
+        assert percept.coherence is None
         assert len(percept.bound_inferences) == 0
         legacy = BayesianBinding(binding_evidence="v04_salience_posterior")
-        assert legacy.bind_inferences([]).binding_quality == 0.0
+        legacy_percept = legacy.bind_inferences([])
+        assert legacy_percept.binding_quality == 0.0
+        assert legacy_percept.coherence == 0.0
 
     def test_single_candidate(self, binding):
         """A single candidate has nothing to bind with: its percept carries
@@ -226,11 +249,13 @@ class TestBayesianBinding:
         inf = self._make_inference("a", [0.5, 0.3, 0.2])
         percept = binding.bind_inferences([inf])
         assert len(percept.bound_inferences) == 1
-        assert percept.coherence == 1.0  # Trivially coherent
+        assert percept.coherence is None  # no pair, so nothing measured it
         assert percept.binding_quality is None
         assert binding.get_average_binding_quality() is None
         legacy = BayesianBinding(binding_evidence="v04_salience_posterior")
-        assert legacy.bind_inferences([inf]).binding_quality == 0.5
+        legacy_percept = legacy.bind_inferences([inf])
+        assert legacy_percept.binding_quality == 0.5
+        assert legacy_percept.coherence == 1.0  # the v0.4.0 constant
         assert legacy.get_average_binding_quality() == 0.0
 
     def test_unknown_binding_evidence_is_rejected(self):
@@ -284,6 +309,109 @@ class TestBayesianBinding:
         assert percept.unified_summary.endswith(" (+ 1 more)")
         names = [inf.content_summary for inf in percept.bound_inferences[:3]]
         assert percept.unified_summary == " + ".join(names) + " (+ 1 more)"
+
+    def test_vectors_of_different_lengths_are_not_compared(self, binding):
+        """Two belief vectors of different lengths carry no mutual
+        information for the correlation proxy: the pair is not measured, a
+        percept whose bound inferences have no comparable pair has no
+        measured quality or coherence, and a comparable pair among the
+        candidates is measured on its own while the odd-length candidate
+        stays unbound. The legacy evidence mode keeps the v0.4.0 rule of
+        truncating both vectors to their common prefix."""
+        short = np.array([0.5, 0.3, 0.2])
+        long = np.array([0.5, 0.3, 0.2, 0.9, 0.1, 0.4])
+        assert binding._estimate_mutual_information(short, long) is None
+        assert binding._estimate_mutual_information(long, short) is None
+        same = binding._estimate_mutual_information(short, short * 0.9 + 0.01)
+        assert isinstance(same, float)
+
+        a = self._make_inference("a", [0.5, 0.3, 0.2], salience=0.8)
+        b = self._make_inference("b", [0.48, 0.32, 0.20], salience=0.7)
+        c = self._make_inference("c", [0.5, 0.3, 0.2, 0.9, 0.1, 0.4], salience=0.9)
+
+        odd = binding.bind_inferences([a, c])
+        assert odd.binding_quality is None
+        assert odd.coherence is None
+        assert len(odd.binding_pairs) == 1
+        assert odd.binding_pairs[0].mutual_information is None
+        assert odd.binding_pairs[0].coherence_score is None
+        assert odd.binding_pairs[0].combined_uncertainty_reduction is None
+        assert binding.get_average_binding_quality() is None
+
+        pair = binding.bind_inferences([a, b])
+        mixed = binding.bind_inferences([a, b, c])
+        assert {inf.id for inf in mixed.bound_inferences} == {"a", "b"}
+        assert mixed.binding_quality == pytest.approx(pair.binding_quality)
+        assert mixed.coherence == pytest.approx(pair.coherence)
+        assert binding.get_average_binding_quality() == pytest.approx(
+            pair.binding_quality
+        )
+
+        legacy = BayesianBinding(binding_evidence="v04_salience_posterior")
+        prefix = legacy._estimate_mutual_information(short, long)
+        assert isinstance(prefix, float)
+        assert prefix == legacy._estimate_mutual_information(short, long[:3])
+        assert isinstance(legacy.bind_inferences([a, c]).binding_quality, float)
+
+    def test_unmeasured_pair_round_trips_and_reports(self, binding):
+        """A percept whose only pair was not comparable persists its None
+        fields as None, survives the hub round trip, and reports
+        insufficient_data for its coherence."""
+        from mtc.consciousness.beautiful_loop.bayesian_binding import (
+            percept_from_dict,
+            percept_to_dict,
+        )
+
+        a = self._make_inference("a", [0.5, 0.3, 0.2], salience=0.8)
+        c = self._make_inference("c", [0.5, 0.3, 0.2, 0.9, 0.1, 0.4], salience=0.9)
+        percept = binding.bind_inferences([a, c])
+        raw = json.loads(json.dumps(percept_to_dict(percept)))
+        assert raw["coherence"] is None
+        assert raw["binding_quality"] is None
+        assert raw["binding_pairs"][0]["mutual_information"] is None
+        restored = percept_from_dict(raw)
+        assert restored.coherence is None
+        assert restored.binding_quality is None
+        assert restored.binding_pairs[0].mutual_information is None
+        assert restored.binding_pairs[0].coherence_score is None
+        assert restored.binding_pairs[0].combined_uncertainty_reduction is None
+        assert "coherence=insufficient_data" in binding.generate_report()
+
+        fresh = BayesianBinding()
+        fresh.from_state_dict(_hub_round_trip(binding.to_state_dict()))
+        latest = fresh._percept_history[-1]
+        assert latest.coherence is None
+        assert latest.binding_pairs[0].mutual_information is None
+        assert fresh.get_average_binding_quality() is None
+
+    def test_empty_and_single_percepts_have_no_measured_coherence(self, binding):
+        """Coherence is a measure over pairs of bound inferences. The empty
+        percept and the single-inference percept have no pair, so under the
+        default evidence mode nothing measured their coherence: it is None,
+        is written as null and restores as None, exactly like their binding
+        quality. The legacy evidence mode keeps the v0.4.0 constants (0.0
+        for the empty percept, 1.0 for the single one) in the same places."""
+        from mtc.consciousness.beautiful_loop.bayesian_binding import (
+            percept_from_dict,
+            percept_to_dict,
+        )
+
+        inf = self._make_inference("a", [0.5, 0.3, 0.2])
+        for percept in (binding.bind_inferences([]), binding.bind_inferences([inf])):
+            assert percept.binding_quality is None
+            assert percept.coherence is None
+            raw = json.loads(json.dumps(percept_to_dict(percept)))
+            assert raw["coherence"] is None
+            assert percept_from_dict(raw).coherence is None
+
+        legacy = BayesianBinding(binding_evidence="v04_salience_posterior")
+        empty = legacy.bind_inferences([])
+        single = legacy.bind_inferences([inf])
+        assert (empty.coherence, single.coherence) == (0.0, 1.0)
+        for percept, constant in ((empty, 0.0), (single, 1.0)):
+            raw = json.loads(json.dumps(percept_to_dict(percept)))
+            assert raw["coherence"] == constant
+            assert percept_from_dict(raw).coherence == constant
 
     def test_mutual_information_symmetric(self, binding):
         """MI(A;B) == MI(B;A)."""
@@ -681,6 +809,78 @@ class TestEpistemicDepthTracker:
             else:
                 assert metrics.strange_loop_detected is True  # 0.5 agrees with 0.5
 
+    def test_strange_loop_threshold_looseness_is_as_documented(self):
+        """The default threshold 0.5 on two quantities in [0, 1] is loose,
+        as the module documents: the self-calibration score starts at 0.5,
+        so at that start every ledger accuracy strictly inside (0, 1) agrees
+        with it and only the history minimums hold the verdict back; the
+        two ends of the range sit exactly at the threshold and do not."""
+        tracker = EpistemicDepthTracker()
+        assert tracker.strange_loop_threshold == 0.5
+        for accuracy in (0.01, 0.5, 0.99):
+            sm, ms = self._calibration_inputs(calibration=0.5, accuracy=accuracy)
+            metrics = tracker.track_self_reference(
+                self_model=sm, meta_state=ms, recursive_observed=True
+            )
+            assert metrics.strange_loop_detected is True
+            assert metrics.strange_loop_basis == "independent_calibration"
+        for accuracy in (0.0, 1.0):
+            sm, ms = self._calibration_inputs(calibration=0.5, accuracy=accuracy)
+            metrics = tracker.track_self_reference(
+                self_model=sm, meta_state=ms, recursive_observed=True
+            )
+            assert metrics.strange_loop_detected is False
+            assert metrics.strange_loop_basis == "independent_calibration"
+
+    def test_first_check_agreement_band_covers_three_quarters(self):
+        """The module docstring states how loose the default threshold is
+        at the first check that can run. The check needs three entries in
+        the self-prediction accuracy history; metacognition appends one per
+        scored prediction once three are scored and moves the calibration
+        a fifth of the way toward each, so by then the score has taken
+        three steps from 0.5 and lies between 0.256 and 0.744. The band
+        (calibration plus or minus 0.5) then covers at least three quarters
+        of [0, 1] and no more is claimed: at the upper extreme an accuracy
+        of 0.2, well inside (0, 1), does not agree."""
+        from mtc.consciousness.metacognition import MetacognitionModule
+
+        extremes = {}
+        for accurate in (True, False):
+            module = MetacognitionModule(narrate_self_model=False)
+            ids = [module.predict_self(f"context {i}").id for i in range(5)]
+            for prediction_id in ids:
+                module.score_prediction(prediction_id, accurate)
+            assert len(module.self_model.prediction_accuracy_history) == 3
+            extremes[accurate] = module.self_model
+        assert extremes[True].self_calibration_score == pytest.approx(0.744)
+        assert extremes[False].self_calibration_score == pytest.approx(0.256)
+
+        tracker = EpistemicDepthTracker()
+        for self_model in extremes.values():
+            calibration = self_model.self_calibration_score
+            low = max(0.0, calibration - tracker.strange_loop_threshold)
+            high = min(1.0, calibration + tracker.strange_loop_threshold)
+            assert high - low >= 0.75
+            assert high - low < 1.0  # not every accuracy agrees any more
+        verdicts = {}
+        for key, accuracy in ((True, 0.2), (True, 0.3), (False, 0.8), (False, 0.7)):
+            ms = Mock()
+            ms.total_predictions = 10
+            ms.predicted_accuracy = 0.5
+            ms.prediction_accuracy = accuracy
+            ms.model_confidence = 0.42
+            metrics = tracker.track_self_reference(
+                self_model=extremes[key], meta_state=ms, recursive_observed=True
+            )
+            assert metrics.strange_loop_basis == "independent_calibration"
+            verdicts[(key, accuracy)] = metrics.strange_loop_detected
+        assert verdicts == {
+            (True, 0.2): False,
+            (True, 0.3): True,
+            (False, 0.8): False,
+            (False, 0.7): True,
+        }
+
     def test_strange_loop_basis_round_trips(self):
         from mtc.consciousness.beautiful_loop.epistemic_depth import (
             metrics_from_dict,
@@ -957,6 +1157,53 @@ class TestBeautifulLoop:
         assert after.self_reference.strange_loop_basis == "independent_calibration"
 
     @pytest.mark.asyncio
+    async def test_predicted_but_unobserved_update_is_not_a_recursive_observation(
+        self,
+    ):
+        """The loop reports an observed recursive update only once the
+        hyper-model has compared a precision prediction with the update that
+        followed (the flag behind recursive_confidence): a prediction made
+        and never observed, or a restored record with predictions and no
+        meta-error, is not an observation, so agreeing calibrations are no
+        strange loop yet."""
+
+        def inputs():
+            sm = Mock()
+            sm.update_count = 5
+            sm.current_focus = "synthetic"
+            sm.confidence = 0.6
+            sm.cognitive_load = 0.3
+            sm.self_calibration_score = 0.6
+            sm.prediction_accuracy_history = [0.55, 0.6, 0.62]
+            sm.model_confidence = 0.1
+            ms = Mock()
+            ms.total_predictions = 10
+            ms.predicted_accuracy = 0.6
+            ms.prediction_accuracy = 0.62
+            ms.model_confidence = 0.9
+            return sm, ms
+
+        loop = BeautifulLoop()
+        loop.hyper_model.predict_precision_update([0.2, 0.1, 0.3])
+        assert loop.hyper_model._prediction_count == 1
+        assert loop.hyper_model.recursive_confidence is None
+        sm, ms = inputs()
+        predicted = await loop.process_conscious_moment(self_model=sm, meta_state=ms)
+        assert predicted.self_reference.strange_loop_detected is False
+        assert predicted.self_reference.strange_loop_basis == "independent_calibration"
+
+        loop.hyper_model.observe_meta_error()
+        sm, ms = inputs()
+        observed = await loop.process_conscious_moment(self_model=sm, meta_state=ms)
+        assert observed.self_reference.strange_loop_detected is True
+
+        restored = BeautifulLoop()
+        restored.hyper_model.from_state_dict({"scalars": {"prediction_count": 4}})
+        sm, ms = inputs()
+        moment = await restored.process_conscious_moment(self_model=sm, meta_state=ms)
+        assert moment.self_reference.strange_loop_detected is False
+
+    @pytest.mark.asyncio
     async def test_cycle_count_increments(self, loop):
         """Cycle count tracks number of moments processed."""
         assert loop.cycle_count == 0
@@ -1174,6 +1421,41 @@ class TestBindingEvidence:
         assert moment.binding_quality is None
         assert [inf.id for inf in moment.bound_percept.bound_inferences] == ["w1"]
 
+    @pytest.mark.asyncio
+    async def test_content_vector_and_embedding_of_different_lengths_are_not_bound(
+        self,
+    ):
+        """A winner with a three-entry content vector and a winner with a
+        longer metadata embedding carry vectors that cannot be compared: the
+        loop measures no binding between them and reports no binding
+        quality, instead of correlating the content with the embedding's
+        first three entries. A third winner with a comparable vector is
+        bound with the first on its own and the embedding winner stays
+        unbound."""
+        embedding = np.random.default_rng(7).random(384).tolist()
+        winners = [
+            _salience_winner(1, 0.8, content=[0.5, 0.3, 0.2]),
+            _salience_winner(2, 0.7, metadata={"embedding": embedding}),
+        ]
+        loop = BeautifulLoop()
+        moment = await loop.process_conscious_moment(workspace_winners=winners)
+        assert moment.binding_quality is None
+        assert moment.bound_percept.binding_quality is None
+        assert loop.bayesian_binding.get_average_binding_quality() is None
+        assert isinstance(moment.loop_quality, float)
+
+        winners.append(_salience_winner(3, 0.6, content=[0.48, 0.32, 0.2]))
+        moment = await loop.process_conscious_moment(workspace_winners=winners)
+        assert {inf.id for inf in moment.bound_percept.bound_inferences} == {
+            "w1",
+            "w3",
+        }
+        assert isinstance(moment.binding_quality, float)
+        assert moment.binding_quality > 0.5
+        assert loop.bayesian_binding.get_average_binding_quality() == pytest.approx(
+            moment.binding_quality
+        )
+
     def test_v04_loop_formula_requires_v04_binding(self):
         """The v04 loop formula reads a binding quality that candidate
         vectors leave unmeasured, so the pair is refused at construction,
@@ -1196,14 +1478,20 @@ class TestBindingEvidence:
 
     @pytest.mark.asyncio
     async def test_moment_with_no_binding_round_trips(self):
+        """Winners without a vector bind nothing: the moment's percept
+        carries no measured binding quality and no measured coherence, both
+        persist as null in the moment history and restore as None."""
         loop = BeautifulLoop()
-        await loop.process_conscious_moment(
+        unbound = await loop.process_conscious_moment(
             workspace_winners=[_salience_winner(1, 0.9), _salience_winner(2, 0.4)]
         )
+        assert unbound.binding_quality is None
+        assert unbound.bound_percept.coherence is None
         state = _hub_round_trip(loop.to_state_dict())
         latest = state["histories"]["moment_history"][-1]
         assert latest["binding_quality"] is None
         assert latest["bound_percept"]["binding_quality"] is None
+        assert latest["bound_percept"]["coherence"] is None
 
         restored = BeautifulLoop()
         restored.from_state_dict(state)
@@ -1211,6 +1499,7 @@ class TestBindingEvidence:
         assert isinstance(moment, ConsciousMoment)
         assert moment.binding_quality is None
         assert moment.bound_percept.binding_quality is None
+        assert moment.bound_percept.coherence is None
         assert restored.get_loop_statistics()["average_binding_quality"] is None
         assert "binding=not measured" in restored.generate_consciousness_context()
 

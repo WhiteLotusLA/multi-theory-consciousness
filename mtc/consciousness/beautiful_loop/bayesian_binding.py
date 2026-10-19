@@ -39,15 +39,25 @@ BeautifulLoop, which builds the inferences):
   - "candidate_vectors" (default): an inference's belief vector is the
     workspace candidate's own numeric evidence. Fewer than two such
     inferences means binding was not measured: the empty and the single
-    percept carry ``binding_quality`` None and the average over an empty
-    history is None.
+    percept carry ``binding_quality`` None and ``coherence`` None (both
+    are measures over pairs, and there is no pair) and the average over an
+    empty history is None.
   - "v04_salience_posterior": the v0.4.0 behaviour, kept for the legacy
     preset: belief vectors built from salience and a shared posterior (which
-    correlate at about 1 for any input), a single percept scored 0.5, an
-    empty percept 0.0 and an empty history averaging 0.0.
+    correlate at about 1 for any input), a single percept scored 0.5 with
+    coherence 1.0, an empty percept 0.0 with coherence 0.0, and an empty
+    history averaging 0.0.
 
 The binding quality itself is a correlation proxy for mutual information
-over whatever vectors the inferences carry.
+over whatever vectors the inferences carry. Two vectors of different
+lengths (a three-entry content vector and a longer embedding, say) are not
+comparable: under ``candidate_vectors`` such a pair carries no mutual
+information, coherence or uncertainty reduction (None), the coherent-subset
+search treats it as no evidence of binding, and a percept whose bound
+inferences have no comparable pair has no measured binding quality or
+coherence (None; nothing enters the quality history). Under
+``v04_salience_posterior`` both vectors are truncated to their common
+prefix, as in v0.4.0.
 
 Connection points:
   - Reads from: GWT workspace winners, active inference posterior
@@ -119,9 +129,11 @@ class BindingPair:
 
     inference_a: str  # ID
     inference_b: str  # ID
-    mutual_information: float
-    coherence_score: float  # How well they reduce each other's uncertainty
-    combined_uncertainty_reduction: float
+    # The three measures are None when the two belief vectors have
+    # different lengths and so were not compared (candidate_vectors)
+    mutual_information: Optional[float]
+    coherence_score: Optional[float]  # How well they reduce each other's uncertainty
+    combined_uncertainty_reduction: Optional[float]
 
 
 @dataclass
@@ -139,10 +151,14 @@ class BoundPercept:
     bound_inferences: List[Inference]
     binding_pairs: List[BindingPair]
     # Overall binding quality (0-1); None when fewer than two inferences
-    # were bound, so nothing measured it (under the default evidence mode)
+    # were bound or no two of them were comparable, so nothing measured it
+    # (under the default evidence mode)
     binding_quality: Optional[float]
     total_uncertainty_reduction: float  # How much uncertainty was reduced
-    coherence: float  # How coherent are the bound inferences
+    # How coherent the bound inferences are: a measure over pairs, so None
+    # when fewer than two inferences were bound or no two of them were
+    # comparable (under the default evidence mode)
+    coherence: Optional[float]
     dominant_content_type: str  # What type of content dominates
     unified_summary: str  # Human-readable summary
     timestamp: float = field(default_factory=time.time)
@@ -215,7 +231,10 @@ class BayesianBinding:
                 measuring reduction). If None, estimated from candidates.
 
         Returns:
-            BoundPercept - the unified conscious experience
+            BoundPercept - the unified conscious experience. Its binding
+            quality and coherence are None when no two bound inferences
+            carried vectors of one length (nothing measured them); the
+            legacy evidence mode compares every pair.
         """
         self.bind_count += 1
         self.total_inferences_processed += len(candidates)
@@ -246,21 +265,31 @@ class BayesianBinding:
             )
         ]
 
-        if relevant_pairs:
-            avg_mi = np.mean([bp.mutual_information for bp in relevant_pairs])
-            avg_coherence = np.mean([bp.coherence_score for bp in relevant_pairs])
-        else:
-            avg_mi = 0.0
-            avg_coherence = 0.0
-
-        # Binding quality: combination of coherence and mutual information
-        binding_quality = float(
-            np.clip(
-                0.5 * avg_coherence + 0.5 * min(1.0, avg_mi),
-                0.0,
-                1.0,
+        # A pair whose vectors were not comparable (None) measured nothing;
+        # under the legacy evidence mode every pair is measured
+        measured_pairs = [
+            bp for bp in relevant_pairs if bp.mutual_information is not None
+        ]
+        binding_quality: Optional[float]
+        avg_coherence: Optional[float]
+        if measured_pairs:
+            avg_mi = np.mean([bp.mutual_information for bp in measured_pairs])
+            avg_coherence = np.mean([bp.coherence_score for bp in measured_pairs])
+            # Binding quality: combination of coherence and mutual information
+            binding_quality = float(
+                np.clip(
+                    0.5 * avg_coherence + 0.5 * min(1.0, avg_mi),
+                    0.0,
+                    1.0,
+                )
             )
-        )
+        elif self._legacy_evidence:
+            avg_coherence = 0.0
+            binding_quality = 0.0
+        else:
+            # No two bound inferences were comparable: nothing was measured
+            avg_coherence = None
+            binding_quality = None
 
         # Step 4: Measure uncertainty reduction
         if prior_uncertainty is None:
@@ -286,17 +315,21 @@ class BayesianBinding:
             binding_pairs=relevant_pairs,
             binding_quality=binding_quality,
             total_uncertainty_reduction=float(uncertainty_reduction),
-            coherence=float(avg_coherence),
+            coherence=None if avg_coherence is None else float(avg_coherence),
             dominant_content_type=dominant,
             unified_summary=unified,
         )
 
         self._percept_history.append(percept)
-        self._binding_quality_history.append(binding_quality)
+        if binding_quality is not None:
+            self._binding_quality_history.append(binding_quality)
 
+        quality_text = (
+            "insufficient_data" if binding_quality is None else f"{binding_quality:.3f}"
+        )
         logger.debug(
             f"Binding: {len(candidates)} candidates -> "
-            f"{len(bound)} bound, quality={binding_quality:.3f}, "
+            f"{len(bound)} bound, quality={quality_text}, "
             f"DeltaU={uncertainty_reduction:.3f}"
         )
 
@@ -381,6 +414,8 @@ class BayesianBinding:
         ]
         vectors = [v for v in vectors if v.size > 0]
         if not vectors:
+            if percept.binding_quality is None or percept.coherence is None:
+                return np.zeros(0)
             return np.array([percept.binding_quality, percept.coherence, 0.5])
         min_len = min(v.size for v in vectors)
         return np.mean([v[:min_len] for v in vectors], axis=0)
@@ -396,6 +431,11 @@ class BayesianBinding:
         with similar belief distributions share more information.
         Specifically, MI(A;B) ~ H(A) + H(B) - H(A,B), estimated
         from the belief vector correlation and entropies.
+
+        A pair whose vectors were not comparable (different lengths under
+        candidate_vectors) carries None in its BindingPair and enters the
+        matrix as 0.0, which the subset search reads as no evidence of
+        binding.
         """
         n = len(candidates)
         mi_matrix = np.zeros((n, n))
@@ -410,26 +450,32 @@ class BayesianBinding:
                 coherence = self._estimate_coherence(a, b)
                 combined_reduction = self._estimate_combined_reduction(a, b)
 
-                mi_matrix[i, j] = mi
-                mi_matrix[j, i] = mi
+                mi_matrix[i, j] = 0.0 if mi is None else mi
+                mi_matrix[j, i] = mi_matrix[i, j]
 
                 binding_pairs.append(
                     BindingPair(
                         inference_a=a.id,
                         inference_b=b.id,
-                        mutual_information=float(mi),
-                        coherence_score=float(coherence),
-                        combined_uncertainty_reduction=float(combined_reduction),
+                        mutual_information=opt_float(mi),
+                        coherence_score=opt_float(coherence),
+                        combined_uncertainty_reduction=opt_float(combined_reduction),
                     )
                 )
 
         return mi_matrix, binding_pairs
 
+    def _comparable(self, beliefs_a: Any, beliefs_b: Any) -> bool:
+        """Whether two belief vectors can be compared: vectors of one length
+        always, vectors of different lengths only under the legacy evidence
+        mode, which truncates them to their common prefix (v0.4.0)."""
+        return self._legacy_evidence or len(beliefs_a) == len(beliefs_b)
+
     def _estimate_mutual_information(
         self,
         beliefs_a: np.ndarray,
         beliefs_b: np.ndarray,
-    ) -> float:
+    ) -> Optional[float]:
         """
         Estimate mutual information between two belief distributions.
 
@@ -440,8 +486,14 @@ class BayesianBinding:
 
         MI ~ -0.5 * ln(1 - rho^2), where rho is the correlation.
         This is the exact MI for jointly Gaussian variables.
+
+        None when the two vectors have different lengths under
+        candidate_vectors: they describe different things, and a
+        correlation over their common prefix would measure nothing.
         """
-        # Normalize to same length
+        if not self._comparable(beliefs_a, beliefs_b):
+            return None
+        # The legacy evidence mode truncates to the common prefix
         min_len = min(len(beliefs_a), len(beliefs_b))
         a = beliefs_a[:min_len]
         b = beliefs_b[:min_len]
@@ -466,7 +518,7 @@ class BayesianBinding:
         self,
         inference_a: Inference,
         inference_b: Inference,
-    ) -> float:
+    ) -> Optional[float]:
         """
         Estimate how coherent two inferences are.
 
@@ -474,8 +526,12 @@ class BayesianBinding:
         1. Belief similarity (cosine similarity of belief vectors)
         2. Temporal proximity (closer in time = more coherent)
         3. Content type compatibility
+
+        None when the belief vectors are not comparable (see _comparable).
         """
-        # Belief similarity
+        if not self._comparable(inference_a.belief_vector, inference_b.belief_vector):
+            return None
+        # Belief similarity (the legacy evidence mode truncates to the prefix)
         min_len = min(len(inference_a.belief_vector), len(inference_b.belief_vector))
         a = inference_a.belief_vector[:min_len]
         b = inference_b.belief_vector[:min_len]
@@ -503,8 +559,11 @@ class BayesianBinding:
         self,
         inference_a: Inference,
         inference_b: Inference,
-    ) -> float:
-        """Estimate joint uncertainty reduction from binding two inferences."""
+    ) -> Optional[float]:
+        """Estimate joint uncertainty reduction from binding two inferences;
+        None when their belief vectors are not comparable."""
+        if not self._comparable(inference_a.belief_vector, inference_b.belief_vector):
+            return None
         # Joint uncertainty is less than sum of individual uncertainties
         # by an amount proportional to their mutual information
         individual_sum = inference_a.uncertainty + inference_b.uncertainty
@@ -513,6 +572,8 @@ class BayesianBinding:
         b = inference_b.belief_vector[:min_len]
 
         mi = self._estimate_mutual_information(a, b)
+        if mi is None:
+            return None
         # Reduction = MI contribution (more MI = more reduction)
         return float(min(individual_sum, mi * 0.5))
 
@@ -525,7 +586,9 @@ class BayesianBinding:
         Find the maximal coherent subset of candidates.
 
         Greedy algorithm: start with the highest-MI pair, then add
-        candidates that have high average MI with existing members.
+        candidates that have high average MI with existing members. A pair
+        that was not compared stands in the matrix as 0.0, no evidence of
+        binding, so its members are never added on its account.
         """
         n = len(candidates)
         if n <= 1:
@@ -580,15 +643,17 @@ class BayesianBinding:
     def _empty_percept(self) -> BoundPercept:
         """Return an empty percept when there are no candidates.
 
-        Nothing was bound, so the binding quality is None; the legacy
-        evidence mode keeps its 0.0.
+        Nothing was bound and there is no pair to measure, so the binding
+        quality and the coherence are None; the legacy evidence mode keeps
+        its constants 0.0 and 0.0.
         """
+        legacy = self._legacy_evidence
         return BoundPercept(
             bound_inferences=[],
             binding_pairs=[],
-            binding_quality=0.0 if self._legacy_evidence else None,
+            binding_quality=0.0 if legacy else None,
             total_uncertainty_reduction=0.0,
-            coherence=0.0,
+            coherence=0.0 if legacy else None,
             dominant_content_type="none",
             unified_summary="No conscious content",
         )
@@ -596,15 +661,18 @@ class BayesianBinding:
     def _single_percept(self, inference: Inference) -> BoundPercept:
         """Return a percept from a single inference.
 
-        One inference has nothing to bind with, so no binding quality was
-        measured; the legacy evidence mode keeps its constant 0.5.
+        One inference has nothing to bind with and no pair to be coherent
+        with, so neither the binding quality nor the coherence was measured
+        (None); the legacy evidence mode keeps its constants 0.5 and 1.0
+        (v0.4.0 called the single inference trivially coherent).
         """
+        legacy = self._legacy_evidence
         return BoundPercept(
             bound_inferences=[inference],
             binding_pairs=[],
-            binding_quality=0.5 if self._legacy_evidence else None,
+            binding_quality=0.5 if legacy else None,
             total_uncertainty_reduction=0.0,
-            coherence=1.0,  # Trivially coherent
+            coherence=1.0 if legacy else None,
             dominant_content_type=inference.content_type,
             unified_summary=inference.content_summary,
         )
@@ -653,10 +721,14 @@ class BayesianBinding:
             latest = self._percept_history[-1]
             quality = latest.binding_quality
             quality_text = "insufficient_data" if quality is None else f"{quality:.3f}"
+            coherence = latest.coherence
+            coherence_text = (
+                "insufficient_data" if coherence is None else f"{coherence:.3f}"
+            )
             lines.append(
                 f" Latest: {len(latest.bound_inferences)} bound, "
                 f"quality={quality_text}, "
-                f"coherence={latest.coherence:.3f}"
+                f"coherence={coherence_text}"
             )
 
         return "\n".join(lines)
@@ -750,16 +822,17 @@ def inference_from_dict(raw: Dict[str, Any]) -> Inference:
 
 
 def percept_to_dict(percept: BoundPercept) -> Dict[str, Any]:
-    """Plain-JSON form of a BoundPercept, inferences and pairs included."""
+    """Plain-JSON form of a BoundPercept, inferences and pairs included; an
+    unmeasured pair measure or coherence (None) is written as null."""
     return {
         "bound_inferences": [inference_to_dict(i) for i in percept.bound_inferences],
         "binding_pairs": [
             {
                 "inference_a": str(bp.inference_a),
                 "inference_b": str(bp.inference_b),
-                "mutual_information": float(bp.mutual_information),
-                "coherence_score": float(bp.coherence_score),
-                "combined_uncertainty_reduction": float(
+                "mutual_information": opt_float(bp.mutual_information),
+                "coherence_score": opt_float(bp.coherence_score),
+                "combined_uncertainty_reduction": opt_float(
                     bp.combined_uncertainty_reduction
                 ),
             }
@@ -767,7 +840,7 @@ def percept_to_dict(percept: BoundPercept) -> Dict[str, Any]:
         ],
         "binding_quality": opt_float(percept.binding_quality),
         "total_uncertainty_reduction": float(percept.total_uncertainty_reduction),
-        "coherence": float(percept.coherence),
+        "coherence": opt_float(percept.coherence),
         "dominant_content_type": str(percept.dominant_content_type),
         "unified_summary": str(percept.unified_summary),
         "timestamp": float(percept.timestamp),
@@ -777,15 +850,16 @@ def percept_to_dict(percept: BoundPercept) -> Dict[str, Any]:
 
 def percept_from_dict(raw: Dict[str, Any]) -> BoundPercept:
     """Rebuild a BoundPercept with typed inferences and binding pairs; an
-    unmeasured binding quality (None) restores as None."""
+    unmeasured binding quality, coherence or pair measure (None) restores
+    as None, and nothing is invented for a value that is missing."""
     pairs = [
         BindingPair(
             inference_a=str(bp.get("inference_a", "")),
             inference_b=str(bp.get("inference_b", "")),
-            mutual_information=_num(bp.get("mutual_information"), 0.0),
-            coherence_score=_num(bp.get("coherence_score"), 0.0),
-            combined_uncertainty_reduction=_num(
-                bp.get("combined_uncertainty_reduction"), 0.0
+            mutual_information=opt_float(bp.get("mutual_information")),
+            coherence_score=opt_float(bp.get("coherence_score")),
+            combined_uncertainty_reduction=opt_float(
+                bp.get("combined_uncertainty_reduction")
             ),
         )
         for bp in raw.get("binding_pairs", [])
@@ -801,7 +875,7 @@ def percept_from_dict(raw: Dict[str, Any]) -> BoundPercept:
         binding_pairs=pairs,
         binding_quality=opt_float(raw.get("binding_quality")),
         total_uncertainty_reduction=_num(raw.get("total_uncertainty_reduction"), 0.0),
-        coherence=_num(raw.get("coherence"), 0.0),
+        coherence=opt_float(raw.get("coherence")),
         dominant_content_type=str(raw.get("dominant_content_type", "none")),
         unified_summary=str(raw.get("unified_summary", "")),
         timestamp=_num(raw.get("timestamp"), time.time()),

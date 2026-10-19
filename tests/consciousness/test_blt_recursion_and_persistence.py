@@ -307,9 +307,49 @@ def test_multilevel_dispatch_with_ragged_beliefs_does_not_raise():
     assert set(percepts) == {"unimodal", "global"}
     assert percepts["unimodal"].binding_level == "unimodal"
     assert percepts["global"].binding_level == "global"
+    # The two unimodal vectors have different lengths, so they are not
+    # compared: their level has no measured quality and feeds nothing upward
+    assert percepts["unimodal"].binding_quality is None
+    assert not any(
+        inf.id == "bound_unimodal" for inf in percepts["global"].bound_inferences
+    )
+
+    # Unimodal vectors of one length bind, and their percept joins the
+    # global competition; a global vector of that length is compared with it
+    even = [
+        Inference(
+            id="u1",
+            content_summary="unimodal a",
+            content_type="perception",
+            source_module="test",
+            belief_vector=np.array([0.1, 0.5, 0.9]),
+            salience=0.7,
+            level="unimodal",
+        ),
+        Inference(
+            id="u2",
+            content_summary="unimodal b",
+            content_type="perception",
+            source_module="test",
+            belief_vector=np.array([0.12, 0.48, 0.91]),
+            salience=0.6,
+            level="unimodal",
+        ),
+        Inference(
+            id="g1",
+            content_summary="global a",
+            content_type="thought",
+            source_module="test",
+            belief_vector=np.array([0.2, 0.4, 0.8]),
+            salience=0.5,
+        ),
+    ]
+    percepts = BayesianBinding().bind_multilevel(even)
+    assert isinstance(percepts["unimodal"].binding_quality, float)
     assert any(
         inf.id == "bound_unimodal" for inf in percepts["global"].bound_inferences
     )
+    assert isinstance(percepts["global"].binding_quality, float)
 
 
 @pytest.mark.asyncio

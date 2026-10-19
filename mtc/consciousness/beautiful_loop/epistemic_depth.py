@@ -40,7 +40,16 @@ proxy for recursive self-reference, not an observation of it. The
     different modules compute from different evidence; it needs at least
     five meta predictions, three scored self-predictions and, when the
     caller reports it, an observed recursive update. It never reads the
-    self-model's ``model_confidence``.
+    self-model's ``model_confidence``. The default threshold 0.5 is a
+    documented design constant and a loose one: both quantities lie in
+    [0, 1], the self-calibration score starts at 0.5 and moves a fifth of
+    the way toward each scored batch, so at the first check that can run
+    (three entries in the self-prediction accuracy history, by which the
+    score has taken three steps from 0.5 and lies between 0.256 and 0.744)
+    the agreement band, the calibration plus or minus 0.5, covers at least
+    three quarters of [0, 1], and the verdict rests mostly on the history
+    minimums and the observed update. Tightening it changes the
+    field-evidencing count and the scores that count feeds.
   - "v04_confidence_match": the v0.4.0 rule, agreement between the
     self-model's ``model_confidence`` and the meta-state's
     ``model_confidence``. In the workspace the first is copied from the
@@ -303,8 +312,9 @@ class EpistemicDepthTracker:
             meta_state: The MetaState from active inference
             recursive_observed: Whether the caller has observed the system
                 updating its own beliefs (the loop passes whether its
-                hyper-model has predicted a precision update). None skips
-                the check, for standalone use. Read by the
+                hyper-model has compared a precision prediction with the
+                update that followed; a prediction alone does not count).
+                None skips the check, for standalone use. Read by the
                 independent_calibration test only.
 
         Returns:
@@ -473,7 +483,9 @@ class EpistemicDepthTracker:
         predictions, three scored self-predictions), the caller has
         observed a recursive update (unless it passed None), and the two
         agree within ``strange_loop_threshold``. The copied
-        ``model_confidence`` is never read.
+        ``model_confidence`` is never read. The threshold is loose (see the
+        module docstring): at the self-calibration start of 0.5 every
+        accuracy strictly inside (0, 1) agrees.
         """
         total = getattr(meta_state, "total_predictions", None)
         accuracy = getattr(meta_state, "prediction_accuracy", None)

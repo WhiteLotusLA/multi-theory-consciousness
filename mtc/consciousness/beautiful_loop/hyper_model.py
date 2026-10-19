@@ -202,6 +202,18 @@ class HyperModel:
             return None
         return float(self._recursive_confidence)
 
+    @property
+    def has_observed_update(self) -> bool:
+        """Whether the hyper-model has compared one of its precision
+        predictions with the update that followed.
+
+        A prediction alone (predict_precision_update) is not an observation:
+        the flag turns on in observe_meta_error, when the meta-error is
+        measured, and it is what makes recursive_confidence a measurement. A
+        restored record holds it only when it holds a meta-error.
+        """
+        return bool(self._meta_observed)
+
     def predict_precision_update(self, prediction_errors: List[Any]) -> np.ndarray:
         """
         Predict the precision update before it happens.

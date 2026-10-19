@@ -42,15 +42,23 @@ Behavior switches (constructor arguments, new behavior by default):
     bound, and fewer than two bound winners means the binding quality was
     not measured, None) or "v04_salience_posterior" (vectors built from
     salience and a shared posterior with random noise, v0.4.0, which bind at
-    about 1 for any input; the v04 loop formula requires this value)
+    about 1 for any input; the v04 loop formula requires this value). Two
+    vectors of different lengths, such as a three-entry content vector and
+    a longer embedding, are never compared with each other: their pair
+    carries no mutual information and a percept with no comparable pair
+    has no measured quality (the legacy value truncates to the common
+    prefix, as v0.4.0 did)
   - precision_floor_enabled: uniform high precision earns a 0.4 floor
   - require_recursive_confidence: field evidencing also needs the
     hyper-model's recursive confidence above 0.3
   - strange_loop_test: "independent_calibration" (agreement between the
     self-model's scored self-prediction accuracy and the inference ledger's
-    forecast accuracy, with an observed recursive update) or
+    forecast accuracy, with an observed recursive update: the hyper-model
+    has compared a precision prediction with the update that followed) or
     "v04_confidence_match" (the self-model's confidence against the
-    meta-state's, which the workspace copies from one to the other)
+    meta-state's, which the workspace copies from one to the other). The
+    agreement threshold of 0.5 on two quantities in [0, 1] is loose by
+    design; epistemic_depth states how loose
   - narrate_self_model: gates generate_consciousness_context()
 
 Wiring into the GWT cycle:
@@ -339,11 +347,13 @@ class BeautifulLoop:
             attention_schema_state=attention_schema_state,
         )
         # The strange-loop test is told whether this loop has observed one
-        # of its own belief updates (a precision prediction was made)
+        # of its own belief updates: the hyper-model has compared a precision
+        # prediction with the update that followed (a prediction that was
+        # made and not yet observed does not count)
         self_reference = self.epistemic_depth.track_self_reference(
             self_model=self_model,
             meta_state=meta_state,
-            recursive_observed=self.hyper_model._prediction_count > 0,
+            recursive_observed=self.hyper_model.has_observed_update,
         )
 
         # --- Step 4: Compute integrated loop quality ---
@@ -463,7 +473,10 @@ class BeautifulLoop:
         one-dimensional numeric sequence of three or more entries, else a
         numeric ``metadata["embedding"]`` of that shape. A winner with
         neither is not converted: no vector is fabricated for it, no random
-        number is drawn, and it takes no part in binding.
+        number is drawn, and it takes no part in binding. Vectors of
+        different lengths are never compared with one another (see
+        BayesianBinding), so a three-entry content vector and a longer
+        embedding bind only with vectors of their own length.
 
         Under ``v04_salience_posterior`` every winner gets the v0.4.0
         construction, unchanged: the active inference posterior scaled by
