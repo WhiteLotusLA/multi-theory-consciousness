@@ -134,27 +134,43 @@ def test_headline_numbers_equal_the_committed_fixtures(where, read):
     assert missing == [], f"{where} lacks {missing}"
 
 
-def test_migration_opening_announces_the_erratum_note_without_a_path():
-    """No erratum file exists in the tree, so the opening announces the note
-    and links nothing: the paragraph that announces it holds no link, no
-    slash and no file name."""
-    paragraphs = [
-        " ".join(p.split())
-        for p in _migration_opening().split("\n\n")
-        if "erratum" in p
-    ]
-    assert len(paragraphs) == 1, "the opening does not announce the erratum note once"
+def test_migration_opening_announces_the_paper_update_without_a_path():
+    """The paper draft was never submitted (no arXiv endorsement), so it gets
+    no erratum: the opening announces that the maintainer will update the
+    draft with a v0.5.0 results section, states that the draft reports twenty
+    indicators (the v0.1.1 count, so its numbers are not v0.4.0's) and links
+    nothing: the paragraph holds no link, no slash and no file name."""
+    joined = (" ".join(p.split()) for p in _migration_opening().split("\n\n"))
+    paragraphs = [p for p in joined if "paper draft" in p]
+    assert len(paragraphs) == 1, "the opening does not announce the paper update once"
     paragraph = paragraphs[0]
     assert re.search(
-        r"The maintainer will publish an erratum note for the paper's v0\.4\.0 "
-        r"numbers; until then",
+        r"The maintainer will update the paper draft, which reports twenty "
+        r"indicators \(the v0\.1\.1 count\) and has not been submitted, with a "
+        r"v0\.5\.0 results section; until then this record is the reference for "
+        r"the difference between v0\.4\.0 and v0\.5\.0\.",
         paragraph,
     ), paragraph
+    assert "erratum" not in paragraph and "v0.4.0 numbers" not in paragraph, paragraph
     assert "](" not in paragraph and "/" not in paragraph, paragraph
     file_name = re.search(
         r"[\w-]+\.(?:md|pdf|txt|tex|html?|rst|docx?)\b", paragraph, re.I
     )
     assert file_name is None, file_name.group(0)
+
+
+def test_version_history_states_the_paper_draft_was_not_submitted():
+    """The version history names the paper as a draft prepared for arXiv in
+    March 2026 and not submitted (no endorsement), referencing v0.1.1; it
+    never calls it a submission."""
+    text = (ROOT / "VERSION_HISTORY.md").read_text(encoding="utf-8")
+    assert (
+        "The MTC paper draft (prepared for arXiv in March 2026 and not submitted) "
+        "references **v0.1.1**." in text
+    ), "the version history does not state the paper draft's status"
+    assert (
+        "arXiv submission" not in text
+    ), "the version history calls the draft a submission"
 
 
 def test_first_run_full_mode_paragraph_equals_the_fixture():

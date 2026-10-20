@@ -14,8 +14,8 @@ This document tracks MTC releases and their relationship to publications.
 
 ## Reproducing Paper Results
 
-The MTC paper (arXiv submission, March 2026) references **v0.1.1**.
-To reproduce the paper's assessment results exactly:
+The MTC paper draft (prepared for arXiv in March 2026 and not submitted) references **v0.1.1**.
+To reproduce the draft's assessment results exactly:
 
     git checkout v0.1.1
     pip install -e ".[dev]"

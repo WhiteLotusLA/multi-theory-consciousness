@@ -11,9 +11,10 @@ The legacy column does not move: the preset reproduces every printed metric
 line of the v0.4.0 experiment run and every field of the legacy seeded
 assessment except three wall-clock readouts (see Reproducing v0.4.0). The
 v0.5.0 column measures the corrected system; the sections below name the
-switch behind every line that moved. The maintainer will publish an erratum
-note for the paper's v0.4.0 numbers; until then this record is the reference
-for the difference.
+switch behind every line that moved. The maintainer will update the paper
+draft, which reports twenty indicators (the v0.1.1 count) and has not been
+submitted, with a v0.5.0 results section; until then this record is the
+reference for the difference between v0.4.0 and v0.5.0.
 
 ## Why the numbers changed
 
