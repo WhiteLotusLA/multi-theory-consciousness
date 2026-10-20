@@ -94,6 +94,13 @@ audit.
   fails when the secret is missing, except on fork pull requests, which get no
   secrets and run the public checks with a warning.
 
+The released history carries six such hits that the v0.5.0 history rewrite
+left on purpose: a Greek Phi, an o with diaeresis, two arrows, a section sign
+and a bullet in comments and docstrings of five files, added on main before
+the port and removed on the branch, so a `--patch-from main` run over that
+history reports them by code point. They are typographic characters, not
+personal information, and the tree has carried none of them since the port.
+
 In `--patch-from` mode the path allowlist rules apply to each file; token and
 pattern hits count added lines within that file, and a hit in the decoded or
 folded view of a line counts added lines within that file and carries no
