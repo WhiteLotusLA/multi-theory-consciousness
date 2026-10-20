@@ -551,7 +551,11 @@ class VectorCoordinator:
         """Return ``(point_id, score, payload)`` best first, scores >= ``min_score``.
 
         ``top_k`` defaults to ``VECTOR_SEARCH_LIMIT`` read now; ``filters``
-        keeps payloads whose fields equal the given values.
+        keeps payloads whose fields equal the given values. ``min_score`` is
+        handed to Qdrant as its score threshold, and whether a score equal to
+        the floor is kept is the client's and the server's rule (qdrant-client
+        1.17 keeps it in local mode, 1.19 drops it); the in-memory store keeps
+        it. Callers that want every point pass a floor below the score range.
         """
         limit = top_k if top_k is not None else self._active().VECTOR_SEARCH_LIMIT
         if limit <= 0:

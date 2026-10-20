@@ -142,17 +142,20 @@ or model. See [TESTING.md](TESTING.md).
 
 ## Verification
 
-The fresh-machine verification of this release (a clean clone, a
-non-editable install, the commands of Path 1, `mtc serve` and `mtc chat` on a
-free port) is pending; this note will record the date, the Python version and
-the path it tested when its report is in. Until then: the `mtc` commands of
-Path 1 (`init --print-example-answers`, `init --from ... --yes --no-probe`,
-`doctor` with `--no-network`, `assess`) and the demo were run from a
-temporary project directory on the development machine with the mock
-provider, through the same entry point the console script calls
-(`python3 -m mtc.cli.main`), and each exited 0; the clone and the
-`pip install` were not run there; the commands of Paths 2 and 3 were
-reviewed, not run.
+The fresh-machine verification of this release ran on 2026-10-19 with
+Python 3.14.3 on macOS 27.0 (arm64): a clean clone of the release candidate,
+a non-editable `pip install` of the clone with the `all` extra into a fresh
+virtual environment, then from a project directory outside the clone, with the
+mock provider and every store disabled, the commands of Path 1 and their
+variants (`init --print-example-answers`, `init --from ... --yes --no-probe`,
+`doctor`, `doctor --fetch-models` into an empty model cache,
+`doctor --no-network`, `assess --quick`, the demo) and `mtc serve` with `mtc chat` and
+`mtc ctm status` on a free loopback port. Each exited 0, `doctor` printed the
+same lines with and without `--no-network`, the server stopped on SIGTERM
+within a second, the runtime privacy audit over its logs and results was
+clean, and every packaged resource resolved from the installed package. The
+commands of Paths 2 and 3 were reviewed, not run
+([SETUP_MACOS.md](SETUP_MACOS.md) says which steps).
 
 ## Next
 

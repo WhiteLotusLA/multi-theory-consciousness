@@ -12,24 +12,31 @@ in-memory install with the mock provider.
 
 ## What was tested
 
-Each step below carries one status: `tested` (run on a fresh machine by the
-release's verification), `reviewed-not-run` (written from official
-documentation and the code, not run on the development machine), or
-`pending` (the fresh-machine verification has not recorded it yet). A test
-(`tests/docs/test_setup_docs_honesty.py`) accepts only these three.
+Each step below carries one status: `tested` (run by the release's
+fresh-machine verification: a clean clone of the release candidate, installed
+non-editable into a fresh virtual environment, with an empty model cache),
+`reviewed-not-run` (written from official documentation and the code, not run
+on the development machine), or `pending` (the fresh-machine verification has
+not recorded it yet). A test (`tests/docs/test_setup_docs_honesty.py`)
+accepts only these three.
 
-The fresh-machine verification of this release is pending; the lines below
-are updated from its report when the phase closes.
+The fresh-machine verification of this release ran on 2026-10-19 on macOS 27.0
+(arm64) with Python 3.14.3 (the python.org build): a clean clone of the release
+candidate, `python3 -m venv`, a non-editable `pip install` of the clone with
+the `all` extra, `mtc init` from the example answers with the mock provider
+and every store disabled, and the API on a free loopback port. Every step
+marked `tested` exited 0 there, the server stopped on SIGTERM within a
+second, and the runtime privacy audit over its logs and results was clean.
 
 | Step | Status |
 |---|---|
-| Python virtual environment and `pip install` | pending |
-| `mtc init` from an answers file with the mock provider | pending |
-| `mtc doctor` | pending |
-| `mtc doctor --fetch-models` | pending |
-| the full pipeline demo | pending |
-| `mtc assess` (quick mode) | pending |
-| `mtc serve`, `mtc chat` and `mtc ctm status` | pending |
+| Python virtual environment and `pip install` | tested |
+| `mtc init` from an answers file with the mock provider | tested |
+| `mtc doctor` | tested |
+| `mtc doctor --fetch-models` | tested |
+| the full pipeline demo | tested |
+| `mtc assess` (quick mode) | tested |
+| `mtc serve`, `mtc chat` and `mtc ctm status` | tested |
 | Homebrew store installs and `brew services` | reviewed-not-run |
 | the Qdrant release binary | reviewed-not-run |
 | `scripts/db/init_postgres.sh` | reviewed-not-run |

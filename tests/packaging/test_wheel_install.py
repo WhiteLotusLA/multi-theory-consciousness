@@ -2,7 +2,9 @@
 environment and, from a project directory outside the repository, check the
 version, the packaged resources, the setup wizard, doctor and the full
 pipeline demo. No network: the build uses the installed setuptools and the
-venv sees the system site-packages for the dependencies.
+venv sees the system site-packages for the dependencies; when the suite itself
+runs inside a virtual environment, the nested venv also reads that
+environment's site-packages through a .pth written after the install.
 
 The sources are copied to a temporary directory first, so the build writes
 nothing into the repository. Every child process gets an explicit
@@ -11,6 +13,7 @@ port nobody listens on, offline model hubs and a temporary HOME."""
 
 import json
 import shutil
+import site
 import socket
 import subprocess
 import sys
@@ -128,6 +131,25 @@ def test_wheel_installs_and_runs_demo(tmp_path):
     assert installed.returncode == 0, (
         installed.stdout[-2000:] + installed.stderr[-2000:]
     )
+    if sys.prefix != sys.base_prefix:
+        # The suite itself runs inside a virtual environment, whose base
+        # interpreter owns no dependencies: let the nested venv see this
+        # environment's site-packages too, after its own, so numpy and the
+        # rest resolve while the wheel's mtc still wins. Written after the
+        # install, or pip would see this environment's mtc as already there.
+        purelib = _run(
+            [
+                str(python),
+                "-c",
+                "import sysconfig; print(sysconfig.get_paths()['purelib'])",
+            ],
+            cwd=tmp_path,
+            env=env,
+        )
+        assert purelib.returncode == 0, purelib.stderr[-2000:]
+        (Path(purelib.stdout.strip()) / "running_environment.pth").write_text(
+            "\n".join(site.getsitepackages()) + "\n", encoding="utf-8"
+        )
 
     project = tmp_path / "proj"
     project.mkdir()

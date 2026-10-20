@@ -19,6 +19,18 @@ later, never part of `all`, see [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSE
 `python3 scripts/license_audit.py --extras all` checks the licences of what
 is installed.
 
+Two platform notes from the v0.5.0 release's matrices (fresh virtual
+environments on macOS arm64, 2026-10-19). The `graphillion` wheel PyPhi pulls
+in for Python 3.12 is linked against Homebrew's gcc runtime and fails to load
+on a machine without it (`libstdc++.6.dylib` not found); rebuild it from
+source after installing the `iit` extra, which was measured with
+graphillion 2.1:
+`pip install --no-binary graphillion --force-reinstall --no-deps graphillion`.
+The `research` extra's pymc on Python 3.11 resolves a pytensor whose C
+backend does not compile on the newest Xcode (`ld: library 'd64' not found`);
+`PYTENSOR_FLAGS=cxx=` runs its slower Python backend, and Python 3.12 or
+later resolves a pytensor that compiles.
+
 ## Hooks and a first test run
 
 ```bash

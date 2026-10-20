@@ -160,10 +160,14 @@ async def test_search_applies_emotional_filter(system):
     await system.store_memory("alpha memory", {"joy": 0.9})
     await system.store_memory("alpha again", {"fear": 0.9})
     await system.store_memory("beta memory", {"joy": 0.9})
-    everything = await system.search_memories("alpha query", top_k=5, min_score=0.0)
+    # Every floor here (-1.0) sits below every score in this test: "beta memory"
+    # scores exactly 0.0 against the query, and a floor of exactly 0.0 keeps it
+    # in the in-memory store but not in Qdrant local mode from client 1.19 (see
+    # search_similar).
+    everything = await system.search_memories("alpha query", top_k=5, min_score=-1.0)
     assert len(everything) == 3
     joyful = await system.search_memories(
-        "alpha query", top_k=5, emotional_filter="joy", min_score=0.0
+        "alpha query", top_k=5, emotional_filter="joy", min_score=-1.0
     )
     assert [hit[2]["text"] for hit in joyful] == ["alpha memory", "beta memory"]
     assert all(hit[2]["emotional_state"]["joy"] >= 0.5 for hit in joyful)
@@ -171,17 +175,30 @@ async def test_search_applies_emotional_filter(system):
         "alpha query",
         top_k=5,
         emotional_filter="joy",
-        min_score=0.0,
+        min_score=-1.0,
         emotion_threshold=0.95,
     )
     assert strict == []
     fearful = await system.search_memories(
-        "alpha query", top_k=1, emotional_filter="fear", min_score=0.0
+        "alpha query", top_k=1, emotional_filter="fear", min_score=-1.0
     )
     assert [hit[2]["text"] for hit in fearful] == ["alpha again"]
-    capped = await system.search_memories("alpha query", top_k=1, min_score=0.0)
+    capped = await system.search_memories("alpha query", top_k=1, min_score=-1.0)
     assert len(capped) == 1
-    assert await system.search_memories("alpha query", top_k=0, min_score=0.0) == []
+    assert await system.search_memories("alpha query", top_k=0, min_score=-1.0) == []
+
+
+@pytest.mark.asyncio
+async def test_in_memory_store_keeps_a_score_equal_to_the_floor(manager):
+    """The in-memory store includes a hit scoring exactly the floor; the
+    coordinator's docstring says Qdrant's rule at the floor is the client's."""
+    embedder = LookupEmbedder()
+    system = IntegratedMemorySystem(InMemoryVectorStore(embedder=embedder), manager)
+    await system.store_memory("alpha memory", {"joy": 0.9})
+    await system.store_memory("beta memory", {"joy": 0.9})
+    hits = await system.search_memories("alpha query", top_k=5, min_score=0.0)
+    assert [hit[2]["text"] for hit in hits] == ["alpha memory", "beta memory"]
+    assert hits[-1][1] == pytest.approx(0.0)
 
 
 @pytest.mark.asyncio

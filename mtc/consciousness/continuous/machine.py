@@ -262,8 +262,6 @@ class ContinuousThoughtMachine:
 
         self._process = process
         self._process_checked = process is not None
-        if process is None:
-            self._acquire_process()  # primes the reading at construction
         self._resource_factor = 1.0
         self._resource_status: Dict[str, Any] = {
             "available": None,
@@ -272,6 +270,10 @@ class ContinuousThoughtMachine:
             "checks": 0,
             "breaches": 0,
         }
+        if process is None:
+            # Primes the reading at construction; without psutil it records
+            # the absence in the status above instead of raising.
+            self._acquire_process()
 
         self._thought_times: List[datetime] = []
         self._stream_id = uuid.uuid4().hex

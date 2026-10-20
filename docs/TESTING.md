@@ -18,6 +18,13 @@ PYPHI_WELCOME_OFF=yes timeout 1500 python3 -m pytest tests -q -p no:cacheprovide
 installed. `pyproject.toml` also sets a per-test timeout (pytest-timeout,
 900 seconds) and `--strict-markers`, so a misspelled marker is an error.
 
+The suite was run for v0.5.0 on Python 3.11, 3.12, 3.13 and 3.14 in fresh
+virtual environments with every extra installed (2026-10-19; the `iit` extra
+from 3.12, where PyPhi installs, so the exact-Phi paths were not exercised on
+3.11); the two platform notes in [DEVELOPER_BRINGUP.md](DEVELOPER_BRINGUP.md),
+a graphillion wheel on 3.12 and pytensor's C backend on 3.11, come from that
+run.
+
 The Makefile has two shortcuts:
 
 ```bash
@@ -110,6 +117,11 @@ the pure comparators of `tests/baseline_compare.py`:
   and then how the running environment differs from the one recorded in
   `tests/fixtures/baseline_v050_env.txt`, so an environment change is told
   apart from a code change.
+
+The v0.5.0 release's matrices reproduced these fixtures on Python 3.12, 3.13
+and 3.14 in fresh virtual environments whose numpy, scipy, torch, snntorch,
+reservoirpy, pymdp and pydantic were all newer than the recorded versions, so
+the record describes where the numbers were made; it is not a pin.
 
 The tests:
 

@@ -285,6 +285,128 @@ SENTENCES = (
         ),
     ),
     (
+        "L33",
+        11,
+        (
+            "carries a wall-clock recency term (0.2 minus 0.01 per second of the "
+            "state's age, floored at zero)",
+            "constant to within 1e-5",
+        ),
+    ),
+    (
+        "L34",
+        11,
+        (
+            "adds 0.15 times the self-model's confidence",
+            "stays at its declared prior of 0.5 until a higher-order thought has "
+            "been buffered",
+        ),
+    ),
+    (
+        "L35",
+        12,
+        (
+            "The privacy audit's assembled-literal pass evaluates only the literal "
+            "forms it lists",
+            "HTML character reference in a markdown or HTML file is not seen",
+        ),
+    ),
+    (
+        "L36",
+        12,
+        (
+            "In the trust compass's deep mode the brain reads the whole message",
+            "only the keyword path leaves already scored phrases out",
+        ),
+    ),
+    (
+        "L37",
+        12,
+        (
+            "there is no cooldown, so a hostile untrusted speaker produces one "
+            "alert per message",
+        ),
+    ),
+    (
+        "L38",
+        12,
+        (
+            "The resume audit row names the escalation role",
+            "not the trusted speaker who presented the request",
+        ),
+    ),
+    (
+        "L39",
+        12,
+        (
+            "still contacts the model hub at its first load unless "
+            "`HF_HUB_OFFLINE=1` is set",
+            "the demo injects the hash embedder and loads none",
+        ),
+    ),
+    (
+        "L40",
+        13,
+        (
+            "A claimed name written with combining accents (the decomposed form) "
+            "loses them in the reduction",
+        ),
+    ),
+    (
+        "L41",
+        13,
+        (
+            "the reply is returned only after the turn's post-turn work has "
+            "finished",
+            "no heartbeat is sent meanwhile",
+        ),
+    ),
+    (
+        "L42",
+        13,
+        (
+            "A degraded brain is re-checked only when a call arrives",
+            "`/health` keeps reading degraded until the next turn or background "
+            "brain call",
+        ),
+    ),
+    (
+        "L43",
+        13,
+        (
+            "A turn the safety gate refuses still records a wellbeing contact and "
+            "the privacy layer's data-read event",
+            "refers to the conversation rows and the memory stores",
+        ),
+    ),
+    (
+        "L44",
+        14,
+        (
+            "is reported raw and is never noise-normalised unless the caller "
+            "supplies baselines made by the same producer",
+        ),
+    ),
+    (
+        "L45",
+        14,
+        (
+            "`has_meta_prediction_depth` (`has_strange_loop` under the v04 "
+            "formulas, where it reads a key no producer reports) reports that "
+            "the epistemic depth reached 2",
+            "not the depth tracker's strange-loop verdict",
+        ),
+    ),
+    (
+        "L46",
+        14,
+        (
+            "In the legacy 14-indicator panel the text metrics read missing text "
+            "as 0.0",
+            "the array metrics are None without their substrates",
+        ),
+    ),
+    (
         "L30",
         14,
         (

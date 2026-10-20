@@ -219,7 +219,11 @@ class TestBayesianEngine:
             "indicator nodes carry no support or demandingness labels, so the "
             "posterior equals the prior mean for any evidence (the DCM "
             "benchmark limitation in docs/HONEST_LIMITATIONS.md). The strict "
-            "mark turns red the day the engine responds to the evidence."
+            "mark turns red the day the engine responds to the evidence; the "
+            "comparison carries a 1e-6 guard because the constant term changes "
+            "only the rounding of the summed log density (a residue of 1e-14 at "
+            "this seed and under 5e-12 across seeds, whose sign depends on the "
+            "pymc version)."
         ),
     )
     def test_high_evidence_increases_posterior(self):
@@ -248,7 +252,7 @@ class TestBayesianEngine:
         high_mean, _ = engine.run_stance(stance, {"Ind1": 1.0})
         # No evidence
         low_mean, _ = engine.run_stance(stance, {"Ind1": 0.0})
-        assert high_mean > low_mean
+        assert high_mean - low_mean > 1e-6
 
     def test_run_all_stances(self):
         from mtc.assessment.dcm_benchmark import (
