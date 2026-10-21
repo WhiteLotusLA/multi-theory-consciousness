@@ -36,7 +36,7 @@ make test-fast   # -m "not slow and not db and not live"
 
 | Marker | Meaning | Default |
 |---|---|---|
-| `slow` | wall-clock heavy or subprocess tests: the example runs, the wheel build, the baseline runners | runs unless deselected |
+| `slow` | wall-clock heavy or subprocess tests: the example runs, the wheel build, the baseline runners, and every bound on a wall-clock reading (a measurement of the machine; `tests/test_wall_clock_bounds.py` scans for them) | runs unless deselected |
 | `db` | needs a real store; uses the throwaway fixtures | skipped at collection without `MTC_TEST_STORES=1` |
 | `live` | talks to a running stack | never run by default |
 | `gpu` | needs MPS or CUDA | runs unless deselected; deselect on a machine whose accelerator is shared |
@@ -248,8 +248,9 @@ marked `slow` and bound every wait.
    true) proves nothing, and the gates sweep for them.
 3. Use synthetic data and fixed instants; no network, store or accelerator
    unless the test is marked for it.
-4. Mark it `slow` when it starts a subprocess or takes wall time, `db` when it
-   needs a real store (and use the throwaway fixtures), `gpu` when it needs an
-   accelerator.
+4. Mark it `slow` when it starts a subprocess, takes wall time or bounds a
+   wall-clock reading (the per-push CI runs on shared runners and never fails
+   on speed), `db` when it needs a real store (and use the throwaway
+   fixtures), `gpu` when it needs an accelerator.
 5. Never weaken, skip or delete an existing test to make a change pass, and
    never widen a tolerance; a `pytest.skip` always states its reason.

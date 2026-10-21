@@ -5,6 +5,17 @@ All notable changes to the Multi-Theory Consciousness Framework will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+The first CI run on the pushed v0.5.0 main (2026-10-20) failed four ways that no local gate had reached: the install smoke's own invocation of the demo, the runtime audit over the demo's state, two pins on exact floats under another platform's rounding, and a wall-clock bound on a shared runner.
+
+### Fixed
+
+- `examples/full_pipeline_demo.py` and `examples/continuous_thought.py` take a relative `--state-dir` from the current directory: the runtime joins a relative settings path onto `PROJECT_ROOT` (the repository), so the CI install smoke's invocation (`--state-dir runtime/demo` from a fresh project directory) wrote the state, logs and data into the checkout, read no speaker table, audited no log file and exited 1; each entry point now resolves the path before anything reads it, with a test per example that runs from another directory
+- The runtime privacy audit no longer reports two adjacent floats in the typed persistence files under a `state` directory (`*_scalars.json`, `*_histories.json`) as a coordinate pair: two allowlist rules, one kind, those files only; the install smoke's audit step reported eight such pairs from the demo's state
+- Two pins compare floats within the fixture comparator's tolerance (`tests/baseline_compare.py`, 1e-9) instead of exactly: on the host's Linux x64 runners the stub noise baselines (irreducibility on Python 3.11 and 3.13; integrated_information and prediction_error_minimization on 3.12) and the v0.4.0 fixture's integrated_information (3.11 and 3.13) differed from the macOS arm64 values in their last two digits
+- Every bound on a wall-clock reading is marked `slow` (the active inference and workspace competition timing tests also `benchmark`), so the per-push CI on shared runners never fails on speed: the active inference bound read 92 and 79 seconds against 60 on two of the three matrices; `tests/test_wall_clock_bounds.py` scans the suite for such bounds
+
 ## [0.5.0] - 2026-10-18
 
 Scores from the v0.5.0 defaults are not comparable with v0.4.0; `experiments/presets/legacy_v04.toml` reproduces v0.4.0, and `docs/MIGRATION_FROM_V04.md` records every switch and the measured differences. The v0.4.0 numbers under the preset are unchanged: the experiment runner prints an overall of 0.031247 with 2 passing, and the seeded assessment reads 0.333844 with 13 of 30 passing.

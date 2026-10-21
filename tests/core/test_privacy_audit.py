@@ -17,6 +17,7 @@ from mtc.devtools.privacy_audit import (
 # Synthetic tokens: no real name appears in this file, whole or in pieces.
 PLANTED = "Plantedname"
 PET = "Plantedpet"
+ALLOWLIST = Path(__file__).resolve().parents[2] / "config" / "privacy" / "allowlist.txt"
 EM_DASH = "\u2014"
 EN_DASH = "\u2013"
 
@@ -334,6 +335,39 @@ def test_runtime_mode_reports_dir_relative_paths(tmp_path):
     assert run_runtime_audit([logs], [PLANTED], [covering]) == []
     elsewhere = AllowRule("results/**", "token", PLANTED)
     assert len(run_runtime_audit([logs], [PLANTED], [elsewhere])) == 1
+
+
+def test_runtime_mode_allows_adjacent_floats_in_typed_persistence(tmp_path):
+    """Typed persistence under STATE_DIR holds the modules' numeric scalars
+    and histories as compact JSON, where two adjacent floats are values and
+    not a coordinate pair: the tracked allowlist covers that one kind in
+    those files and nothing else. (The CI install smoke audits the demo's
+    runtime directory; its first run on the pushed v0.5.0 main reported eight
+    such pairs.)"""
+    rules = load_allowlist(ALLOWLIST)
+    runtime = tmp_path / "runtime"
+    # The one planted pair (allowlisted for this file, as the self-test's
+    # other samples are) stands in a histories file and a scalars file.
+    pair = "-0.014460000000000011,-0.035380000000000036"
+    write(runtime, "demo/state/gwt_histories.json", f'{{"values":[{pair},0.5]}}\n')
+    write(runtime, "demo/state/orchestrator_scalars.json", f'{{"pair":[{pair}]}}\n')
+    assert run_runtime_audit([runtime], [PLANTED], rules) == []
+    # The allowance is one kind in those files: a name there still counts ...
+    write(
+        runtime, "demo/state/gwt_histories.json", f'{{"by":"{PLANTED}","v":[{pair}]}}\n'
+    )
+    hits = run_runtime_audit([runtime], [PLANTED], rules)
+    assert [(h.path, h.kind) for h in hits] == [
+        ("runtime/demo/state/gwt_histories.json", "token")
+    ]
+    # ... and the same pair in a log or a result is still a coordinate hit.
+    write(runtime, "demo/logs/mtc.log", f"INFO at {pair}\n")
+    write(runtime, "demo/results/report.json", f'{{"where":[{pair}]}}\n')
+    hits = run_runtime_audit([runtime], [], rules)
+    assert sorted((h.path, h.kind) for h in hits) == [
+        ("runtime/demo/logs/mtc.log", "coords"),
+        ("runtime/demo/results/report.json", "coords"),
+    ]
 
 
 def test_runtime_mode_counts_what_it_skips(tmp_path, capsys):

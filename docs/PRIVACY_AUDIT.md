@@ -136,7 +136,12 @@ up a fresh project with `mtc init` from the example answers, runs the
 examples (the demo and the continuous-thought example write their state under
 `runtime/`) and an assessment into `results/`, then runs the runtime mode over
 `runtime` and `results`, so a run that writes a name, a secret-shaped string
-or a dash into its own state or results fails CI.
+or a dash into its own state or results fails CI. The tracked allowlist
+carries one allowance for that audit: in the typed persistence files under a
+`state` directory (`*_scalars.json` and `*_histories.json`, compact JSON of
+the modules' numbers) two adjacent floats are values and not a coordinate
+pair, so the `coords` kind is allowed there and nowhere else, and every other
+kind still applies to those files.
 
 ## The wizard's outputs are gitignored
 

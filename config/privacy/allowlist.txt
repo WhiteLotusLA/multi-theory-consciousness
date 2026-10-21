@@ -22,6 +22,7 @@ tests/core/test_privacy_audit.py token ^/Users/$
 tests/core/test_privacy_audit.py email ^someone@example\.com$
 tests/core/test_privacy_audit.py phone ^555-123-4567$
 tests/core/test_privacy_audit.py coords ^34\.0937, -118\.3295$
+tests/core/test_privacy_audit.py coords ^-0\.014460000000000011,-0\.035380000000000036$
 tests/core/test_privacy_audit.py homepath ^/Users/somebody$
 tests/core/test_privacy_audit.py ipv4 ^10\.0\.0\.12$
 tests/core/test_privacy_audit.py secret ^sk-abcdefghijklmnopqrstuvwxyz0123$
@@ -40,3 +41,9 @@ paper/mtc-arxiv-submission.tar.gz!references.bib dash ^.$
 paper/mtc-arxiv-submission.tar.gz!figures/fig1_architecture.tex dash ^.$
 paper/mtc-arxiv-submission.tar.gz!figures/fig2_cycle_dataflow.tex dash ^.$
 paper/mtc-arxiv-submission.tar.gz!figures/fig3_cross_theory.tex dash ^.$
+# typed persistence under STATE_DIR: the modules' numeric scalars and
+# histories as compact JSON, where two adjacent floats are values and not a
+# coordinate pair (the runtime audit of the CI install smoke); every other
+# kind still applies to these files
+*/state/*_scalars.json coords ^-?\d{1,3}\.\d{3,},-?\d{1,3}\.\d{3,}$
+*/state/*_histories.json coords ^-?\d{1,3}\.\d{3,},-?\d{1,3}\.\d{3,}$

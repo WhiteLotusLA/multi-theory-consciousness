@@ -12,9 +12,14 @@ from mtc.assessment.assessment import (
     MEASURED,
     ConsciousnessAssessment,
 )
+from tests.baseline_compare import close_enough
 
 # The v0.4.0 numbers of the fixture below, captured from the committed
-# v0.4.0 assessment (scores, confidences, passes).
+# v0.4.0 assessment (scores, confidences, passes), compared within the
+# fixture comparator's tolerance: the host's Linux x64 runners read
+# integrated_information as 0.4101643817469391 against the
+# 0.41016438174693864 captured on macOS arm64 (the first CI run on the
+# pushed v0.5.0 main).
 V04_FIXTURE_EXPECTED = {
     "global_broadcast": (0.55, 0.4, True),
     "ignition_dynamics": (0.5, 0.7, True),
@@ -552,12 +557,12 @@ async def test_v04_constants_policy_reproduces_old_values():
     report = await assessment.run_full_assessment(**fixture_modules(), normalize=False)
     for name, (score, confidence, passes) in V04_FIXTURE_EXPECTED.items():
         result = report.indicator_results[name]
-        assert result.score == score, name
-        assert result.confidence == confidence, name
+        assert close_enough(result.score, score), (name, result.score, score)
+        assert close_enough(result.confidence, confidence), (name, result.confidence)
         assert result.passes_threshold is passes, name
-    assert report.overall_score == V04_FIXTURE_OVERALL
+    assert close_enough(report.overall_score, V04_FIXTURE_OVERALL), report.overall_score
     assert report.passing_count == V04_FIXTURE_PASSING
-    assert report.confidence == V04_FIXTURE_CONFIDENCE
+    assert close_enough(report.confidence, V04_FIXTURE_CONFIDENCE), report.confidence
 
 
 class _AlternatingRPT:

@@ -797,6 +797,10 @@ class TestEdgeCases:
 class TestPerformance:
     """Test performance characteristics."""
 
+    # A bound on a wall-clock reading measures the machine, so it runs in the
+    # slow set and not on the per-push CI (tests/test_wall_clock_bounds.py).
+    @pytest.mark.benchmark
+    @pytest.mark.slow
     @pytest.mark.asyncio
     async def test_inference_time(self, active_inference_module):
         """Test inference completes in reasonable time."""

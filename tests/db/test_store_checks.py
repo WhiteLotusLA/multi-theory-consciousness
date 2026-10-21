@@ -783,6 +783,9 @@ def test_missing_client_names_the_extra(tmp_path, monkeypatch, module, hidden, e
     assert result.data["missing_extra"] == extra
 
 
+# A bound on a wall-clock reading measures the machine, so it runs in the
+# slow set and not on the per-push CI (tests/test_wall_clock_bounds.py).
+@pytest.mark.slow
 def test_probe_times_out_quickly(tmp_path, monkeypatch):
     settings = make_settings(tmp_path)
     monkeypatch.setattr(

@@ -236,6 +236,21 @@ def _path(parts: Tuple[str, ...]) -> str:
     return text
 
 
+def close_enough(want: Any, got: Any) -> bool:
+    """``want == got``, except that two numbers are equal within
+    ``FLOAT_TOLERANCE``: for a pin on a computed value that another platform's
+    rounding may move by a few ULPs (a bool is never a number here)."""
+    numbers = (int, float)
+    if (
+        isinstance(want, numbers)
+        and isinstance(got, numbers)
+        and not isinstance(want, bool)
+        and not isinstance(got, bool)
+    ):
+        return abs(want - got) <= FLOAT_TOLERANCE
+    return want == got
+
+
 def _same_scalar(want: Any, got: Any) -> bool:
     if isinstance(want, bool) or isinstance(got, bool):
         return isinstance(want, bool) and isinstance(got, bool) and want == got

@@ -5,9 +5,15 @@ added, removed or reordered call to ``get_statistics``,
 ``get_loop_statistics``, ``get_oscillatory_binding_stats`` or ``get_latest``
 inside any indicator body moves most of the 30 baselines, the legacy ones
 included. The values below were captured from the tree with the seeds set as
-in ``_baselines`` and are compared exactly. Mutation check recorded when the
-pin was written: one extra ``rpt.get_statistics()`` call in one v05 indicator
-body changed 28 of the 30 v05 baselines.
+in ``_baselines`` and are compared within the fixture comparator's tolerance
+(``FLOAT_TOLERANCE`` in ``tests/baseline_compare.py``, 1e-9), which another
+platform's rounding never reaches (the host's Linux x64 runners moved
+irreducibility on Python 3.11 and 3.13, and integrated_information and
+prediction_error_minimization on 3.12, in their last two digits) and one
+extra random draw always exceeds.
+Mutation check recorded when the pin was written: one extra
+``rpt.get_statistics()`` call in one v05 indicator body changed 28 of the 30
+v05 baselines.
 """
 
 import asyncio
@@ -16,6 +22,7 @@ import random
 import numpy as np
 
 from mtc.assessment.assessment import ConsciousnessAssessment
+from tests.baseline_compare import close_enough
 
 V04_BASELINES = {
     "affect_coherence": 0.10728469315063642,
@@ -94,11 +101,15 @@ def _baselines(formulas, policy):
 
 
 def _differences(expected, actual):
+    """The names present on one side only or whose values differ beyond the
+    fixture comparator's tolerance."""
     names = sorted(set(expected) | set(actual))
     return {
         name: (expected.get(name), actual.get(name))
         for name in names
-        if expected.get(name) != actual.get(name)
+        if name not in expected
+        or name not in actual
+        or not close_enough(expected[name], actual[name])
     }
 
 
@@ -107,3 +118,18 @@ def test_stub_noise_baselines_are_unchanged():
     assert _differences(V04_BASELINES, legacy) == {}
     current = _baselines("v05", "insufficient_data")
     assert _differences(V05_BASELINES, current) == {}
+
+
+def test_differences_ignore_platform_rounding():
+    """A value that differs by a few ULPs is the same baseline: the host's
+    Linux x64 runners read irreducibility as 0.7891272260041106 against the
+    0.7891272260041104 captured on macOS arm64 (the first CI run on the
+    pushed v0.5.0 main), and the fixture comparator's tolerance covers that,
+    while an extra random draw moves a baseline by far more."""
+    captured = {"irreducibility": 0.7891272260041104}
+    assert _differences(captured, {"irreducibility": 0.7891272260041106}) == {}
+
+
+def test_differences_report_a_moved_value_and_a_missing_name():
+    moved = _differences({"a": 0.1, "b": 0.2}, {"a": 0.1 + 1e-6})
+    assert moved == {"a": (0.1, 0.1 + 1e-6), "b": (0.2, None)}

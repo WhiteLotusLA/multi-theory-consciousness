@@ -1129,6 +1129,10 @@ class TestGWTIntegration:
 class TestGWTPerformance:
     """Performance tests for the workspace."""
 
+    # A bound on a wall-clock reading measures the machine, so it runs in the
+    # slow set and not on the per-push CI (tests/test_wall_clock_bounds.py).
+    @pytest.mark.benchmark
+    @pytest.mark.slow
     @pytest.mark.asyncio
     async def test_competition_performance(self, bottleneck):
         """Verify competition completes within acceptable time."""

@@ -25,7 +25,8 @@ file, line and kind under ``log_audit.unexplained_hits`` (nothing is filtered
 out of the log) and makes ``ok`` false.
 
 Nothing is written into the repository: every directory sits under
-``--state-dir`` (a temporary directory by default). Needs the ``fep`` extra
+``--state-dir`` (a temporary directory by default; a relative path counts from
+the current directory, not from the repository). Needs the ``fep`` extra
 (pymdp), because the workspace builds the active inference module; without it
 the demo prints one line that names the extra and exits 2. The texts here come from the
 shipped neutral seed packs and the mock provider.
@@ -437,8 +438,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     try:
         if args.state_dir is not None:
-            args.state_dir.mkdir(parents=True, exist_ok=True)
-            summary = asyncio.run(run_demo(args.state_dir, args.ticks))
+            # Absolute before anything reads it: the runtime joins a relative
+            # settings path onto PROJECT_ROOT (the repository), while the
+            # speaker table and the log audit take the path as given.
+            state_dir = args.state_dir.resolve()
+            state_dir.mkdir(parents=True, exist_ok=True)
+            summary = asyncio.run(run_demo(state_dir, args.ticks))
         else:
             with tempfile.TemporaryDirectory(prefix="mtc_pipeline_demo_") as tmp:
                 summary = asyncio.run(run_demo(Path(tmp), args.ticks))

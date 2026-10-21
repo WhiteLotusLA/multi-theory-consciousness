@@ -7,6 +7,7 @@ pass shows it needs no network, no store and no model server.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -92,3 +93,54 @@ def test_example_runs_offline_and_reports_a_summary(tmp_path):
     # the provider state went to the temporary state directory
     assert (state / "data" / "provider_state.json").is_file()
     assert not (tmp_path / "data").exists()
+
+
+@pytest.mark.slow
+def test_example_honours_a_relative_state_dir(tmp_path):
+    """Run from another directory with a relative ``--state-dir`` (the CI
+    install smoke's invocation), the provider state sits under that directory
+    and nothing under the repository."""
+    stray = ROOT / "relative_state_dir"
+    assert not stray.exists(), "a leftover relative_state_dir sits in the repository"
+    runner = tmp_path / "runner.py"
+    runner.write_text(RUNNER, encoding="utf-8")
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("MTC_")
+    }
+    env.update(
+        {
+            "PYTHONPATH": str(ROOT),
+            "PYPHI_WELCOME_OFF": "yes",
+            "MTC_DEVICE": "cpu",
+        }
+    )
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(runner),
+                str(EXAMPLE),
+                "--ticks",
+                "6",
+                "--state-dir",
+                "relative_state_dir/ctm",
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        landed_in_repository = stray.exists()
+    finally:
+        shutil.rmtree(stray, ignore_errors=True)
+    assert not landed_in_repository, "the example wrote under the repository"
+    assert completed.returncode == 0, completed.stderr[-2000:]
+    lines = completed.stdout.splitlines()
+    summary_lines = [line for line in lines if line.startswith("CTM_SUMMARY ")]
+    assert len(summary_lines) == 1
+    summary = json.loads(summary_lines[0][len("CTM_SUMMARY ") :])
+    assert summary["ok"] is True
+    state = tmp_path / "relative_state_dir" / "ctm"
+    assert (state / "data" / "provider_state.json").is_file()
+    assert "NETWORK_ATTEMPTS 0" in lines

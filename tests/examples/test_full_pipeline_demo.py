@@ -155,6 +155,62 @@ def test_demo_runs_offline_and_meets_exit_criterion(tmp_path):
     assert hits == [], [f"{Path(hit.path).name}:{hit.line}:{hit.kind}" for hit in hits]
 
 
+@pytest.mark.slow
+def test_demo_honours_a_relative_state_dir(tmp_path):
+    """Run from another directory with a relative ``--state-dir`` (the CI
+    install smoke's invocation), every file sits under that directory and
+    nothing under the repository, and the run meets its exit criterion: the
+    speaker table the demo writes is the one the runtime reads, and the log
+    audit finds the log the runtime wrote."""
+    stray = ROOT / "relative_state_dir"
+    assert not stray.exists(), "a leftover relative_state_dir sits in the repository"
+    runner = tmp_path / "runner.py"
+    runner.write_text(RUNNER, encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("MTC_")}
+    env.update(
+        {
+            "PYTHONPATH": str(ROOT),
+            "PYPHI_WELCOME_OFF": "yes",
+            "MTC_DEVICE": "cpu",
+            "MTC_LLM_PROVIDER": "mock",
+            "MTC_API_PORT": str(_unused_port()),
+        }
+    )
+    env.update({key: "false" for key in STORE_KEYS})
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(runner),
+                str(EXAMPLE),
+                "--state-dir",
+                "relative_state_dir/demo",
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        landed_in_repository = stray.exists()
+    finally:
+        shutil.rmtree(stray, ignore_errors=True)
+    assert not landed_in_repository, "the demo wrote under the repository"
+    assert completed.returncode == 0, completed.stderr[-3000:]
+    lines = completed.stdout.splitlines()
+    summaries = [line for line in lines if line.startswith("DEMO_SUMMARY ")]
+    assert len(summaries) == 1, completed.stdout[-2000:]
+    summary = json.loads(summaries[0][len("DEMO_SUMMARY ") :])
+    assert summary["ok"] is True
+    assert summary["trust"]["authenticated_trusted"] is True
+    assert summary["log_audit"]["files"] >= 1
+    state = tmp_path / "relative_state_dir" / "demo"
+    assert (state / "speakers.yaml").is_file()
+    assert (state / "state" / "manifest.json").is_file()
+    assert any(p.is_file() for p in (state / "logs").rglob("*"))
+    assert "NETWORK_ATTEMPTS 0" in lines
+
+
 def test_audit_helper_detects_a_planted_hit(tmp_path):
     # The planted token is read from the public denylist at run time, so this
     # file spells no denied word and no pattern of its own.

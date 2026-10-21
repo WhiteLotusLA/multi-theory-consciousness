@@ -15,8 +15,9 @@ instead of waiting for it.
 The run prints each tick, the surfaced thoughts (the ones the novelty gate let
 through, as the conversation prompt would see them), the machine's status and
 a final ``CTM_SUMMARY {json}`` line. The provider state file goes to a
-temporary state directory (``--state-dir`` to choose one); nothing is written
-into the repository. Thought text here comes from the shipped neutral seed
+temporary state directory (``--state-dir`` to choose one; a relative path
+counts from the current directory, not from the repository); nothing is
+written into the repository. Thought text here comes from the shipped neutral seed
 pack and from the mock provider.
 
 Usage:
@@ -173,8 +174,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         parser.error("--ticks must be at least 1")
     logging.basicConfig(level=logging.WARNING)
     if args.state_dir is not None:
-        args.state_dir.mkdir(parents=True, exist_ok=True)
-        summary = asyncio.run(run_example(args.ticks, args.state_dir))
+        # Absolute before anything reads it: the brain joins a relative
+        # settings path onto PROJECT_ROOT (the repository).
+        state_dir = args.state_dir.resolve()
+        state_dir.mkdir(parents=True, exist_ok=True)
+        summary = asyncio.run(run_example(args.ticks, state_dir))
     else:
         with tempfile.TemporaryDirectory(prefix="mtc_ctm_example_") as tmp:
             summary = asyncio.run(run_example(args.ticks, Path(tmp)))
