@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The first CI run on the pushed v0.5.0 main (2026-10-20) failed four ways that no local gate had reached: the install smoke's own invocation of the demo, the runtime audit over the demo's state, two pins on exact floats under another platform's rounding, and a wall-clock bound on a shared runner.
+The first CI run on the pushed v0.5.0 main (2026-10-20) failed four ways that no local gate had reached: the install smoke's own invocation of the demo, the runtime audit over the demo's state, two pins on exact floats under another platform's rounding, and a wall-clock bound on a shared runner. The two deprecations the release-candidate matrices reported are gone from the tree.
+
+### Changed
+
+- The DCM benchmark's experimental posterior path reads the posterior from the `InferenceData` that pymc's `sample` returns by default instead of passing `return_inferencedata=False`, which pymc deprecates (a FutureWarning on pymc 6.3.2, removal announced) and which would have stopped that path the day the argument went; the same stance at the same seed reads the same mean and interval to the last digit. One test checks for a coroutine function through `inspect` instead of `asyncio.iscoroutinefunction`, which Python 3.14 deprecates for removal in 3.16. `tests/test_deprecated_calls.py` scans `mtc`, `tests`, `scripts` and `examples` for both names
 
 ### Fixed
 

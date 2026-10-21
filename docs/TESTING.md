@@ -239,6 +239,15 @@ Code that waits takes an injected clock, so tests never sleep for real time.
 Tests that must use wall time (subprocesses, servers, the example runs) are
 marked `slow` and bound every wait.
 
+## Deprecated calls
+
+A call that Python or a library has deprecated is replaced before the removal
+lands. `tests/test_deprecated_calls.py` scans `mtc`, `tests`, `scripts` and
+`examples` for the names reported so far (`asyncio.iscoroutinefunction`,
+deprecated on Python 3.14 for removal in 3.16, and pymc's
+`return_inferencedata` keyword) and names each hit by file and line. When a
+deprecation report names another call, add its shape to the scan with the fix.
+
 ## Adding a test
 
 1. Write the test first, named for the property it pins, in the directory

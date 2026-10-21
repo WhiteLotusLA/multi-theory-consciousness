@@ -8,7 +8,7 @@ normalization correctly separates signal from activity-driven inflation.
 Task 7 of the consciousness expansion plan.
 """
 
-import asyncio
+import inspect
 import random
 
 import numpy as np
@@ -43,7 +43,7 @@ class TestGetNormalizedScore:
         assert hasattr(
             assessment, "run_noise_baseline"
         ), "ConsciousnessAssessment is missing the run_noise_baseline method"
-        assert asyncio.iscoroutinefunction(
+        assert inspect.iscoroutinefunction(
             assessment.run_noise_baseline
         ), "run_noise_baseline must be an async method"
 

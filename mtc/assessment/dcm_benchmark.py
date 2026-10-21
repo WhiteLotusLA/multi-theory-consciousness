@@ -602,16 +602,17 @@ class BayesianEngine:
             )
 
             # Sample
-            trace = pm.sample(
+            inference_data = pm.sample(
                 draws=self.samples,
                 tune=self.samples,
                 cores=1,
                 random_seed=self.seed,
                 progressbar=False,
-                return_inferencedata=False,
             )
 
-        posterior = trace["consciousness"]
+        # The sampler returns an InferenceData whose posterior holds one row of
+        # draws per chain; the statistics read every chain's draws as one array.
+        posterior = np.asarray(inference_data.posterior["consciousness"]).ravel()
         mean_val = float(np.mean(posterior))
         ci_low = float(np.percentile(posterior, 2.5))
         ci_high = float(np.percentile(posterior, 97.5))

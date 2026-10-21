@@ -211,6 +211,53 @@ class TestBayesianEngine:
         assert 0.0 <= mean_val <= 1.0
         assert ci_width >= 0.0
 
+    def test_run_stance_reads_the_posterior_from_the_sampler_default(self):
+        """The sampling call passes no ``return_inferencedata`` and raises no
+        deprecation warning attributed to the engine's own code. pymc 6.3.2
+        warns (a FutureWarning at the ``pm.sample`` call) that
+        ``return_inferencedata=False`` is deprecated and will be removed, which
+        the v0.5.0 release-candidate matrices reported on 2026-10-19, so the
+        engine reads the posterior from the InferenceData the sampler returns
+        by default. A warning a library raises inside itself is not the
+        engine's and is not counted."""
+        import warnings
+
+        from mtc.assessment import dcm_benchmark
+        from mtc.assessment.dcm_benchmark import BayesianEngine, StanceNode
+
+        engine = BayesianEngine(samples=25, seed=42)
+        stance = StanceNode(
+            name="Test",
+            evidencers=[
+                {
+                    "name": "Feature",
+                    "support": "strong",
+                    "demandingness": "moderately demanding",
+                    "evidencers": [
+                        {
+                            "name": "Sub",
+                            "evidencers": [
+                                {"name": "Ind1", "evidencers": []},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            mean_val, ci_width = engine.run_stance(stance, {"Ind1": 1.0})
+        engine_file = Path(dcm_benchmark.__file__).resolve()
+        attributed = [
+            f"{item.category.__name__}: {item.message}"
+            for item in caught
+            if issubclass(item.category, (DeprecationWarning, FutureWarning))
+            and Path(item.filename).resolve() == engine_file
+        ]
+        assert attributed == []
+        assert 0.0 <= mean_val <= 1.0
+        assert 0.0 <= ci_width <= 1.0
+
     @pytest.mark.xfail(
         strict=True,
         reason=(
