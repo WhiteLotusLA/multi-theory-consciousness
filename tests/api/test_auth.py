@@ -7,6 +7,7 @@ modules that need an application without building the whole runtime.
 
 import logging
 import os
+import re
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
@@ -258,6 +259,26 @@ def _pieces(secret: str, size: int = 4) -> List[str]:
     return [secret[i : i + size] for i in range(len(secret) - size + 1)]
 
 
+# A record's timestamp as the JSON and the text formats write it (timezone
+# aware UTC, ISO 8601, microseconds).
+_TIMESTAMP = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?"
+)
+
+
+def _without_timestamps(text: str) -> str:
+    """The log text with every record timestamp replaced by a placeholder.
+
+    A timestamp changes between the baseline scenario and the one checked, so
+    the baseline cannot exclude its digits, and a four-digit piece of a random
+    hex key coincides with the seconds and microseconds about three times in a
+    hundred runs (measured 2026-10-21: eight hits in 300 scenario runs, every
+    one inside a ``timestamp`` field, no other hit; the full gate had failed
+    on the piece 7791 inside ``22:20:01.779152``). A key cannot leak through a
+    timestamp, so the check reads every record without it."""
+    return _TIMESTAMP.sub("<timestamp>", text)
+
+
 def _key_scenario(tmp_path: Path, configured: str, wrong: str) -> str:
     """Run requests with the right, a wrong and no key; return all log text."""
     collected: List[logging.LogRecord] = []
@@ -291,7 +312,7 @@ def _key_scenario(tmp_path: Path, configured: str, wrong: str) -> str:
         reset_logging()
     log_files = sorted((tmp_path / "logs").glob("*.log"))
     file_text = "\n".join(path.read_text(encoding="utf-8") for path in log_files)
-    return _messages(collected) + "\n" + file_text
+    return _without_timestamps(_messages(collected) + "\n" + file_text)
 
 
 def test_key_never_logged(clean_env):
@@ -309,6 +330,28 @@ def test_key_never_logged(clean_env):
     for secret in (configured, wrong):
         leaked = [piece for piece in _pieces(secret) if piece in text]
         assert not leaked, "a piece of an API key reached a log line"
+
+
+def test_scenario_text_drops_record_timestamps(clean_env):
+    """A record's timestamp is the one part of a log line a key cannot leak
+    through, and the only part that changes between the baseline scenario and
+    the one checked, so the scenario text carries none: the JSON field and
+    the text format's prefix both read as a placeholder, and the message
+    beside them is kept whole."""
+    line = '{"timestamp": "2026-10-21T22:20:01.779152+00:00", "message": "key 7791"}'
+    assert (
+        _without_timestamps(line)
+        == '{"timestamp": "<timestamp>", "message": "key 7791"}'
+    )
+    assert (
+        _without_timestamps("2026-10-21T22:20:01.779152+00:00 INFO [mtc] ok")
+        == "<timestamp> INFO [mtc] ok"
+    )
+    text = _key_scenario(
+        clean_env / "run", secrets.token_hex(24), secrets.token_hex(24)
+    )
+    assert "<timestamp>" in text, "the scenario writes timestamped records"
+    assert _TIMESTAMP.search(text) is None, "a timestamp survived in the text"
 
 
 def test_auth_disabled_on_loopback_warns_once(clean_env, caplog):
